@@ -1,0 +1,20 @@
+# cargo-deny — supply-chain gate run in CI (`check advisories bans sources`).
+#
+# License compliance is intentionally NOT gated here (personal MIT project);
+# the CI command omits the `licenses` check, so no SPDX allow-list is needed.
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# Deny known vulnerabilities (the default for v2). To consciously waive one,
+# add its RUSTSEC id here with a comment explaining why.
+version = 2
+ignore = []
+
+[bans]
+# Duplicate transitive versions are noise, not a failure — surface, don't block.
+multiple-versions = "warn"
+
+[sources]
+# Everything must come from crates.io; no ad-hoc git or alternate registries.
+unknown-registry = "deny"
+unknown-git = "deny"

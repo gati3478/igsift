@@ -6,7 +6,9 @@
 //!   Columns: `username, display_name, bucket, keep_prob, dm_msgs,
 //!   last_dm_days, likes_given_90d, comments_given_90d, story_in_180d,
 //!   account_class, notes`. Serialized from a `#[derive(Serialize)]` row
-//!   struct via the `csv` crate.
+//!   struct via the `csv` crate. The `*_90d` / `*_180d` columns are raw
+//!   fixed-window counts for human context — distinct from the decay-weighted
+//!   values that drive `keep_prob` (see `docs/DESIGN.md`).
 //! - **Markdown** (secondary) — a skim summary: top 20 unfollow candidates
 //!   and top 20 keepers, each with the dominant feature behind the call.
 //!

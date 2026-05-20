@@ -9,7 +9,7 @@ output manually inside Instagram.
 ```
 ┌──────────────────────────┐     ┌─────────────────┐     ┌────────────────────┐
 │ IG personal data export  │ ──▶ │  CLI: ig-mgr    │ ──▶ │ recommendations.*  │
-│ (downloaded ZIP / dir)   │     │  score + rank   │     │ (CSV + MD summary) │
+│ (unzipped export folder) │     │  score + rank   │     │ (CSV + MD summary) │
 └──────────────────────────┘     └─────────────────┘     └────────────────────┘
 ```
 
@@ -37,8 +37,9 @@ cargo run -- /path/to/export --out ~/cleanup --verbose
 ```
 
 Options: `--out <PATH>` (output stem, defaults next to the export),
-`--config <PATH>` (scoring weights, default `config/scoring.toml`), `-v`/`-vv`
-(verbosity). `RUST_LOG` overrides verbosity when set.
+`--config <PATH>` (scoring weights; when omitted, resolved from the dev tree,
+your platform config dir, or a built-in default), `-v`/`-vv` (verbosity).
+`RUST_LOG` overrides verbosity when set.
 
 ## Development
 

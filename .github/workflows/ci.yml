@@ -27,13 +27,23 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Build
-        run: cargo build --all-targets --all-features
+        run: cargo build --all-targets
 
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
       - name: Test
-        run: cargo nextest run --all-features
+        run: cargo nextest run
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Advisories / bans / sources
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans sources

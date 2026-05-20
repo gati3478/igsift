@@ -24,14 +24,11 @@ pub struct Cli {
     #[arg(short, long, value_name = "PATH")]
     pub out: Option<PathBuf>,
 
-    /// Scoring configuration (feature weights and decay constants).
-    #[arg(
-        short,
-        long,
-        value_name = "PATH",
-        default_value = "config/scoring.toml"
-    )]
-    pub config: PathBuf,
+    /// Scoring configuration (feature weights and decay constants). When
+    /// omitted, the path is resolved (dev tree → platform config dir → built-in
+    /// default) — see [`crate::config`].
+    #[arg(short, long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
 
     /// Increase log verbosity (`-v` for debug, `-vv` for trace). `RUST_LOG`
     /// overrides this when set.

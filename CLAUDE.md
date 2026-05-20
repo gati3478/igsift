@@ -19,10 +19,11 @@ for build order before writing pipeline code.
 - **Package shape**: single package, two targets — library crate `ig_mgr`
   (`src/lib.rs`) holds the logic; binary `ig-mgr` (`src/main.rs`) is a thin
   shell. **Not** a workspace. Integration tests in `tests/` use the lib.
-- **Key crates**: `clap` (CLI), `serde`/`serde_json`/`serde_path_to_error`
-  (parsing), `toml` (config), `jiff` (time), `rayon` (parallel scoring), `csv`
-  (output), `tracing` (logs), `anyhow` + `thiserror` (errors), `indicatif` +
-  `owo-colors` (UX). Tests: `insta` (snapshots), `assert_cmd` + `predicates`.
+- **Dependencies**: the full set lives in `Cargo.toml`; per-crate rationale and
+  the deliberately-not-used list are in [`docs/DESIGN.md`](docs/DESIGN.md). Two
+  picks an agent should not "modernize away": **`jiff`** (not `chrono`) for
+  time, and **`serde_path_to_error`** wrapping every parse — it is the
+  schema-drift survival mechanism (see Conventions), not optional ceremony.
 
 ## Commands
 
@@ -64,9 +65,13 @@ responsibility and planned submodules. `export.rs` / `output.rs` graduate to
 
 ## Conventions
 
-- **Privacy first.** A real export contains personal data; never commit one. The
-  `.gitignore` blocks `ig_data/`, `export*/`, `*.zip`, and `recommendations_*`.
-  Test fixtures must be sanitized synthetic data.
+- **Privacy first.** A real export contains personal data; never commit one.
+  Keep exports **outside** the repo (the positional path can point anywhere) —
+  that, not `.gitignore`, is the real safety net: the ignore patterns only match
+  exports placed at known names (`ig_data/`, `export/`, `exports/`, `*.zip`), so
+  a default-named export folder dropped in-repo would _not_ be caught. See
+  `.gitignore` for the exact patterns. Test fixtures must be sanitized synthetic
+  data.
 - **Schema drift is the main risk.** Instagram rotates export paths/keys
   silently. Parsers use `#[serde(default)]` + `Option<T>` and
   `serde_path_to_error` so a changed file degrades or fails _loudly with the
@@ -80,7 +85,8 @@ responsibility and planned submodules. `export.rs` / `output.rs` graduate to
 
 ## Non-goals
 
-No web UI / card deck / TUI (a `ratatui review` subcommand is a possible v2, not
-v1). No Instagram API, scraping, or automated unfollow. No daemon. No DB — the
-export is the source of truth. No login/credentials. No async/`tokio`, no
-network crates.
+No web UI / TUI, no Instagram API / scraping / automated unfollow, no daemon,
+no DB, no login, no async or network crates — the export is the source of truth
+and the run is one-shot. A `ratatui review` subcommand is a possible v2, not v1.
+Full rationale and the deliberately-not-used crate list:
+[`docs/DESIGN.md`](docs/DESIGN.md) ("Deliberately not using").

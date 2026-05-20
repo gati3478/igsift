@@ -40,7 +40,10 @@ engaged back" is a partially observable variable.
 
 ## Algorithm sketch
 
-Score each followed account on `keep_probability ∈ [0, 1]`.
+Score each followed account on `keep_probability ∈ [0, 1]`. **Scope:** the
+ranking covers accounts **you follow**. "Remove from followers" is the manual
+companion action — when you unfollow a mutual you also drop them as a follower —
+not a separate ranked set. One list, one decision per account.
 
 ### Per-account features
 
@@ -67,8 +70,12 @@ days for DMs, 365 for content interactions.
 
 ### Account-class heuristic (gates "suggest unfollow")
 
-- Username / display-name regex against a small lexicon (`official`, `studio`,
-  `magazine`, `records`, `inc`, `co`, `gallery`, …).
+- Username / display-name matched against a small lexicon (`official`, `studio`,
+  `magazine`, `records`, `inc`, `co`, `gallery`, …). This is multi-substring
+  matching, not true patterns, so prefer **`aho-corasick`** (one pass over all
+  terms) over N separate `regex` searches; reach for `regex` / `regex-lite` only
+  if real patterns appear. Neither crate is in `Cargo.toml` yet — add when this
+  step lands.
 - Known-brand allowlist the user maintains: [`config/keep_allowlist.txt`](../config/keep_allowlist.txt).
 - Follower count cannot be inferred from the export, so the heuristic relies on
   name patterns + allowlist. **If uncertain, never auto-suggest unfollow — flag
@@ -77,14 +84,21 @@ days for DMs, 365 for content interactions.
 ### Scoring composition (initial form, iterate empirically)
 
 ```
-engagement_raw = w1·dm + w2·likes + w3·comments + w4·story_out
-reciprocity    = w5·story_in + w6·dm_balance_penalty
+engagement_raw = w_dm·dm + w_likes·likes + w_comments·comments + w_story_out·story_out
+               + w_tagged_them·tagged_them + w_saved·saved_their_content
+               + w_searched·searched_for_them
+reciprocity    = w_story_in·story_in + w_they_tagged_me·they_tagged_me
 score_raw      = engagement_raw + reciprocity + close_friend_boost
+               - w_dm_balance_penalty·dm_balance_penalty
 keep_prob      = sigmoid((score_raw - threshold) / scale)
 ```
 
-Weights and constants live in [`config/scoring.toml`](../config/scoring.toml)
-so they can be tuned without a rebuild.
+Every key in [`config/scoring.toml`](../config/scoring.toml) `[weights]` appears
+exactly once above. `dm_balance_penalty` **subtracts** — one-sided threads lower
+the score. Recency is _not_ its own weight: `dm_recency_days` and content recency
+enter through the exponential decay applied to each count (`[decay]` τ
+constants), not as additive terms. Weights and constants live in TOML so they
+can be tuned without a rebuild.
 
 ### Buckets
 
@@ -104,6 +118,13 @@ different and out of scope for the algorithm.
 ```
 username,display_name,bucket,keep_prob,dm_msgs,last_dm_days,likes_given_90d,comments_given_90d,story_in_180d,account_class,notes
 ```
+
+> **Two aggregations — don't conflate them.** `keep_prob` is computed from
+> exponential-decay-weighted signals (continuous τ). The `*_90d` / `*_180d`
+> columns are **raw counts in a fixed window**, emitted only as human-readable
+> sanity context for skim-review — they are _not_ the values that feed scoring.
+> `features.rs` therefore computes both: the decay-weighted score inputs and
+> these plain windowed counts.
 
 **Secondary: Markdown summary** alongside the CSV — top 20 unfollow candidates
 and top 20 keepers, with the dominant feature behind each call, for skim-review

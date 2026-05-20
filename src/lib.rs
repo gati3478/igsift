@@ -64,7 +64,10 @@ pub fn run(cli: Cli) -> Result<()> {
         "ig-mgr {} — scaffold only.\n  export dir : {}\n  config     : {}\n  output     : {}",
         env!("CARGO_PKG_VERSION"),
         cli.export_dir.display(),
-        cli.config.display(),
+        cli.config
+            .as_deref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<resolved default>".to_string()),
         cli.out
             .as_deref()
             .map(|p| p.display().to_string())
