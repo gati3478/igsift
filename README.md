@@ -1,0 +1,74 @@
+# Instagram Manager (`ig-mgr`)
+
+Local-first CLI that reads my Instagram personal data export and produces a
+ranked recommendation file: who to unfollow (and remove from followers) versus
+who to keep, with a `keep_probability` per account derived from the full
+breadth of exported interactions. No UI, no API automation — I act on the
+output manually inside Instagram.
+
+```
+┌──────────────────────────┐     ┌─────────────────┐     ┌────────────────────┐
+│ IG personal data export  │ ──▶ │  CLI: ig-mgr    │ ──▶ │ recommendations.*  │
+│ (downloaded ZIP / dir)   │     │  score + rank   │     │ (CSV + MD summary) │
+└──────────────────────────┘     └─────────────────┘     └────────────────────┘
+```
+
+One invocation, one input folder, two output files. I review the output and do
+the unfollows by hand.
+
+## Status
+
+**Active — scaffolding.** This repository is set up but the analysis pipeline
+is **not implemented yet**. The binary builds, the CLI surface and module
+boundaries exist, and CI is wired; running it prints a "scaffold only" notice.
+See [`ROADMAP.md`](ROADMAP.md) for what's next and [`docs/DESIGN.md`](docs/DESIGN.md)
+for the full design.
+
+> A previous SvelteKit web-app prototype (card-deck review UI, SQLite/Drizzle)
+> was retired — the interactive direction is friction I don't need for a
+> one-shot periodic cleanup. This repo is a clean restart as a Rust CLI.
+
+## Build & run
+
+```bash
+cargo build --release            # binary at target/release/ig-mgr
+cargo run -- /path/to/export     # run against an unzipped export folder
+cargo run -- /path/to/export --out ~/cleanup --verbose
+```
+
+Options: `--out <PATH>` (output stem, defaults next to the export),
+`--config <PATH>` (scoring weights, default `config/scoring.toml`), `-v`/`-vv`
+(verbosity). `RUST_LOG` overrides verbosity when set.
+
+## Development
+
+```bash
+cargo build --all-targets        # compile lib, bin, and tests
+cargo fmt --all                  # format
+cargo clippy --all-targets -- -D warnings
+cargo nextest run                # tests (or: cargo test)
+cargo insta review               # review snapshot changes (once snapshots exist)
+```
+
+`cargo-nextest` and `cargo-insta` are optional local tools:
+`cargo install cargo-nextest cargo-insta`. CI uses nextest.
+
+## Tech stack
+
+Rust (edition 2024, stable) — single static binary, no async, no network, no
+database. `clap` (CLI) · `serde`/`serde_json` (parsing) · `jiff` (time) ·
+`rayon` (parallel scoring) · `csv` (output) · `tracing` (logs) · `anyhow` +
+`thiserror` (errors). Tests: `insta` snapshots + `assert_cmd`. Rationale and
+the deliberately-not-used list are in [`docs/DESIGN.md`](docs/DESIGN.md).
+
+## Non-goals
+
+- No web UI, card deck, or swipe interface.
+- No Instagram API calls, scraping, or automated unfollow.
+- No background daemon — one-shot run, exits when done.
+- No persistent DB — the export is the source of truth; history = old output files.
+- No login or credentials handling.
+
+## License
+
+[MIT](LICENSE)

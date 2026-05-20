@@ -1,0 +1,26 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Personal data — NEVER commit a real Instagram export
+/ig_data/
+/export/
+/exports/
+*.zip
+
+# Generated recommendations
+recommendations_*.csv
+recommendations_*.md
+
+# insta: uncommitted pending snapshots (review then accept with `cargo insta`)
+*.snap.new
+*.pending-snap
+
+# Editor / OS cruft
+.DS_Store
+*.swp
+
+# Claude Code / session tooling (local, machine-specific)
+/.claude/
+/.remember/

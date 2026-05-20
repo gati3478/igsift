@@ -1,0 +1,12 @@
+# keep_allowlist — accounts to never suggest unfollowing.
+#
+# One username per line (without the leading @). Lines starting with '#' and
+# blank lines are ignored. Matching is case-insensitive.
+#
+# Use this for accounts the heuristics can't be trusted on: brands/public
+# figures you deliberately keep, or personal accounts with sparse export
+# signal that you know you want to hold onto.
+#
+# Examples (commented out):
+# natgeo
+# a_close_friend_with_no_dms
