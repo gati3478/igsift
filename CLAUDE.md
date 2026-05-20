@@ -35,7 +35,7 @@ cargo nextest run                              # tests (cargo test also works)
 cargo insta review                             # accept/reject snapshot changes
 ```
 
-Local tools (optional, used by CI): `cargo install cargo-nextest cargo-insta`.
+Local tools (optional, used by CI): `cargo install --locked cargo-nextest && cargo install cargo-insta` (nextest only installs with `--locked`).
 
 ## Layout
 

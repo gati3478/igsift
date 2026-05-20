@@ -51,7 +51,8 @@ cargo insta review               # review snapshot changes (once snapshots exist
 ```
 
 `cargo-nextest` and `cargo-insta` are optional local tools:
-`cargo install cargo-nextest cargo-insta`. CI uses nextest.
+`cargo install --locked cargo-nextest && cargo install cargo-insta`
+(nextest only installs with `--locked`). CI uses nextest.
 
 ## Tech stack
 
