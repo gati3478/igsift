@@ -55,6 +55,10 @@ cargo insta review               # review snapshot changes (once snapshots exist
 `cargo install --locked cargo-nextest && cargo install cargo-insta`
 (nextest only installs with `--locked`). CI uses nextest.
 
+A repo-tracked pre-commit hook fails fast on formatting (`cargo fmt --all --
+--check`, mirroring CI). Activate it once per clone:
+`git config core.hooksPath .githooks`.
+
 ## Tech stack
 
 Rust (edition 2024, stable) — single static binary, no async, no network, no

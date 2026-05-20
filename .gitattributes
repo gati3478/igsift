@@ -1,0 +1,8 @@
+# Normalize to LF on checkin; let git auto-detect text vs. binary.
+* text=auto eol=lf
+
+# Generated lockfile — collapse in PR diffs, drop from GitHub language stats.
+Cargo.lock linguist-generated -diff
+
+# Sanitized JSON fixtures shouldn't skew the repo's language stats.
+tests/fixtures/** linguist-vendored
