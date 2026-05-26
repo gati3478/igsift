@@ -1,0 +1,26 @@
+{
+  "participants": [{ "name": "stranger_synth" }, { "name": "Test User" }],
+  "messages": [
+    {
+      "sender_name": "stranger_synth",
+      "timestamp_ms": 1701000000000,
+      "content": "hey, you don't know me",
+      "reactions": [],
+      "is_geoblocked_for_viewer": false,
+      "is_unsent_image_by_messenger_kid_parent": false
+    },
+    {
+      "sender_name": "stranger_synth",
+      "timestamp_ms": 1701000060000,
+      "content": "but i'm reaching out anyway",
+      "reactions": [],
+      "is_geoblocked_for_viewer": false,
+      "is_unsent_image_by_messenger_kid_parent": false
+    }
+  ],
+  "title": "stranger_synth",
+  "is_still_participant": false,
+  "is_pending": true,
+  "thread_path": "message_requests/stranger_thread",
+  "magic_words": []
+}

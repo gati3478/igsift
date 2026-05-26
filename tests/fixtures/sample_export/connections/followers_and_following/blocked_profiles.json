@@ -1,0 +1,12 @@
+[
+  {
+    "timestamp": 1700500000,
+    "media": [],
+    "label_values": [
+      { "label": "URL", "value": "" },
+      { "label": "Name", "value": "Spam Account" },
+      { "label": "Username", "value": "spammer_synth" }
+    ],
+    "fbid": "1000000000000004"
+  }
+]

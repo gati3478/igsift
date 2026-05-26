@@ -54,9 +54,12 @@ fn nonexistent_export_dir_fails_gracefully() {
 
 #[test]
 fn fixture_counts_match_expected() {
-    // Sanitized fixture: 3 followings, 2 followers, 2 threads, 7 total
-    // messages (one thread is multi-part: 3 in message_1 + 2 in message_2).
-    // Drifting any of these numbers means the parser silently dropped data.
+    // Sanitized fixture: 3 followings, 2 followers, 2 inbox threads, 7 total
+    // inbox messages (one thread is multi-part: 3 in message_1 + 2 in
+    // message_2), plus the relationship-flag files and one message request
+    // thread added in the second parser slice. Drifting any of these numbers
+    // means the parser silently dropped data — diagnose, don't relax the
+    // assertion.
     ig_mgr()
         .arg(sample_export())
         .assert()
@@ -64,5 +67,13 @@ fn fixture_counts_match_expected() {
         .stdout(contains("following count: 3"))
         .stdout(contains("followers count: 2"))
         .stdout(contains("DM thread count: 2"))
-        .stdout(contains("total DM messages: 7"));
+        .stdout(contains("total DM messages: 7"))
+        .stdout(contains("close friends count: 1"))
+        .stdout(contains("favorited count: 2"))
+        .stdout(contains("blocked count: 1"))
+        .stdout(contains("restricted count: 1"))
+        .stdout(contains("hide_story_from count: 1"))
+        .stdout(contains("recently unfollowed count: 1"))
+        .stdout(contains("removed suggestions count: 1"))
+        .stdout(contains("message request thread count: 1"));
 }

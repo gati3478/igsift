@@ -1,0 +1,12 @@
+[
+  {
+    "timestamp": 1700600000,
+    "media": [],
+    "label_values": [
+      { "label": "URL", "value": "" },
+      { "label": "Name", "value": "Restricted User" },
+      { "label": "Username", "value": "restricted_synth" }
+    ],
+    "fbid": "1000000000000005"
+  }
+]

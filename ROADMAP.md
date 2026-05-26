@@ -20,6 +20,16 @@ behind each item.
       `tests/cli.rs` exercises shape A, shape B, and a multi-part thread.
 - [ ] **Remaining feature extractors**, one at a time, verifying counts against
       spot-checks (likes, comments, stories, tags, saved, searches).
+    - [x] **Relationship-flag parsers** (2026-05-26) — `read_close_friends`,
+          `read_favorited`, `read_blocked`, `read_restricted`,
+          `read_recently_unfollowed`, `read_removed_suggestions` (shape C
+          arrays), `read_hide_story_from` (single-entry object), and
+          `read_message_requests` (reuses the inbox thread parser via a shared
+          `read_thread_dir` helper). Validated against the 2026-05-11 export:
+          267 close friends, 49 favorited, 4 blocked, 5 restricted, 1 hidden,
+          5 recently unfollowed, 24 removed suggestions, 10 message request
+          threads. Owner extraction from `label_values.dict.dict` deferred to
+          the next slice (lands with `liked_posts.json`).
 - [ ] **First-pass scoring** with hand-set weights; eyeball top/bottom 50.
 - [ ] **Tune weights and decay constants** — consider a small labeled set of
       ~30 accounts I already know I want to keep/drop, fit weights to match.

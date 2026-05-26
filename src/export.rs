@@ -5,9 +5,14 @@
 //! Paths and field names below match what Instagram actually ships today.
 //! Re-run the walker after every new export to detect drift.
 //!
-//! Implemented in this pass: `following.json`, `followers_*.json`, and DM
-//! threads under `messages/inbox/<thread>/message_*.json`. Likes, comments,
-//! stories, saved, and other relationships are deferred per `ROADMAP.md`.
+//! Implemented in this pass: `following.json`, `followers_*.json`, DM
+//! threads under `messages/inbox/<thread>/message_*.json` and the same shape
+//! under `messages/message_requests/<thread>/`, and the seven shape-C /
+//! single-entry relationship-flag files (`close_friends`,
+//! `profiles_you've_favorited`, `blocked_profiles`, `restricted_profiles`,
+//! `hide_story_from`, `recently_unfollowed_profiles`, `removed_suggestions`).
+//! Likes, comments, stories, saved, and shape-C `Owner` extraction are
+//! deferred per `ROADMAP.md`.
 //!
 //! Robustness approach:
 //!
@@ -32,6 +37,7 @@ use serde::Deserialize;
 
 const FOLLOW_DIR: &str = "connections/followers_and_following";
 const INBOX_DIR: &str = "your_instagram_activity/messages/inbox";
+const MESSAGE_REQUESTS_DIR: &str = "your_instagram_activity/messages/message_requests";
 
 // ── Public output types ──────────────────────────────────────────────────────
 
@@ -73,6 +79,33 @@ pub struct DmMessage {
 pub struct DmReaction {
     pub reaction: Option<String>,
     pub actor: Option<String>,
+}
+
+/// One row from a "label-values" relationship file (shape **C** in DESIGN).
+///
+/// Backs `close_friends.json`, `profiles_you've_favorited.json`,
+/// `blocked_profiles.json`, `restricted_profiles.json`,
+/// `recently_unfollowed_profiles.json`, `removed_suggestions.json`, and the
+/// single-entry `hide_story_from.json`. The username sits three levels deep
+/// inside `label_values` (`label == "Username"`) — this slice keeps the raw
+/// labels so the next slice (which adds `Owner` extraction for
+/// `liked_posts.json` and friends) can reuse the same struct.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ShapeCEntry {
+    #[serde(default)]
+    pub fbid: Option<String>,
+    #[serde(default)]
+    pub timestamp: Option<i64>,
+    #[serde(default)]
+    pub label_values: Vec<ShapeCLabelValue>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ShapeCLabelValue {
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 // ── Raw deserialization shapes ───────────────────────────────────────────────
@@ -201,16 +234,76 @@ pub fn read_followers(export_dir: &Path) -> Result<Vec<FollowerEntry>> {
 }
 
 /// Parse every DM thread under `your_instagram_activity/messages/inbox/`.
-///
-/// Each thread folder may hold one or more `message_*.json` parts; this reader
-/// concatenates the parts in lexicographic order (`message_1.json` <
-/// `message_2.json` < … < `message_10.json` would be wrong — but Instagram
-/// caps at single digits in practice, and we sort the actual numeric suffix
-/// just in case).
 pub fn read_inbox(export_dir: &Path) -> Result<Vec<DmThread>> {
-    let inbox = export_dir.join(INBOX_DIR);
-    let mut thread_dirs: Vec<PathBuf> = std::fs::read_dir(&inbox)
-        .with_context(|| format!("reading {}", inbox.display()))?
+    read_thread_dir(&export_dir.join(INBOX_DIR))
+}
+
+/// Parse every thread under `your_instagram_activity/messages/message_requests/`.
+///
+/// Schema is identical to `inbox/` — same `message_*.json` parts, same
+/// multi-part concat rules; only the base directory differs. Surfaced as a
+/// separate signal because the relationship semantics differ:
+/// `message_requests/` is inbound DMs from accounts the user never accepted,
+/// not a held conversation. Schema-extra keys (`is_pending`, `magic_words`,
+/// …) ride along harmlessly via serde's default ignore-unknown-fields.
+pub fn read_message_requests(export_dir: &Path) -> Result<Vec<DmThread>> {
+    read_thread_dir(&export_dir.join(MESSAGE_REQUESTS_DIR))
+}
+
+/// Parse `close_friends.json` (shape **C** — bare array of label-values entries).
+pub fn read_close_friends(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
+    read_shape_c_array(export_dir, "close_friends.json")
+}
+
+/// Parse `profiles_you've_favorited.json` (shape **C**).
+pub fn read_favorited(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
+    // Apostrophe in the filename is preserved by `Path::join` — no shell
+    // escaping needed.
+    read_shape_c_array(export_dir, "profiles_you've_favorited.json")
+}
+
+/// Parse `blocked_profiles.json` (shape **C**).
+pub fn read_blocked(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
+    read_shape_c_array(export_dir, "blocked_profiles.json")
+}
+
+/// Parse `restricted_profiles.json` (shape **C**).
+pub fn read_restricted(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
+    read_shape_c_array(export_dir, "restricted_profiles.json")
+}
+
+/// Parse `recently_unfollowed_profiles.json` (shape **C**).
+pub fn read_recently_unfollowed(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
+    read_shape_c_array(export_dir, "recently_unfollowed_profiles.json")
+}
+
+/// Parse `removed_suggestions.json` (shape **C**).
+pub fn read_removed_suggestions(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
+    read_shape_c_array(export_dir, "removed_suggestions.json")
+}
+
+/// Parse `hide_story_from.json`.
+///
+/// Unlike the other relationship-flag files this one is a single shape-C
+/// entry at the top level — not an array of them. The 2026-05-11 export
+/// validated by `scripts/walk_export_schema.sh` ships a lone object with the
+/// same `{fbid, timestamp, label_values, media}` keys. Returning
+/// `ShapeCEntry` (not `Vec<ShapeCEntry>`) keeps the structural difference
+/// visible in the API.
+pub fn read_hide_story_from(export_dir: &Path) -> Result<ShapeCEntry> {
+    let path = export_dir.join(FOLLOW_DIR).join("hide_story_from.json");
+    parse_json(&path)
+}
+
+// ── Internals ────────────────────────────────────────────────────────────────
+
+/// Shared between `read_inbox` and `read_message_requests`. Walks one base
+/// directory of thread folders, concatenating multi-part `message_*.json`
+/// files per thread in numeric-suffix order. See `read_inbox` doc for the
+/// part-ordering rationale.
+fn read_thread_dir(base: &Path) -> Result<Vec<DmThread>> {
+    let mut thread_dirs: Vec<PathBuf> = std::fs::read_dir(base)
+        .with_context(|| format!("reading {}", base.display()))?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.is_dir())
@@ -267,7 +360,14 @@ pub fn read_inbox(export_dir: &Path) -> Result<Vec<DmThread>> {
     Ok(threads)
 }
 
-// ── Internals ────────────────────────────────────────────────────────────────
+/// Deserialize a shape-C bare-array file from `connections/followers_and_following/`.
+///
+/// All six shape-C relationship-flag files share the same top-level shape;
+/// only the filename differs.
+fn read_shape_c_array(export_dir: &Path, file_name: &str) -> Result<Vec<ShapeCEntry>> {
+    let path = export_dir.join(FOLLOW_DIR).join(file_name);
+    parse_json(&path)
+}
 
 /// Read `message_1.json`, `message_2.json`, … sorted by numeric suffix.
 /// Falling back to lexicographic sort would put `message_10.json` before

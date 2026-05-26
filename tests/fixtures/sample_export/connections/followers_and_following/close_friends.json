@@ -1,0 +1,12 @@
+[
+  {
+    "timestamp": 1700300000,
+    "media": [],
+    "label_values": [
+      { "label": "URL", "value": "" },
+      { "label": "Name", "value": "Alice Synth" },
+      { "label": "Username", "value": "alice_synth" }
+    ],
+    "fbid": "1000000000000001"
+  }
+]

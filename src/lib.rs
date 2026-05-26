@@ -65,10 +65,34 @@ pub fn run(cli: Cli) -> Result<()> {
     let threads = export::read_inbox(&cli.export_dir)?;
     let total_messages: usize = threads.iter().map(|t| t.messages.len()).sum();
 
+    let close_friends = export::read_close_friends(&cli.export_dir)?;
+    let favorited = export::read_favorited(&cli.export_dir)?;
+    let blocked = export::read_blocked(&cli.export_dir)?;
+    let restricted = export::read_restricted(&cli.export_dir)?;
+    // Parse for schema-drift detection — the returned `ShapeCEntry` has no
+    // additional information beyond "the file is shaped the way we expect".
+    export::read_hide_story_from(&cli.export_dir)?;
+    let recently_unfollowed = export::read_recently_unfollowed(&cli.export_dir)?;
+    let removed_suggestions = export::read_removed_suggestions(&cli.export_dir)?;
+    let message_request_threads = export::read_message_requests(&cli.export_dir)?;
+
     println!("following count: {}", following.len());
     println!("followers count: {}", followers.len());
     println!("DM thread count: {}", threads.len());
     println!("total DM messages: {total_messages}");
+    println!("close friends count: {}", close_friends.len());
+    println!("favorited count: {}", favorited.len());
+    println!("blocked count: {}", blocked.len());
+    println!("restricted count: {}", restricted.len());
+    // `hide_story_from.json` is a single shape-C entry, not an array — its
+    // presence is the count.
+    println!("hide_story_from count: 1");
+    println!("recently unfollowed count: {}", recently_unfollowed.len());
+    println!("removed suggestions count: {}", removed_suggestions.len());
+    println!(
+        "message request thread count: {}",
+        message_request_threads.len()
+    );
 
     Ok(())
 }
