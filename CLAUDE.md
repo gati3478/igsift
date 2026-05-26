@@ -36,7 +36,7 @@ cargo nextest run                              # tests (cargo test also works)
 cargo insta review                             # accept/reject snapshot changes
 ```
 
-Local tools (optional, used by CI): `cargo install --locked cargo-nextest && cargo install cargo-insta` (nextest only installs with `--locked`).
+Set up once per clone: `brew install lefthook && lefthook install` (pre-commit fmt + pre-push clippy/test mirror CI — see `lefthook.yml`). Optional CI tools: `cargo install --locked cargo-nextest && cargo install cargo-insta` (nextest only installs with `--locked`).
 
 ## Layout
 
@@ -56,6 +56,8 @@ tests/
 config/
   scoring.toml       # tunable weights + decay constants
   keep_allowlist.txt # user-maintained never-unfollow list
+scripts/
+  walk_export_schema.sh # JSON-schema walker; drift detector for IG exports
 docs/DESIGN.md  ROADMAP.md
 ```
 
@@ -66,17 +68,18 @@ responsibility and planned submodules. `export.rs` / `output.rs` graduate to
 ## Conventions
 
 - **Privacy first.** A real export contains personal data; never commit one.
-  Keep exports **outside** the repo (the positional path can point anywhere) —
-  that, not `.gitignore`, is the real safety net: the ignore patterns only match
-  exports placed at known names (`ig_data/`, `export/`, `exports/`, `*.zip`), so
-  a default-named export folder dropped in-repo would _not_ be caught. See
-  `.gitignore` for the exact patterns. Test fixtures must be sanitized synthetic
-  data.
+  Exports live in `ig-exported-data/` (gitignored); the binary's positional
+  path can point anywhere — inside or outside the repo. `.gitignore` is the
+  safety net but a fragile one: only the names listed there
+  (`/ig-exported-data/`, `/ig_data/`, `/export/`, `/exports/`, `*.zip`) are
+  matched. An export dropped at any other name **will** be tracked. Test
+  fixtures must be sanitized synthetic data.
 - **Schema drift is the main risk.** Instagram rotates export paths/keys
   silently. Parsers use `#[serde(default)]` + `Option<T>` and
   `serde_path_to_error` so a changed file degrades or fails _loudly with the
-  offending path_, not silently. Re-verify paths against a fresh export before
-  trusting `docs/DESIGN.md`.
+  offending path_, not silently. Re-run `scripts/walk_export_schema.sh`
+  against every fresh export and diff against the last-known-good output to
+  catch drift before it bites the parser.
 - **Errors**: `anyhow::Result` in `main`/orchestration; `thiserror` enums inside
   parser modules.
 - **Tunables in TOML**, not code — weights/decay/thresholds live in
