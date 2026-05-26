@@ -4,24 +4,44 @@
 # INITIAL guesses from the design sketch — expect to iterate empirically once
 # the pipeline runs against a real export. See docs/DESIGN.md.
 #
+# Every key in [weights] appears exactly once in the scoring formula
+# (DESIGN.md "Scoring composition"). When adding or removing a feature,
+# update both files together to keep them in sync.
+#
 # NOTE: this file is read by code that does not exist yet. It documents the
 # intended shape; the deserialization struct lands with the scoring module.
 
-# Feature weights feeding `engagement_raw` and `reciprocity`.
-# Relative magnitudes matter more than absolute scale (a sigmoid squashes the
-# result). "high / medium / low" from the design map roughly to these.
+# Feature weights. Relative magnitudes matter more than absolute scale (a
+# sigmoid squashes the result). "high / medium / low" from the design map
+# roughly to these.
 [weights]
-dm = 3.0                  # DM volume (log-scaled)
-likes = 1.0              # likes I gave (log-scaled, recency-weighted)
-comments = 1.5          # comments I made
-story_out = 1.0         # story interactions I sent
-story_in = 2.0          # inbound story reactions/replies (reciprocity proxy)
-dm_balance_penalty = 1.0 # penalty for one-sided DM threads
-tagged_them = 0.5
-they_tagged_me = 1.5
-saved_their_content = 0.5
-searched_for_them = 0.5
-close_friend_boost = 5.0 # hard boost; close friends should land in `keep`
+# --- engagement (outbound: things I did toward them) ---
+dm = 3.0                          # DM volume (log-scaled, recency-weighted)
+likes = 1.0                       # likes I gave on their posts/comments
+comments = 1.5                    # comments I left on their posts/reels/stories
+story_out = 1.0                   # story interactions I sent (polls, quizzes, etc.)
+stories_viewed = 0.2              # passive — I watched their story (low intent)
+saved = 0.5                       # saves of their posts
+reactions_given = 1.0             # DM reactions I sent on their messages
+
+# --- reciprocity (inbound: things they did toward me, where the export ships it) ---
+reactions_received = 2.0          # DM reactions they sent on my messages — the
+                                  # only true inbound signal Instagram ships
+
+# --- tenure ---
+tenure = 0.3                      # log(follow_tenure_days + 1) — longstanding
+                                  # follow = mild commitment proxy
+
+# --- penalties (subtracted from score_raw) ---
+dm_balance_penalty = 1.0          # one-sided thread (I send, they don't)
+reaction_balance_penalty = 0.5    # one-sided reactions (I react, they don't)
+hide_story_penalty = 2.0          # I hid my stories from them
+removed_suggestion_penalty = 0.3  # I dismissed them from PYMK
+
+# --- boolean boosts (added when the gate is on) ---
+close_friend_boost = 5.0          # close_friends.json — should land in `keep`
+favorite_boost = 3.0              # profiles_you've_favorited.json — also `keep`
+inbound_request = 0.5             # thread present in messages/message_requests/
 
 # Exponential decay half-lives (τ), in days. A signal older than τ is worth
 # ~37% of a fresh one; older interactions fade rather than count forever.
@@ -31,8 +51,8 @@ tau_content_days = 365
 
 # Sigmoid mapping score_raw -> keep_probability, and the bucket cut-offs.
 [scoring]
-threshold = 0.0   # center of the sigmoid (score_raw at keep_prob = 0.5)
-scale = 1.0       # spread; larger = softer transition
-keep_min = 0.7    # keep_prob >= keep_min            -> keep
+threshold = 0.0    # center of the sigmoid (score_raw at keep_prob = 0.5)
+scale = 1.0        # spread; larger = softer transition
+keep_min = 0.7     # keep_prob >= keep_min            -> keep
 unfollow_max = 0.3 # keep_prob <  unfollow_max (+gates) -> unfollow
-                  # everything in between             -> review
+                   # everything in between             -> review
