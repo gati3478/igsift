@@ -55,9 +55,10 @@ cargo insta review               # review snapshot changes (once snapshots exist
 `cargo install --locked cargo-nextest && cargo install cargo-insta`
 (nextest only installs with `--locked`). CI uses nextest.
 
-A repo-tracked pre-commit hook fails fast on formatting (`cargo fmt --all --
---check`, mirroring CI). Activate it once per clone:
-`git config core.hooksPath .githooks`.
+Local git hooks are managed by [Lefthook](https://github.com/evilmartians/lefthook)
+([`lefthook.yml`](lefthook.yml)): `pre-commit` runs `cargo fmt --check` (fast
+gate), `pre-push` runs `cargo clippy -D warnings` and `cargo nextest run`
+(mirrors CI). Set up once per clone: `brew install lefthook && lefthook install`.
 
 ## Tech stack
 

@@ -1,0 +1,21 @@
+## Lefthook — local CI mirror. Install once per clone: `lefthook install`.
+##
+## pre-commit is the fast gate (fmt only) so it never gets in the way.
+## pre-push runs the slow gates (clippy, tests) that CI would also run, so
+## broken pushes fail locally instead of burning CI minutes.
+
+pre-commit:
+  parallel: true
+  commands:
+    fmt:
+      glob: "*.rs"
+      run: cargo fmt --all -- --check
+      fail_text: "rustfmt: run 'cargo fmt --all', then re-stage."
+
+pre-push:
+  parallel: true
+  commands:
+    clippy:
+      run: cargo clippy --all-targets -- -D warnings
+    test:
+      run: cargo nextest run
