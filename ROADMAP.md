@@ -9,8 +9,10 @@ behind each item.
 - [x] **Scaffold the repository** (2026-05-20) — Rust CLI skeleton: module
       boundaries, dependencies, config files, CI, and smoke tests. No pipeline
       logic.
-- [ ] **Re-validate the file layout and JSON keys** against the fresh export —
-      every parser path is suspect until confirmed.
+- [x] **Re-validate the file layout and JSON keys** (2026-05-26) — walked the
+      2026-05-11 export with `scripts/walk_export_schema.sh`; DESIGN.md and
+      scoring.toml rewritten against the actual schema. Re-run the walker
+      against every fresh export to catch drift.
 - [ ] **Minimal parser** for followers + following + DM threads; confirm the
       following set and DM volumes match reality.
 - [ ] **Remaining feature extractors**, one at a time, verifying counts against
