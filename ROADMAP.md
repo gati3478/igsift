@@ -13,8 +13,11 @@ behind each item.
       2026-05-11 export with `scripts/walk_export_schema.sh`; DESIGN.md and
       scoring.toml rewritten against the actual schema. Re-run the walker
       against every fresh export to catch drift.
-- [ ] **Minimal parser** for followers + following + DM threads; confirm the
-      following set and DM volumes match reality.
+- [x] **Minimal parser** (2026-05-26) — `export::read_following`,
+      `read_followers`, `read_inbox`; validated against the 2026-05-11 export:
+      643 followings, 695 followers, 593 DM threads, 706,095 total messages
+      (multi-part threads concatenated). Fixture-driven integration test in
+      `tests/cli.rs` exercises shape A, shape B, and a multi-part thread.
 - [ ] **Remaining feature extractors**, one at a time, verifying counts against
       spot-checks (likes, comments, stories, tags, saved, searches).
 - [ ] **First-pass scoring** with hand-set weights; eyeball top/bottom 50.

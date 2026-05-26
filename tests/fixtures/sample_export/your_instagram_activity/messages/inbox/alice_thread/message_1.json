@@ -1,0 +1,25 @@
+{
+  "participants": [{ "name": "alice_synth" }, { "name": "Test User" }],
+  "messages": [
+    {
+      "sender_name": "alice_synth",
+      "timestamp_ms": 1700000000000,
+      "content": "hi",
+      "reactions": [],
+      "is_geoblocked_for_viewer": false,
+      "is_unsent_image_by_messenger_kid_parent": false
+    },
+    {
+      "sender_name": "Test User",
+      "timestamp_ms": 1700000060000,
+      "content": "hello",
+      "reactions": [{ "reaction": "heart", "actor": "alice_synth" }],
+      "is_geoblocked_for_viewer": false,
+      "is_unsent_image_by_messenger_kid_parent": false
+    }
+  ],
+  "title": "alice_synth",
+  "is_still_participant": true,
+  "thread_path": "inbox/alice_thread",
+  "magic_words": []
+}

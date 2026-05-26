@@ -1,0 +1,25 @@
+{
+  "participants": [{ "name": "bob_synth" }, { "name": "Test User" }],
+  "messages": [
+    {
+      "sender_name": "Test User",
+      "timestamp_ms": 1700200000000,
+      "content": "msg4",
+      "reactions": [],
+      "is_geoblocked_for_viewer": false,
+      "is_unsent_image_by_messenger_kid_parent": false
+    },
+    {
+      "sender_name": "bob_synth",
+      "timestamp_ms": 1700200060000,
+      "content": "msg5",
+      "reactions": [],
+      "is_geoblocked_for_viewer": false,
+      "is_unsent_image_by_messenger_kid_parent": false
+    }
+  ],
+  "title": "bob_synth",
+  "is_still_participant": true,
+  "thread_path": "inbox/bob_thread",
+  "magic_words": []
+}

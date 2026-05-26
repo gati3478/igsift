@@ -47,9 +47,10 @@ pub fn init_tracing(verbose: u8) {
 
 /// Entry point for the analysis run.
 ///
-/// Currently a scaffold: it validates that the export directory exists and
-/// reports that the pipeline is not yet implemented. Future sessions wire in
-/// [`export`], [`features`], [`scoring`], and [`output`].
+/// At this stage the pipeline parses relationships and DM threads and prints
+/// the four count lines that gate the parser-pass acceptance criteria. The
+/// feature aggregation, scoring, and output writers land in later ROADMAP
+/// steps.
 pub fn run(cli: Cli) -> Result<()> {
     use anyhow::ensure;
 
@@ -59,20 +60,15 @@ pub fn run(cli: Cli) -> Result<()> {
         cli.export_dir.display()
     );
 
-    tracing::warn!("ig-mgr scaffold: analysis pipeline is not implemented yet");
-    println!(
-        "ig-mgr {} — scaffold only.\n  export dir : {}\n  config     : {}\n  output     : {}",
-        env!("CARGO_PKG_VERSION"),
-        cli.export_dir.display(),
-        cli.config
-            .as_deref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "<resolved default>".to_string()),
-        cli.out
-            .as_deref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "<next to export dir>".to_string()),
-    );
+    let following = export::read_following(&cli.export_dir)?;
+    let followers = export::read_followers(&cli.export_dir)?;
+    let threads = export::read_inbox(&cli.export_dir)?;
+    let total_messages: usize = threads.iter().map(|t| t.messages.len()).sum();
+
+    println!("following count: {}", following.len());
+    println!("followers count: {}", followers.len());
+    println!("DM thread count: {}", threads.len());
+    println!("total DM messages: {total_messages}");
 
     Ok(())
 }
