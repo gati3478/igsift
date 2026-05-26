@@ -69,12 +69,17 @@ pub fn run(cli: Cli) -> Result<()> {
     let favorited = export::read_favorited(&cli.export_dir)?;
     let blocked = export::read_blocked(&cli.export_dir)?;
     let restricted = export::read_restricted(&cli.export_dir)?;
-    // Parse for schema-drift detection — the returned `ShapeCEntry` has no
-    // additional information beyond "the file is shaped the way we expect".
-    export::read_hide_story_from(&cli.export_dir)?;
+    let hide_story_from = export::read_hide_story_from(&cli.export_dir)?;
     let recently_unfollowed = export::read_recently_unfollowed(&cli.export_dir)?;
     let removed_suggestions = export::read_removed_suggestions(&cli.export_dir)?;
     let message_request_threads = export::read_message_requests(&cli.export_dir)?;
+
+    // `hide_story_from.json` is a single shape-C entry, not an array. With
+    // every field carrying `#[serde(default)]`, an empty object `{}` parses
+    // successfully — so "the file is shaped right" isn't enough to count
+    // someone as a real hide. Treat the entry as real iff it carries at
+    // least one label value (the username sits inside that list).
+    let hide_story_from_count = usize::from(!hide_story_from.label_values.is_empty());
 
     println!("following count: {}", following.len());
     println!("followers count: {}", followers.len());
@@ -84,9 +89,7 @@ pub fn run(cli: Cli) -> Result<()> {
     println!("favorited count: {}", favorited.len());
     println!("blocked count: {}", blocked.len());
     println!("restricted count: {}", restricted.len());
-    // `hide_story_from.json` is a single shape-C entry, not an array — its
-    // presence is the count.
-    println!("hide_story_from count: 1");
+    println!("hide_story_from count: {hide_story_from_count}");
     println!("recently unfollowed count: {}", recently_unfollowed.len());
     println!("removed suggestions count: {}", removed_suggestions.len());
     println!(

@@ -414,3 +414,52 @@ fn seconds_to_timestamp(secs: i64) -> Option<Timestamp> {
 fn milliseconds_to_timestamp(ms: i64) -> Option<Timestamp> {
     Timestamp::from_millisecond(ms).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests that pin the *structural fidelity* of parser output, not
+    //! just `len()`. The integration test in `tests/cli.rs` already asserts
+    //! the count line printed by the binary; without these tests a parser
+    //! regression that returns N empty-default `ShapeCEntry`s would
+    //! print the right count and pass.
+    //!
+    //! Scope of this slice: assert the parser walks into nested arrays and
+    //! preserves leaf values. `Owner` extraction (the three-level
+    //! `label_values → dict → dict → Username` walk) is deferred to the
+    //! slice that adds `liked_posts.json`.
+    use super::*;
+
+    fn fixture_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample_export")
+    }
+
+    #[test]
+    fn close_friends_parses_label_values() {
+        let entries = read_close_friends(&fixture_root()).expect("fixture parse");
+        assert_eq!(entries.len(), 1, "fixture has one close friend");
+
+        let entry = &entries[0];
+        assert_eq!(entry.fbid.as_deref(), Some("1000000000000001"));
+        assert_eq!(entry.timestamp, Some(1_700_300_000));
+
+        // Three labels: URL, Name, Username. If serde silently skips
+        // `label_values` (rename, type change), this drops to zero.
+        let labels: Vec<&str> = entry
+            .label_values
+            .iter()
+            .filter_map(|lv| lv.label.as_deref())
+            .collect();
+        assert_eq!(labels, ["URL", "Name", "Username"]);
+    }
+
+    #[test]
+    fn hide_story_from_parses_as_single_entry() {
+        let entry = read_hide_story_from(&fixture_root()).expect("fixture parse");
+        assert_eq!(entry.fbid.as_deref(), Some("1000000000000006"));
+        assert!(
+            !entry.label_values.is_empty(),
+            "fixture entry must carry label_values so the count line in \
+             lib::run derives `1`, not `0`",
+        );
+    }
+}
