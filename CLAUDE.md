@@ -8,10 +8,14 @@ unfollow vs. keep, with a `keep_probability` per account. One-shot run, no UI,
 no network, no database, no automated unfollow. The user acts on the output
 manually inside Instagram.
 
-**Current state: scaffolding only.** Module boundaries, dependencies, config,
-CI, and smoke tests exist; the analysis pipeline is **not implemented**. Read
-[`docs/DESIGN.md`](docs/DESIGN.md) for the algorithm and [`ROADMAP.md`](ROADMAP.md)
-for build order before writing pipeline code.
+**Current state: parsers landing in slices.** Schema validation, the
+relationship readers (`following`, `followers_*`, `close_friends`,
+`profiles_you've_favorited`, `blocked_profiles`, `restricted_profiles`,
+`hide_story_from`, `recently_unfollowed_profiles`, `removed_suggestions`), DM
+threads in `inbox/` and `message_requests/`, and the fixture-driven
+acceptance test exist. Feature aggregation, scoring, and CSV/Markdown output
+remain stubs. Read [`docs/DESIGN.md`](docs/DESIGN.md) for the algorithm and
+[`ROADMAP.md`](ROADMAP.md) for build order before writing pipeline code.
 
 ## Tech stack
 
@@ -46,13 +50,13 @@ src/
   lib.rs        # run() orchestration, init_tracing(); re-exports modules
   cli.rs        # clap derive: Cli (export_dir, --out, --config, --verbose)
   config.rs     # scoring.toml deserialization               [stub]
-  export.rs     # IG export JSON parsers                      [stub]
+  export.rs     # IG export JSON parsers (relationships + threads landed)
   features.rs   # per-account feature aggregation             [stub]
   scoring.rs    # keep_probability + bucketing                [stub]
   output.rs     # CSV + Markdown writers                      [stub]
 tests/
-  cli.rs                  # E2E smoke tests via assert_cmd
-  fixtures/sample_export/ # sanitized fixture (to be added)
+  cli.rs                  # smoke tests + fixture-count assertions (locked-in)
+  fixtures/sample_export/ # sanitized synthetic export
 config/
   scoring.toml       # tunable weights + decay constants
   keep_allowlist.txt # user-maintained never-unfollow list
@@ -62,8 +66,8 @@ docs/DESIGN.md  ROADMAP.md
 ```
 
 `[stub]` modules are doc-comment-only and document their intended
-responsibility and planned submodules. `export.rs` / `output.rs` graduate to
-`export/mod.rs` / `output/mod.rs` when submodules land.
+responsibility and planned submodules. Each graduates to `<name>/mod.rs`
+when submodules land (e.g., `output.rs` → `output/mod.rs`).
 
 ## Conventions
 
@@ -84,6 +88,13 @@ responsibility and planned submodules. `export.rs` / `output.rs` graduate to
   parser modules.
 - **Tunables in TOML**, not code — weights/decay/thresholds live in
   `config/scoring.toml` so iteration needs no rebuild.
+- **Fixture counts are locked-in.** `tests/cli.rs` asserts exact integer
+  counts against the synthetic fixture. If a count drifts after a parser
+  change, the parser silently dropped data — diagnose the parser, don't
+  relax the assertion. Pair with the structural unit tests in
+  `src/export.rs` (`#[cfg(test)] mod tests`) which pin nested fields so
+  counts alone can't paper over a regression that returns defaulted
+  entries.
 - `unsafe` is forbidden (`[lints.rust] unsafe_code = "forbid"`).
 
 ## Non-goals
