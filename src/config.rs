@@ -29,7 +29,7 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
 /// Top-level scoring configuration. Slice 7B-2 surfaces only [`decay`];
@@ -60,14 +60,36 @@ pub struct DecayConfig {
 /// default falls through to the compiled-in copy — that's the "ran the
 /// binary from outside the project tree" case, not a misconfiguration.
 pub fn read_scoring_config(cli_config: Option<&Path>) -> Result<ScoringConfig> {
-    if let Some(path) = cli_config {
-        return parse_file(path);
-    }
-    let dev_tree = Path::new("config/scoring.toml");
-    if dev_tree.exists() {
-        return parse_file(dev_tree);
-    }
-    parse_str(BUILTIN_DEFAULT, "<compiled-in default config/scoring.toml>")
+    let cfg = if let Some(path) = cli_config {
+        parse_file(path)?
+    } else {
+        let dev_tree = Path::new("config/scoring.toml");
+        if dev_tree.exists() {
+            parse_file(dev_tree)?
+        } else {
+            parse_str(BUILTIN_DEFAULT, "<compiled-in default config/scoring.toml>")?
+        }
+    };
+    validate(&cfg)?;
+    Ok(cfg)
+}
+
+/// Reject degenerate values that would silently poison downstream
+/// arithmetic. `tau_days = 0` is the case worth catching: `exp(-0/0)` is
+/// `NaN`, and a single NaN propagates through every `+=` into the
+/// decayed sums, contaminating sort order once scoring lands.
+fn validate(cfg: &ScoringConfig) -> Result<()> {
+    ensure!(
+        cfg.decay.tau_dm_days > 0,
+        "decay.tau_dm_days must be > 0 (got 0). To make DM decay effectively negligible, \
+         set a very large τ — never 0, which produces NaN at Δt=0.",
+    );
+    ensure!(
+        cfg.decay.tau_content_days > 0,
+        "decay.tau_content_days must be > 0 (got 0). To make content decay effectively negligible, \
+         set a very large τ — never 0, which produces NaN at Δt=0.",
+    );
+    Ok(())
 }
 
 const BUILTIN_DEFAULT: &str = include_str!("../config/scoring.toml");
@@ -128,5 +150,33 @@ mod tests {
             .expect_err("missing [decay] must fail");
         let msg = format!("{err:#}");
         assert!(msg.contains("decay"), "error must mention `decay`: {msg}");
+    }
+
+    #[test]
+    fn zero_tau_is_rejected_at_load() {
+        // `tau_days = 0` parses cleanly (u32 accepts 0) but `decay_weight`
+        // would then evaluate `exp(-0/0) = NaN` at Δt=0 — silently
+        // poisoning every decayed sum and breaking sort order. The
+        // loader must reject it loudly with a message that names the
+        // offending key so users can correct the typo.
+        for (key, body) in [
+            (
+                "tau_dm_days",
+                "[decay]\ntau_dm_days = 0\ntau_content_days = 365\n",
+            ),
+            (
+                "tau_content_days",
+                "[decay]\ntau_dm_days = 180\ntau_content_days = 0\n",
+            ),
+        ] {
+            // Parse succeeds; validate must fail.
+            let cfg: ScoringConfig = toml::from_str(body).expect("toml parses");
+            let err = validate(&cfg).expect_err("τ = 0 must be rejected");
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains(key),
+                "error must name the offending key `{key}`: {msg}",
+            );
+        }
     }
 }
