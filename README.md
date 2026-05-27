@@ -1,38 +1,43 @@
 # Instagram Manager (`ig-mgr`)
 
-Local-first CLI that reads my Instagram personal data export and produces a
-ranked recommendation file: who to unfollow (and remove from followers) versus
-who to keep, with a `keep_probability` per account derived from the full
-breadth of exported interactions. No UI, no API automation — I act on the
+Local-first CLI that reads an Instagram personal data export and produces a
+ranked audit — who to unfollow (and remove from followers) versus who to keep,
+with a `keep_probability` per account derived from the full breadth of
+exported interactions. No UI, no API automation, no network — I act on the
 output manually inside Instagram.
 
 ```
 ┌──────────────────────────┐     ┌─────────────────┐     ┌────────────────────┐
 │ IG personal data export  │ ──▶ │  CLI: ig-mgr    │ ──▶ │ following-audit.*  │
-│ (unzipped export folder) │     │  score + rank   │     │ (CSV + MD summary) │
+│ dir / .zip / multipart   │     │  score + rank   │     │  CSV · MD · HTML   │
 └──────────────────────────┘     └─────────────────┘     └────────────────────┘
 ```
 
-One invocation, one input folder, two output files. I review the output and do
-the unfollows by hand.
+One invocation, three artifacts: CSV for spreadsheet triage, Markdown for
+skim-review, HTML for browser-based filterable triage. I review the output
+and do the unfollows by hand.
 
 ## Status
 
-**Active — end-to-end pipeline landed.** Every functional ROADMAP slice is in:
-the parser layer, per-account feature aggregation (raw + decay-weighted +
-90d/180d windowed counts), scoring (`keep_prob` plus a
-`keep` / `review` / `unfollow` bucket per account), CSV + Markdown writers,
-brand / public-figure account-class heuristic (16-token lexicon with
-user-maintained keep-allowlist override), and the held-out
-labeled-set confusion-matrix report (`config/labels.txt`) used for weight
-tuning. Four tuning rounds landed: threshold + tenure calibration,
-`unfollow_max` widening against the labeled set, brand-lexicon expansion.
-The binary prints per-source counts plus top-10 / bottom-10 candidates with
-their dominant feature, and writes `following-audit_<DATE>.csv` + `.md` next
-to the export directory. Remaining: the operational "run, clean up, evaluate
-regret" feedback loop. See [`ROADMAP.md`](ROADMAP.md) for the task list,
-[`docs/DESIGN.md`](docs/DESIGN.md) for the full design, and
-[`docs/TUNING.md`](docs/TUNING.md) for the weight-tuning journal.
+**Active — end-to-end pipeline landed, six refinement phases shipped.** The
+binary accepts a directory or a `.zip` (single or multipart, transparently
+extracted and cached), runs a progress-bar pipeline through parser →
+feature aggregation (raw + decay-weighted + 90d/180d windowed counts +
+mutual-follower flag) → scoring (`keep_prob` + `keep`/`review`/`unfollow`
+bucket gated by brand/allowlist/restricted floor) → three writers (CSV,
+decision-oriented Markdown with per-bucket cards, self-contained HTML with
+sortable+filterable tables). Three subcommands (`run`, `init`, `check`),
+three shipped scoring presets (`balanced`/`engagement`/`tenure`), and an
+optional held-out labeled-set confusion-matrix report (`config/labels.txt`)
+that quantifies agreement after every run.
+
+Display names are mojibake-repaired at parse time (IG's exporter ships
+UTF-8 bytes as Latin-1, so `HÃ¼seyin` becomes `Hüseyin` and Arabic /
+Georgian / emoji surface correctly). Current bucket split on the real
+643-account export: `481 / 155 / 7` at 25% labeled-set agreement, 0 hard
+mismatches. See [`ROADMAP.md`](ROADMAP.md), [`docs/DESIGN.md`](docs/DESIGN.md)
+for the algorithm, and [`docs/TUNING.md`](docs/TUNING.md) for the
+weight-tuning journal.
 
 > A previous SvelteKit web-app prototype (card-deck review UI, SQLite/Drizzle)
 > was retired — the interactive direction is friction I don't need for a
@@ -41,28 +46,43 @@ regret" feedback loop. See [`ROADMAP.md`](ROADMAP.md) for the task list,
 ## Build & run
 
 ```bash
-cargo build --release             # binary at target/release/ig-mgr
-cargo run -- /path/to/export      # run against an unzipped export folder
-cargo run -- /path/to/export.zip  # single .zip — extracted + cached
-cargo run -- /path/to/parts/      # directory of multipart .zip parts
-cargo run -- /path/to/export --out ~/cleanup --verbose
+cargo build --release                                # binary at target/release/ig-mgr
+cargo run -- /path/to/export                         # extracted folder
+cargo run -- /path/to/export.zip                     # single .zip (auto-extract + cache)
+cargo run -- /path/to/parts/                         # directory of multipart .zip parts
+cargo run -- /path/to/export --out ~/cleanup -v
 ```
 
 Three input shapes are accepted transparently: an already-extracted
 directory, a single `.zip` file, or a directory of multipart `*.zip`
 parts that IG ships for large exports. Archives extract to
-`.ig-mgr-extracted*/` next to the input and are cached on re-runs.
-Use `--rebuild-cache` to force a fresh extract.
+`.ig-mgr-extracted*/` next to the input and are cached across re-runs
+(cache fingerprint is `{count}\n{total_bytes}`, so `cp -p` /
+`rsync --times` replacements don't slip past as "fresh"). Use
+`--rebuild-cache` to force a fresh extract.
 
-Options:
+### Subcommands
 
-- `--out <PATH>` — output stem; defaults to `following-audit_<DATE>.{csv,md}`
+```bash
+ig-mgr <input>                       # implicit Run (legacy form)
+ig-mgr run <input>                   # explicit form of the above
+ig-mgr check <input>                 # parser-only dry-run, per-source ✓ / ✗
+ig-mgr init [--force]                # scaffold config/keep_allowlist.txt + labels.txt
+```
+
+`check` runs the same parser stack as `run` without aggregation /
+scoring / writing, reporting each source individually. Fast pre-flight
+when you're not sure a fresh export extracted cleanly.
+
+### Options
+
+- `--out <PATH>` — output stem; defaults to `following-audit_<DATE>.{csv,md,html}`
   next to the input.
 - `--preset <NAME>` — pick a shipped scoring shape (`balanced`,
   `engagement`, `tenure`). Mutually exclusive with `--config`. See
   Quickstart below.
 - `--config <PATH>` — scoring weights TOML; when omitted, resolved as
-  `./config/scoring.toml` in the cwd, then a compiled-in default
+  `./config/scoring.toml` in the cwd, then the compiled-in fallback
   (= the `balanced` preset). A platform config dir
   (`~/.config/ig-mgr/`) is not yet wired.
 - `--rebuild-cache` — force a fresh extract of an archive input.
@@ -70,7 +90,9 @@ Options:
   followee handle. Errors if the handle isn't in the followings set after
   blocked / recently-unfollowed exclusions. Use during tuning to answer
   "why did this account rank where it did?".
-- `-v` / `-vv` — debug / trace log verbosity. `RUST_LOG` overrides when set.
+- `-v` / `-vv` — debug / trace log verbosity. Also disables the
+  progress spinner so log lines don't interleave. `RUST_LOG` overrides
+  when set.
 
 ## Quickstart for first-time users
 
@@ -127,12 +149,15 @@ gate), `pre-push` runs `cargo clippy -D warnings` and `cargo nextest run`
 ## Tech stack
 
 Rust (edition 2024, stable) — single static binary, no async, no network, no
-database. `clap` (CLI) · `serde`/`serde_json` + `serde_path_to_error`
-(schema-drift-survivable parsing) · `jiff` (time) · `rayon` (parallel
-scoring) · `aho-corasick` (brand-suffix lexicon, single-pass automaton) ·
-`csv` (output) · `tracing` (logs) · `anyhow` + `thiserror` (errors). Tests:
-`insta` snapshots + `assert_cmd` + `cargo-nextest`. Rationale and the
-deliberately-not-used list are in [`docs/DESIGN.md`](docs/DESIGN.md).
+database. `clap` (CLI + subcommands) · `serde` / `serde_json` +
+`serde_path_to_error` (schema-drift-survivable parsing) · `jiff` (time) ·
+`rayon` (parallel scoring) · `aho-corasick` (brand-suffix lexicon,
+single-pass automaton) · `zip` (archive extraction, pure-Rust, deflate-only)
+· `indicatif` (progress spinner + bytes bar) · `csv` (output) · `tracing`
+(logs) · `anyhow` + `thiserror` (errors). Tests: `insta` snapshots +
+`assert_cmd` + `cargo-nextest`. The HTML report is hand-rolled markup —
+no template engine. Rationale and the deliberately-not-used list are in
+[`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Non-goals
 
