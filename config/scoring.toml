@@ -54,5 +54,5 @@ tau_content_days = 365
 threshold = 1.5    # center of the sigmoid (score_raw at keep_prob = 0.5)
 scale = 1.0        # spread; larger = softer transition
 keep_min = 0.7     # keep_prob >= keep_min            -> keep
-unfollow_max = 0.3 # keep_prob <  unfollow_max (+gates) -> unfollow
+unfollow_max = 0.35 # keep_prob <  unfollow_max (+gates) -> unfollow
                    # everything in between             -> review
