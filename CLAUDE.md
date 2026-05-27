@@ -8,19 +8,19 @@ unfollow vs. keep, with a `keep_probability` per account. One-shot run, no UI,
 no network, no database, no automated unfollow. The user acts on the output
 manually inside Instagram.
 
-**Current state: pipeline landed, output writers remaining.** Parser
-layer (every JSON source DESIGN.md lists — relationships, DM inbox +
-message requests, nested-`Owner` activity, shape-A activity, shape-D
-comments, the `me` identity and `display_name → handle` resolver),
-per-account feature aggregation (raw counts, decay-weighted versions,
-DM features, 90d/180d windowed counts), and first-pass scoring
-(`keep_prob` + bucket per account) all run end-to-end against a real
-export. `src/output.rs` (CSV + Markdown) is the only remaining stub;
-the brand / public-figure account-class heuristic that hardens the
-`unfollow` recommendation and weight tuning against a labeled sample
-are the other open ROADMAP items. Read [`docs/DESIGN.md`](docs/DESIGN.md)
-for the algorithm and [`ROADMAP.md`](ROADMAP.md) for build order before
-writing pipeline code.
+**Current state: end-to-end pipeline landed.** Every functional ROADMAP slice
+is in: parser layer (every JSON source DESIGN.md lists — relationships, DM
+inbox + message requests, nested-`Owner` activity, shape-A activity, shape-D
+comments, the `me` identity and `display_name → handle` resolver), per-account
+feature aggregation (raw counts, decay-weighted versions, DM features, 90d/180d
+windowed counts), first-pass scoring (`keep_prob` + bucket per account), CSV +
+Markdown writers, and the brand / public-figure account-class heuristic with
+the user-maintained keep-allowlist override (`config/keep_allowlist.txt`) all
+run end-to-end against a real export. Remaining: weight tuning against a
+labeled sample (`config/labels.txt`) and the operational "run, clean up,
+evaluate regret" feedback loop. Read [`docs/DESIGN.md`](docs/DESIGN.md) for the
+algorithm and [`ROADMAP.md`](ROADMAP.md) for build order before writing pipeline
+code.
 
 ## Tech stack
 
@@ -56,28 +56,29 @@ src/
   cli.rs                        # clap derive: Cli (export_dir, --out, --config, --verbose)
   config.rs                     # scoring.toml deserialization (decay + weights + scoring params)
   export.rs                     # IG export JSON parsers — every source DESIGN.md lists
+  allowlist.rs                  # config/keep_allowlist.txt loader (case-insensitive HashSet)
+  labels.rs                     # config/labels.txt loader + confusion-matrix report
   features/
     mod.rs                      # re-exports
     aggregate.rs                # per-account features: raw + decayed + windowed counts
     name_resolution.rs          # display_name → handle bridge for DM attribution
+    account_class.rs            # brand-detection (aho-corasick lexicon) + allowlist gate
   scoring.rs                    # score_raw composition, sigmoid, bucket assignment
-  output.rs                     # CSV + Markdown writers                       [stub]
+  output/
+    mod.rs                      # CSV + Markdown writer dispatcher
+    csv.rs                      # CSV row writer (DESIGN.md "Output" header is the contract)
+    markdown.rs                 # skim-summary Markdown: top/bottom-20 tables
 tests/
   cli.rs                  # smoke tests + fixture-count assertions (locked-in)
   fixtures/sample_export/ # sanitized synthetic export
 config/
-  scoring.toml       # tunable weights + decay constants
-  keep_allowlist.txt # user-maintained never-unfollow list
+  scoring.toml             # tunable weights + decay constants
+  keep_allowlist.txt       # user-maintained never-unfollow list (template; per-user content gitignored)
+  labels.txt.example       # per-user labels template (real `labels.txt` gitignored)
 scripts/
   walk_export_schema.sh # JSON-schema walker; drift detector for IG exports
-docs/DESIGN.md  ROADMAP.md
+docs/DESIGN.md  ROADMAP.md  TUNING.md
 ```
-
-`src/output.rs` is the remaining `[stub]` — doc-comment-only, documents
-its intended responsibility and planned submodules (`csv`, `markdown`).
-It graduates to `output/mod.rs` when those land, matching the pattern
-`features.rs` followed when `name_resolution` arrived alongside
-`aggregate`.
 
 ## Conventions
 

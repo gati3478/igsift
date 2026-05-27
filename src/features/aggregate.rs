@@ -60,27 +60,32 @@ use crate::config::DecayConfig;
 use crate::export::{
     CommentEntry, DmThread, FollowingEntry, MeIdentity, ShapeAEntry, ShapeCEntry, owner_username,
 };
+use crate::features::account_class::Classifier;
 use crate::features::name_resolution::NameResolver;
 
-/// Account class — currently a placeholder until the brand / public-figure
-/// heuristic lands. DESIGN.md gates the `Unfollow` bucket on
-/// `account_class == Personal`, so we materialize the field now (defaulting
-/// to `Personal`) and the future heuristic upgrades non-personal accounts
-/// in place rather than introducing a new field. Surfaced in the CSV
-/// `account_class` column for human triage.
+/// Account class — DESIGN.md gates the `Unfollow` bucket on
+/// `account_class == Personal`. The brand-detection heuristic lives in
+/// [`crate::features::account_class::Classifier`] and stamps `Brand` onto
+/// any followee whose handle or display name hits the lexicon. Surfaced in
+/// the CSV `account_class` column for human triage.
+///
+/// `PublicFigure` is deliberately omitted from the variant set: the
+/// username/display-name heuristic can't reliably tell brand from
+/// public_figure from text alone, and the downstream gating is identical
+/// (block Unfollow, surface as Review). Adding a variant we can't populate
+/// would be a lie about what the aggregator knows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AccountClass {
     #[default]
     Personal,
-    // Brand and PublicFigure variants land with the account-class slice.
-    // Adding them here without the detection logic would be a lie about
-    // what the aggregator knows.
+    Brand,
 }
 
 impl AccountClass {
     pub fn as_str(self) -> &'static str {
         match self {
             AccountClass::Personal => "personal",
+            AccountClass::Brand => "brand",
         }
     }
 }
@@ -107,6 +112,13 @@ pub struct AccountFeatures {
     pub is_hide_story_from: bool,
     pub is_removed_suggestion: bool,
     pub recently_unfollowed: bool,
+    /// Handle is in `config/keep_allowlist.txt` — user-maintained
+    /// never-unfollow override. Parallel signal to `is_close_friend` /
+    /// `is_favorited`, gated at [`crate::scoring::assign_bucket`] to floor
+    /// the bucket at Review. NOT classification — a personal close friend
+    /// the user has allowlisted stays `account_class == Personal` so the
+    /// column doesn't misrepresent their profile.
+    pub is_keep_allowlisted: bool,
 
     pub likes_given: u32,
     pub comments_given: u32,
@@ -182,6 +194,7 @@ pub struct AggregateInputs<'a> {
     pub message_request_threads: &'a [DmThread],
     pub me: &'a MeIdentity,
     pub resolver: &'a NameResolver,
+    pub classifier: &'a Classifier,
 
     pub decay: &'a DecayConfig,
 }
@@ -216,13 +229,11 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
         if handle.is_empty() || blocked.contains(handle) || recently_unfollowed.contains(handle) {
             continue;
         }
+        let display_name = inputs.resolver.display_name_for(handle);
         let features = AccountFeatures {
             username: f.username.clone(),
-            display_name: inputs
-                .resolver
-                .display_name_for(handle)
-                .map(|s| s.to_owned()),
-            account_class: AccountClass::default(),
+            display_name: display_name.map(|s| s.to_owned()),
+            account_class: inputs.classifier.classify(handle, display_name),
             follow_tenure_days: f.followed_at.and_then(|ts| days_since(ts, now)),
             is_close_friend: close_friend.contains(handle),
             is_favorited: favorited.contains(handle),
@@ -231,6 +242,7 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
             is_hide_story_from: hide_story_target == Some(handle),
             is_removed_suggestion: removed_suggestion.contains(handle),
             recently_unfollowed: false,
+            is_keep_allowlisted: inputs.classifier.is_allowlisted(handle),
             likes_given: 0,
             comments_given: 0,
             story_interactions_out: 0,
@@ -635,6 +647,7 @@ mod tests {
         hide_story_from: &'a ShapeCEntry,
         me: &'a MeIdentity,
         resolver: &'a NameResolver,
+        classifier: &'a Classifier,
         decay: &'a DecayConfig,
     ) -> AggregateInputs<'a> {
         AggregateInputs {
@@ -664,8 +677,16 @@ mod tests {
             message_request_threads: &[],
             me,
             resolver,
+            classifier,
             decay,
         }
+    }
+
+    /// Build a synthetic [`Classifier`] with no allowlist entries. Tests
+    /// that only exercise the existing flag/activity paths use this; tests
+    /// that exercise allowlist behaviour build their own.
+    fn synth_classifier() -> Classifier {
+        Classifier::new(HashSet::new())
     }
 
     fn synth_decay() -> DecayConfig {
@@ -761,7 +782,8 @@ mod tests {
         let me = synth_me();
         let resolver = NameResolver::default();
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         // close_friends includes a handle (`stranger`) that's NOT a following:
         // the aggregator must drop it from the output, not promote it.
         let close_friends = vec![flag("alice"), flag("stranger")];
@@ -784,7 +806,8 @@ mod tests {
         let me = synth_me();
         let resolver = NameResolver::default();
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let blocked = vec![flag("carol")];
         let recently_unfollowed = vec![flag("dave")];
         inputs.blocked = &blocked;
@@ -810,7 +833,8 @@ mod tests {
         let me = synth_me();
         let resolver = NameResolver::default();
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let close_friends = vec![flag("alice")];
         let favorited = vec![flag("bob"), flag("carol")];
         let restricted = vec![flag("bob")];
@@ -846,7 +870,8 @@ mod tests {
         let me = synth_me();
         let resolver = NameResolver::default();
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
 
         // alice gets 2 liked_posts + 1 liked_comment → likes_given = 3.
         let liked_posts = vec![
@@ -917,7 +942,8 @@ mod tests {
         let me = synth_me();
         let resolver = NameResolver::default();
         let decay = synth_decay();
-        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
 
         let by = by_username(aggregate(&inputs, now));
         assert_eq!(by["alice"].follow_tenure_days, Some(30));
@@ -936,7 +962,8 @@ mod tests {
         let me = synth_me();
         let resolver = NameResolver::default();
         let decay = synth_decay();
-        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
 
         let by = by_username(aggregate(&inputs, now));
         assert_eq!(by["alice"].follow_tenure_days, None);
@@ -955,7 +982,8 @@ mod tests {
         let me = synth_me();
         let resolver = NameResolver::default();
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         // Activity entries with empty `Owner.Username` and shape-A username:
         // both would route to `get_mut("")` if the empty handle existed.
         let liked_posts = vec![owner_entry("")];
@@ -984,7 +1012,8 @@ mod tests {
         let me = synth_me();
         let resolver = NameResolver::default();
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let close_friends = vec![ShapeCEntry {
             fbid: None,
             timestamp: None,
@@ -1010,7 +1039,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         // Three participants including me — `attributable_handle` must
         // refuse to single out Alice as the partner.
         let threads = vec![dm_thread(
@@ -1032,7 +1062,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         // Only me in participants — `attributable_handle` returns None
         // (no `first` other-participant to resolve).
         let threads = vec![dm_thread(
@@ -1054,7 +1085,8 @@ mod tests {
         // (`Stranger`) that the resolver has never seen.
         let resolver = resolver_from(&[("Alice Real", "alice")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let threads = vec![dm_thread(
             &["Stranger", "Me Real"],
             vec![msg(Some("Stranger"), Some(1_700_000_000), vec![])],
@@ -1076,7 +1108,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Mike", "alice"), ("Mike", "alice2")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let threads = vec![dm_thread(
             &["Mike", "Me Real"],
             vec![msg(Some("Mike"), Some(1_700_000_000), vec![])],
@@ -1095,7 +1128,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Stranger", "stranger")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let threads = vec![dm_thread(
             &["Stranger", "Me Real"],
             vec![msg(Some("Stranger"), Some(1_700_000_000), vec![])],
@@ -1118,7 +1152,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let threads = vec![dm_thread(
             &["Alice Real", "Me Real"],
             vec![
@@ -1147,7 +1182,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let threads = vec![dm_thread(
             &["Alice Real", "Me Real"],
             vec![msg(None, Some(1_700_000_000), vec![])],
@@ -1166,7 +1202,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let threads = vec![dm_thread(
             &["Alice Real", "Me Real"],
             vec![msg(
@@ -1196,7 +1233,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         // Out-of-order timestamps: the recency value must be derived
         // from the maximum, not the last entry encountered.
         let now_secs = 1_800_000_000_i64;
@@ -1222,7 +1260,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let future_secs = 1_800_000_000_i64 + 86_400;
         let threads = vec![dm_thread(
             &["Alice Real", "Me Real"],
@@ -1247,7 +1286,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice"), ("Alice Alias", "alice")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let now_secs = 1_800_000_000_i64;
         let threads = vec![
             dm_thread(
@@ -1282,7 +1322,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice"), ("Bob Real", "bob")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         // Alice has only an inbox thread → inbound_dm_request stays
         // false. Bob has only a message_requests thread → flips.
         let inbox = vec![dm_thread(
@@ -1379,7 +1420,8 @@ mod tests {
         let me = synth_me();
         let resolver = NameResolver::default();
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let liked = vec![
             ShapeAEntry {
                 username: "alice".to_owned(),
@@ -1419,7 +1461,8 @@ mod tests {
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
         let decay = synth_decay();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
         let threads = vec![dm_thread(
             &["Alice Real", "Me Real"],
             vec![
@@ -1444,5 +1487,51 @@ mod tests {
         approx(alice.dm_reactions_received_decayed, 1.0 + (-1.0_f64).exp());
         // 180d window: 0d in, 180d out (half-open) → 1
         assert_eq!(alice.dm_reactions_received_180d, 1);
+    }
+
+    // ── account-class heuristic: classifier propagates through aggregator ─
+
+    #[test]
+    fn classifier_stamps_brand_for_lexicon_hit() {
+        // Pin the classifier→aggregator wire: a brand-suffixed handle in
+        // `followings` must materialize as `account_class = Brand` on its
+        // `AccountFeatures`. Personal-handled followees stay `Personal`.
+        let followings = vec![
+            following("alice", None),
+            following("nytimes_official", None),
+        ];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let decay = synth_decay();
+        let classifier = synth_classifier();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+
+        let by = by_username(aggregate(&inputs, fixed_now()));
+        assert_eq!(by["alice"].account_class, AccountClass::Personal);
+        assert_eq!(by["nytimes_official"].account_class, AccountClass::Brand);
+    }
+
+    #[test]
+    fn classifier_stamps_keep_allowlisted_independently_of_class() {
+        // The allowlist is a parallel signal — a personal-handled close
+        // friend on the allowlist stays `Personal` but flips
+        // `is_keep_allowlisted = true`. Scoring will gate Unfollow on
+        // BOTH, but classification stays honest.
+        let mut allowlist = HashSet::new();
+        allowlist.insert("alice".to_owned());
+        let classifier = Classifier::new(allowlist);
+
+        let followings = vec![following("alice", None), following("bob", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let decay = synth_decay();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+
+        let by = by_username(aggregate(&inputs, fixed_now()));
+        assert!(by["alice"].is_keep_allowlisted);
+        assert_eq!(by["alice"].account_class, AccountClass::Personal);
+        assert!(!by["bob"].is_keep_allowlisted);
     }
 }

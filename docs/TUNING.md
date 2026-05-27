@@ -10,6 +10,46 @@ The methodology choice for this pass was the **hybrid** in DESIGN.md's
 with `config/labels.txt` (when laid down) serving as a held-out accuracy
 floor. The labels file is not committed — it's a per-user artifact.
 
+## 2026-05-27 — brand gate (structural change, not a weights edit)
+
+The brand / public-figure account-class heuristic landed alongside the
+keep-allowlist override (see ROADMAP). Not a TOML edit — a code-level
+addition of a new Unfollow gate — but it shifts the bucket distribution
+on the real export, so worth recording here for continuity:
+
+```
+before (round 2 weights, no brand gate):  481 / 159 / 3
+after  (same weights, brand gate live):    481 / 160 / 2
+```
+
+One account (`butt_news`) moved Unfollow → Review on the `"news"`
+substring match — a known acceptable false positive of the text-only
+lexicon. 19 of 643 followings are now classified as `Brand`; only that
+one was in the Unfollow band, so the gate's effect on the bucket split
+is small at the current weights. The structural value is forward-looking:
+the next round of weight tuning can widen Unfollow (lower
+`unfollow_max` or further drop `tenure`) without re-introducing brand
+false positives, because the gate catches them upstream.
+
+### Open follow-ups after the brand gate
+
+- Lay down `config/labels.txt` per the strategy in the
+  `labels.txt.example` template (5 top / 5 bottom / 20 review-band).
+  The confusion matrix becomes the held-out floor for the next
+  weight edit.
+- Consider widening the Unfollow band now that brands are filtered —
+  candidates: raise `unfollow_max` from 0.3 to 0.35, OR drop `tenure`
+  from 0.15 to 0.1. Either move pulls the long tail of `[0.3, 0.5)`
+  tenure-only accounts (35 + 64 = 99 accounts) into a more actionable
+  Unfollow recommendation. Hold off until labels land — the matrix
+  tells us which of the two is closer to the user's intent.
+- Lexicon false-positive triage: `butt_news` is the only known case
+  on this export. If the labeled set confirms it should be Unfollow,
+  the user can add it to `keep_allowlist.txt`'s **opposite** — there
+  isn't one yet; allowlist semantics are "never unfollow". For now,
+  the false positive surfaces as a Review-band account and the user
+  handles it manually.
+
 ## 2026-05-27 — first calibration pass
 
 Goal: move the bucket distribution from "everything is Keep" to a

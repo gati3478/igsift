@@ -25,7 +25,9 @@
 //! likes/comments _others_ made on my posts — so inbound signals (DM
 //! `reactions[].actor`, `message_requests/`) stand in as proxies.
 
+pub mod account_class;
 pub mod aggregate;
 pub mod name_resolution;
 
+pub use account_class::Classifier;
 pub use aggregate::{AccountClass, AccountFeatures, aggregate};

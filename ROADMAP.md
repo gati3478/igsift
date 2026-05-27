@@ -207,7 +207,28 @@ behind each item.
       in `src/labels.rs`) as the held-out accuracy floor when laid down.
       Further Unfollow widening deferred until the brand / public-figure
       heuristic ships. Full notes: [`docs/TUNING.md`](docs/TUNING.md).
-- [ ] **Brand / public-figure heuristic** + user-maintained allowlist.
+- [x] **Brand / public-figure heuristic** + user-maintained allowlist
+      (2026-05-27) — added `aho-corasick` and `src/features/account_class.rs`:
+      `Classifier` wraps a case-insensitive aho-corasick automaton over the
+      curated `BRAND_LEXICON` (8 high-precision tokens: `official`, `studio`,
+      `magazine`, `records`, `gallery`, `news`, `media`, `agency` — all ≥ 5
+      chars to keep false-positive risk against personal handles low) plus a
+      `HashSet<String>` keep-allowlist loaded from `config/keep_allowlist.txt`
+      by the new `src/allowlist.rs` module. The classifier exposes
+      `classify(username, display_name) -> AccountClass` (lexicon hit on
+      either surface promotes to `Brand`) and `is_allowlisted(handle) -> bool`
+      (ASCII-case-insensitive). `AccountClass::Brand` lands as a real variant;
+      `PublicFigure` is deliberately omitted because the text-only heuristic
+      can't reliably tell brand from public_figure and the downstream gate is
+      identical. The classifier threads through `AggregateInputs` and stamps
+      both `account_class` and a new `is_keep_allowlisted: bool` flag onto
+      every `AccountFeatures`. Scoring's `assign_bucket` Unfollow→Review
+      override fires when `account_class != Personal || is_keep_allowlisted`
+      (parallel to the existing close_friend / favorited gates). Validated
+      against the 2026-05-11 export: 19 followings classified as `Brand`,
+      bucket split shifted 481 / 159 / 3 → 481 / 160 / 2 (one account
+      `butt_news` moved from Unfollow to Review on the `"news"` substring —
+      acceptable false positive, the allowlist is the user-side override).
 - [x] **CSV + Markdown output writers** (2026-05-27) — `src/output/` with
       `csv` and `markdown` submodules. CSV columns pin
       [`docs/DESIGN.md`](docs/DESIGN.md) "Output" verbatim; rows emit

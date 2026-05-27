@@ -23,17 +23,20 @@
 //! the same ratio over 1000 messages is — gating on volume here keeps the
 //! ratio honest at the source.
 //!
-//! ## Account-class gate is partial
+//! ## Account-class + allowlist gates
 //!
-//! DESIGN.md's `Unfollow` bucket requires `account_class == personal` AND
-//! not `is_close_friend`/`is_favorited`/`is_restricted`. The account-class
-//! heuristic is a separate ROADMAP slice — this implementation gates on
-//! "not restricted, not boosted" only. Brand and public-figure accounts
-//! that today land in `unfollow` will get downgraded to `review` once
-//! the account-class slice lands.
+//! DESIGN.md's `Unfollow` bucket requires `account_class == Personal` AND
+//! not `is_close_friend`/`is_favorited`/`is_restricted`. Brand accounts
+//! detected by [`crate::features::account_class::Classifier`] downgrade
+//! Unfollow → Review in [`assign_bucket`]. The user-maintained keep-
+//! allowlist (`config/keep_allowlist.txt`) surfaces on
+//! [`AccountFeatures::is_keep_allowlisted`] and applies the same
+//! Unfollow → Review override — a parallel signal to `is_close_friend` /
+//! `is_favorited`, kept separate so the CSV `account_class` column
+//! doesn't lie about a personal close-friend's profile.
 
 use crate::config::{ScoringConfig, ScoringParams, WeightsConfig};
-use crate::features::AccountFeatures;
+use crate::features::{AccountClass, AccountFeatures};
 
 /// Below this DM-volume threshold, `dm_balance_penalty` is suppressed.
 ///
@@ -258,15 +261,18 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
         return Bucket::Keep;
     }
     if keep_prob < p.unfollow_max {
-        // DESIGN.md gates `unfollow` on `account_class == personal` AND
-        // `!is_close_friend && !is_favorited && !is_restricted`. The
-        // account-class heuristic lands in a later slice; for now,
-        // close-friend / favorited boosts force `review`. Restricted
-        // is already handled above. Brand / public-figure accounts
-        // below `unfollow_max` will get downgraded to `review` once
-        // the account-class slice lands — this is the only place to
-        // wire it.
-        if f.is_close_friend || f.is_favorited {
+        // DESIGN.md gates `unfollow` on `account_class == Personal` AND
+        // `!is_close_friend && !is_favorited && !is_restricted`. Restricted
+        // is handled above; the remaining gates fold in here. The keep-
+        // allowlist (`config/keep_allowlist.txt`) is the user-maintained
+        // override for accounts the lexicon can't be trusted on —
+        // brands / public figures the heuristic missed, or personal
+        // accounts the export under-represents.
+        if f.is_close_friend
+            || f.is_favorited
+            || f.is_keep_allowlisted
+            || f.account_class != AccountClass::Personal
+        {
             return Bucket::Review;
         }
         return Bucket::Unfollow;
@@ -289,7 +295,7 @@ mod tests {
         AccountFeatures {
             username: handle.to_owned(),
             display_name: None,
-            account_class: crate::features::AccountClass::default(),
+            account_class: AccountClass::default(),
             follow_tenure_days: None,
             is_close_friend: false,
             is_favorited: false,
@@ -298,6 +304,7 @@ mod tests {
             is_hide_story_from: false,
             is_removed_suggestion: false,
             recently_unfollowed: false,
+            is_keep_allowlisted: false,
             likes_given: 0,
             comments_given: 0,
             story_interactions_out: 0,
@@ -581,6 +588,45 @@ mod tests {
             (1.5..4.0).contains(&ratio),
             "tenure ratio should be in log-scaled range: {ratio}",
         );
+    }
+
+    #[test]
+    fn brand_class_gates_unfollow_to_review() {
+        // A Brand account scoring below `unfollow_max` must downgrade to
+        // Review, not Unfollow. DESIGN.md: "Public figures / brands with
+        // low `keep_prob` get `review`, never `unfollow`."
+        let mut cfg = baseline_cfg();
+        cfg.weights.removed_suggestion_penalty = 10.0;
+        let mut acct = baseline_account("nytimes_official");
+        acct.account_class = AccountClass::Brand;
+        acct.is_hide_story_from = true;
+        acct.is_removed_suggestion = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(
+            scored[0].keep_prob < cfg.scoring.unfollow_max,
+            "keep_prob {} should be below unfollow_max {} to exercise the gate",
+            scored[0].keep_prob,
+            cfg.scoring.unfollow_max,
+        );
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn keep_allowlisted_gates_unfollow_to_review() {
+        // A personal-classed account on the keep-allowlist must downgrade
+        // Unfollow → Review without touching `account_class`. The two
+        // gates are parallel signals.
+        let mut cfg = baseline_cfg();
+        cfg.weights.removed_suggestion_penalty = 10.0;
+        let mut acct = baseline_account("sparse_friend");
+        acct.is_keep_allowlisted = true;
+        acct.is_hide_story_from = true;
+        acct.is_removed_suggestion = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(scored[0].keep_prob < cfg.scoring.unfollow_max);
+        assert_eq!(scored[0].bucket, Bucket::Review);
+        // Class stayed Personal — allowlist is NOT classification.
+        assert_eq!(scored[0].features.account_class, AccountClass::Personal);
     }
 
     #[test]

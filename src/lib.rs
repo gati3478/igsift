@@ -13,13 +13,15 @@
 //!            ──▶ output::*   (CSV + Markdown writers)
 //! ```
 //!
-//! Status: parser layer, feature aggregation, and first-pass scoring all
-//! landed. The pipeline composes a `keep_prob` per account and bucket
-//! assignment (`keep` / `review` / `unfollow`) via the DESIGN.md formula
-//! plus the restricted/boost gates. The CSV + Markdown output writers
-//! and the account-class heuristic that hardens the `unfollow`
-//! recommendation remain on the ROADMAP.
+//! Status: parser layer, feature aggregation, first-pass scoring, CSV +
+//! Markdown writers, and the brand / public-figure account-class
+//! heuristic (with the user-maintained keep-allowlist override) have all
+//! landed. The pipeline composes a `keep_prob` per account, assigns a
+//! bucket (`keep` / `review` / `unfollow`) via the DESIGN.md formula plus
+//! the restricted / boost / brand / allowlist gates, and writes the
+//! CSV + Markdown artifacts next to the export directory.
 
+pub mod allowlist;
 pub mod cli;
 pub mod config;
 pub mod export;
@@ -202,6 +204,9 @@ pub fn run(cli: Cli) -> Result<()> {
     println!("resolvable DM threads: {resolvable_dm_threads}");
 
     let scoring_config = config::read_scoring_config(cli.config.as_deref())?;
+    let keep_allowlist = allowlist::load_default()?;
+    let keep_allowlist_size = keep_allowlist.len();
+    let classifier = features::Classifier::new(keep_allowlist);
 
     let inputs = features::aggregate::AggregateInputs {
         followings: &following,
@@ -230,6 +235,7 @@ pub fn run(cli: Cli) -> Result<()> {
         message_request_threads: &message_request_threads,
         me: &me,
         resolver: &resolver,
+        classifier: &classifier,
         decay: &scoring_config.decay,
     };
     let aggregated = features::aggregate(&inputs, jiff::Timestamp::now());
@@ -247,10 +253,22 @@ pub fn run(cli: Cli) -> Result<()> {
         .map(|f| f.dm_reactions_received as u64)
         .sum();
     let agg_inbound_dm_requests = aggregated.iter().filter(|f| f.inbound_dm_request).count();
+    let agg_brands = aggregated
+        .iter()
+        .filter(|f| f.account_class == features::AccountClass::Brand)
+        .count();
+    let agg_keep_allowlisted = aggregated.iter().filter(|f| f.is_keep_allowlisted).count();
 
     println!("aggregated accounts: {}", aggregated.len());
     println!("aggregated close friends: {agg_close_friends}");
     println!("aggregated favorited: {agg_favorited}");
+    println!("aggregated brands: {agg_brands}");
+    // The allowlist file may carry handles that aren't followees (a
+    // stale entry, or an aspirational keep). The aggregated count
+    // reflects only those that intersect the followings set; the
+    // file-size line below is the loaded-from-disk count for sanity.
+    println!("aggregated keep-allowlisted: {agg_keep_allowlisted}");
+    println!("keep-allowlist size on disk: {keep_allowlist_size}");
     println!("aggregated with likes_given > 0: {agg_with_likes}");
     println!("aggregated with comments_given > 0: {agg_with_comments}");
     println!("DM-attributed accounts: {agg_dm_attributed}");

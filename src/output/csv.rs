@@ -115,6 +115,7 @@ mod tests {
                 is_hide_story_from: false,
                 is_removed_suggestion: false,
                 recently_unfollowed: false,
+                is_keep_allowlisted: false,
                 likes_given: 0,
                 comments_given: 0,
                 story_interactions_out: 0,

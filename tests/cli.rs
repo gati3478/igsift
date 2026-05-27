@@ -100,15 +100,19 @@ fn trace_known_handle_prints_contributions() {
 
 #[test]
 fn fixture_counts_match_expected() {
-    // Sanitized fixture: 3 followings, 2 followers, 3 inbox threads, 9 total
-    // inbox messages (alice_thread = 2 msgs, bob_thread = 5 across two parts,
-    // carol_thread = 2 msgs), the seven relationship-flag files and one
-    // message request thread from the second slice, the four nested-`Owner`
-    // activity files from the third slice — 2 liked posts (distinct owners),
-    // 1 story like, 1 stories viewed, 1 saved post — the eight shape-A
-    // activity files from the fourth slice — 2 liked comments, 1 of each of
-    // the seven story_interactions files — the three shape-D comment files
-    // from the fifth slice — 2 post comments (distinct targets), 1 reel
+    // Sanitized fixture: 4 followings (alice/bob/carol_synth + the
+    // brand-suffixed nytimes_official added in the account-class slice,
+    // which has an empty `string_list_data` so its `followed_at` is None
+    // and the brand-gate test isn't contaminated by tenure), 2 followers,
+    // 3 inbox threads, 9 total inbox messages (alice_thread = 2 msgs,
+    // bob_thread = 5 across two parts, carol_thread = 2 msgs), the seven
+    // relationship-flag files and one message request thread from the
+    // second slice, the four nested-`Owner` activity files from the
+    // third slice — 2 liked posts (distinct owners), 1 story like, 1
+    // stories viewed, 1 saved post — the eight shape-A activity files
+    // from the fourth slice — 2 liked comments, 1 of each of the seven
+    // story_interactions files — the three shape-D comment files from
+    // the fifth slice — 2 post comments (distinct targets), 1 reel
     // comment, 1 hype (story comment) — and the slice-6 resolver
     // infrastructure: `me` identity from `personal_information.json`
     // (`me_synth` / `Test User`) plus a NameResolver over the eight
@@ -141,7 +145,7 @@ fn fixture_counts_match_expected() {
         .arg(out_stem("fixture_counts"))
         .assert()
         .success()
-        .stdout(contains("following count: 3"))
+        .stdout(contains("following count: 4"))
         .stdout(contains("followers count: 2"))
         .stdout(contains("DM thread count: 3"))
         .stdout(contains("total DM messages: 9"))
@@ -173,18 +177,24 @@ fn fixture_counts_match_expected() {
         .stdout(contains("name resolver entries: 8"))
         .stdout(contains("name resolver collisions: 0"))
         .stdout(contains("resolvable DM threads: 1"))
-        // Slice-7A handle-keyed aggregator: 3 followings → 3 aggregated
+        // Slice-7A handle-keyed aggregator: 4 followings → 4 aggregated
         // accounts (no blocked/recently_unfollowed handle appears in
         // following.json, so both filters are no-ops on this fixture).
         // close_friends ∩ followings = {alice_synth} → 1. favorited ∩
-        // followings = {bob_synth, carol_synth} → 2. None of the activity
-        // targets in the fixture are in followings, so the with-likes /
-        // with-comments counts are 0 — the activity-summation path is
-        // pinned independently by the structural unit tests in
+        // followings = {bob_synth, carol_synth} → 2. nytimes_official is
+        // Brand by lexicon hit on "official" — exercises the
+        // account-class slice's classifier wire-through; no allowlist
+        // overrides on this fixture so `keep-allowlisted: 0`. None of
+        // the activity targets in the fixture are in followings, so the
+        // with-likes / with-comments counts are 0 — the activity-summation
+        // path is pinned independently by the structural unit tests in
         // `src/features/aggregate.rs::tests`.
-        .stdout(contains("aggregated accounts: 3"))
+        .stdout(contains("aggregated accounts: 4"))
         .stdout(contains("aggregated close friends: 1"))
         .stdout(contains("aggregated favorited: 2"))
+        .stdout(contains("aggregated brands: 1"))
+        .stdout(contains("aggregated keep-allowlisted: 0"))
+        .stdout(contains("keep-allowlist size on disk: 0"))
         .stdout(contains("aggregated with likes_given > 0: 0"))
         .stdout(contains("aggregated with comments_given > 0: 0"))
         // Slice-7B-1 DM aggregator: only `carol_thread` resolves (display
@@ -201,24 +211,32 @@ fn fixture_counts_match_expected() {
         .stdout(contains("DM reactions given total: 1"))
         .stdout(contains("DM reactions received total: 1"))
         .stdout(contains("inbound DM requests: 0"))
-        // First-pass scoring: alice (close_friend, boost 5.0), bob and
-        // carol (favorited, boost 3.0) all land in Keep. carol picks up
-        // additional DM signal (1 message in each direction, 1 reaction
-        // each way) but the boost dominates regardless. No fixture
-        // account is restricted, hide_story'd, or removed_suggestion'd,
-        // so the review band is empty and unfollow is empty.
+        // First-pass scoring + brand gate:
+        //   - alice (close_friend, boost 5.0) → Keep
+        //   - bob (favorited, boost 3.0) → Keep
+        //   - carol (favorited, boost 3.0; faint DM signal) → Keep
+        //   - nytimes_official (no tenure, no engagement) scores below
+        //     unfollow_max; without the brand-class gate it would be
+        //     Unfollow, but `account_class == Brand` floors it at
+        //     Review per DESIGN.md "Public figures / brands with low
+        //     keep_prob get review, never unfollow."
+        // No fixture account is restricted or hide_story'd, so all
+        // three remaining buckets are accounted for by the above.
         .stdout(contains("bucket keep: 3"))
-        .stdout(contains("bucket review: 0"))
+        .stdout(contains("bucket review: 1"))
         .stdout(contains("bucket unfollow: 0"));
 }
 
 #[test]
 fn writes_csv_and_markdown_at_out_path() {
-    // End-to-end pin for the output writer slice. Runs the binary against
-    // the sample fixture (3 followings, all in Keep), asserts both files
-    // land at the `--out` stem with the right extensions, and checks the
-    // load-bearing surface in each: the CSV header (the inter-run diff
-    // contract per DESIGN.md "Output") and the Markdown summary line.
+    // End-to-end pin for the output writer slice (extended for the
+    // account-class slice). Runs the binary against the sample fixture
+    // (4 followings: 3 in Keep + nytimes_official in Review via the
+    // brand-class gate), asserts both files land at the `--out` stem
+    // with the right extensions, and checks the load-bearing surface
+    // in each: the CSV header (the inter-run diff contract per
+    // DESIGN.md "Output"), the row count, and the Markdown summary
+    // including the brand-gated Review entry.
     let stem = out_stem("writes_csv_and_md");
     let csv_path = stem.with_extension("csv");
     let md_path = stem.with_extension("md");
@@ -248,13 +266,28 @@ fn writes_csv_and_markdown_at_out_path() {
          likes_given_90d,comments_given_90d,follow_tenure_days,\
          account_class,notes",
     );
-    // 1 header + 3 rows (fixture has 3 followings).
-    assert_eq!(csv.lines().count(), 4, "expected 4 lines, got:\n{csv}");
+    // 1 header + 4 rows (fixture has 4 followings: alice/bob/carol_synth
+    // + nytimes_official as the brand-gate test case).
+    assert_eq!(csv.lines().count(), 5, "expected 5 lines, got:\n{csv}");
+
+    // nytimes_official rendered with account_class=brand — pins the
+    // CSV column's connection to the classifier wire-through, not just
+    // the unit tests in account_class.rs.
+    assert!(
+        csv.contains("nytimes_official"),
+        "brand fixture row must appear in CSV:\n{csv}",
+    );
+    assert!(
+        csv.lines()
+            .any(|line| line.starts_with("nytimes_official,") && line.contains(",brand,")),
+        "nytimes_official row must carry account_class=brand:\n{csv}",
+    );
 
     // Markdown self-documents the run.
     assert!(md.contains("# ig-mgr recommendations"));
-    assert!(md.contains("Accounts scored: **3**"));
+    assert!(md.contains("Accounts scored: **4**"));
     assert!(md.contains("Keep: **3**"));
+    assert!(md.contains("Review: **1**"));
     // `carol_synth` has a `display_name` populated via the NameResolver
     // reverse map (she appears in `favorited` with Name "Carol Synth").
     // The Markdown writer surfaces that — pinning it here means a

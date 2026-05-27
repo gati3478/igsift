@@ -18,15 +18,17 @@ the unfollows by hand.
 
 ## Status
 
-**Active — pipeline landed, output writers remaining.** The parser layer,
-per-account feature aggregation (raw + decay-weighted + windowed counts),
-and first-pass scoring (`keep_prob` + `keep` / `review` / `unfollow`
-bucket per account) all run end-to-end against a real export today; the
-binary prints per-source counts plus top-10 keep / bottom-10 unfollow
-candidates with their dominant feature. Remaining: the CSV + Markdown
-output writers, the brand / public-figure account-class heuristic that
-hardens the `unfollow` recommendation, and weight tuning against a
-labeled sample. See [`ROADMAP.md`](ROADMAP.md) for the task list and
+**Active — end-to-end pipeline landed.** Every functional ROADMAP slice is in:
+the parser layer, per-account feature aggregation (raw counts, decay-weighted
+counts, 90d/180d windowed counts), first-pass scoring (`keep_prob` plus a
+`keep` / `review` / `unfollow` bucket per account), CSV + Markdown writers,
+and the brand / public-figure account-class heuristic (with the
+user-maintained keep-allowlist override) all run against a real export today.
+The binary prints per-source counts plus top-10 / bottom-10 candidates with
+their dominant feature, and writes `recommendations_<DATE>.csv` + `.md` next
+to the export directory. Remaining: weight tuning against a labeled sample,
+and the operational "run, clean up, evaluate regret" feedback loop. See
+[`ROADMAP.md`](ROADMAP.md) for the task list and
 [`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
 
 > A previous SvelteKit web-app prototype (card-deck review UI, SQLite/Drizzle)
