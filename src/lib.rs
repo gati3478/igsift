@@ -28,6 +28,7 @@ pub mod export;
 pub mod features;
 pub mod labels;
 pub mod output;
+pub mod progress;
 pub mod scoring;
 pub mod text;
 
@@ -258,6 +259,11 @@ pub fn run(args: RunArgs) -> Result<()> {
         .as_deref()
         .ok_or_else(|| anyhow!("export directory required — pass a path or use `ig-mgr --help`"))?;
 
+    // Progress spinner: visible at default verbosity on a TTY, hidden
+    // when -v / -vv (logs would interleave) or when stderr is piped.
+    let progress = progress::Reporter::new(args.verbose == 0);
+
+    progress.phase("Validating export shape");
     ensure!(
         export_dir.is_dir(),
         "export directory does not exist or is not a directory: {}",
@@ -265,11 +271,9 @@ pub fn run(args: RunArgs) -> Result<()> {
     );
     export::validate_shape(export_dir)?;
 
+    progress.phase("Parsing connections (followings, followers, flag files)");
     let following = export::read_following(export_dir)?;
     let followers = export::read_followers(export_dir)?;
-    let threads = export::read_inbox(export_dir)?;
-    let total_messages: usize = threads.iter().map(|t| t.messages.len()).sum();
-
     let close_friends = export::read_close_friends(export_dir)?;
     let favorited = export::read_favorited(export_dir)?;
     let blocked = export::read_blocked(export_dir)?;
@@ -277,13 +281,19 @@ pub fn run(args: RunArgs) -> Result<()> {
     let hide_story_from = export::read_hide_story_from(export_dir)?;
     let recently_unfollowed = export::read_recently_unfollowed(export_dir)?;
     let removed_suggestions = export::read_removed_suggestions(export_dir)?;
+
+    progress.phase("Parsing DM threads");
+    let threads = export::read_inbox(export_dir)?;
+    let total_messages: usize = threads.iter().map(|t| t.messages.len()).sum();
     let message_request_threads = export::read_message_requests(export_dir)?;
 
+    progress.phase("Parsing activity (likes, stories, saves)");
     let liked_posts = export::read_liked_posts(export_dir)?;
     let story_likes = export::read_story_likes(export_dir)?;
     let stories_viewed = export::read_stories_viewed(export_dir)?;
     let saved_posts = export::read_saved_posts(export_dir)?;
 
+    progress.phase("Parsing activity (story interactions)");
     let liked_comments = export::read_liked_comments(export_dir)?;
     let story_polls = export::read_story_polls(export_dir)?;
     let story_quizzes = export::read_story_quizzes(export_dir)?;
@@ -293,10 +303,12 @@ pub fn run(args: RunArgs) -> Result<()> {
     let story_reaction_stickers = export::read_story_reaction_stickers(export_dir)?;
     let story_countdowns = export::read_story_countdowns(export_dir)?;
 
+    progress.phase("Parsing comments");
     let post_comments = export::read_post_comments(export_dir)?;
     let reels_comments = export::read_reels_comments(export_dir)?;
     let hype = export::read_hype(export_dir)?;
 
+    progress.phase("Building name resolver");
     let me = export::read_me_identity(export_dir)?;
     let resolver = features::name_resolution::NameResolver::build(&[
         close_friends.as_slice(),
@@ -402,11 +414,13 @@ pub fn run(args: RunArgs) -> Result<()> {
         println!("resolvable DM threads: {resolvable_dm_threads}");
     }
 
+    progress.phase("Loading scoring config + allowlist");
     let scoring_config = config::read_scoring_config(args.config.as_deref())?;
     let keep_allowlist = allowlist::load_default()?;
     let keep_allowlist_size = keep_allowlist.len();
     let classifier = features::Classifier::new(keep_allowlist);
 
+    progress.phase("Aggregating per-account features");
     let inputs = features::aggregate::AggregateInputs {
         followings: &following,
         followers: &followers,
@@ -509,7 +523,14 @@ pub fn run(args: RunArgs) -> Result<()> {
         println!("180d reactions received total: {reactions_received_180d_total}");
     }
 
+    progress.phase("Scoring");
     let scored = scoring::score(&aggregated, &scoring_config);
+    // Finish before any stdout println — indicatif draws on stderr but
+    // a still-ticking spinner can race with the run summary on fast
+    // terminals. The write phase is fast (<100ms) and doesn't need its
+    // own progress frame.
+    progress.finish();
+
     let keep_count = scored
         .iter()
         .filter(|s| s.bucket == scoring::Bucket::Keep)

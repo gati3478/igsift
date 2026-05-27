@@ -120,8 +120,11 @@ pub fn read_scoring_config(cli_config: Option<&Path>) -> Result<ScoringConfig> {
     // Surface which resolution rung fired so a user who laid down a custom
     // `config/scoring.toml` but invoked the binary from the wrong cwd sees
     // "<compiled-in default>" instead of silently getting baseline weights
-    // and wondering why their tuning didn't take effect.
-    tracing::info!("loaded scoring config: {source}");
+    // and wondering why their tuning didn't take effect. Demoted to debug
+    // so the default-verbosity stdout stays focused on the audit summary
+    // and doesn't interleave with the progress spinner — re-emerges with
+    // `-v`.
+    tracing::debug!("loaded scoring config: {source}");
     Ok(cfg)
 }
 
