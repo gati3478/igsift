@@ -207,6 +207,13 @@ behind each item.
       in `src/labels.rs`) as the held-out accuracy floor when laid down.
       Further Unfollow widening deferred until the brand / public-figure
       heuristic ships. Full notes: [`docs/TUNING.md`](docs/TUNING.md).
+      **Round 3 (2026-05-27):** labeled-gated single edit `unfollow_max
+      0.3 → 0.35` → 481 / 154 / 8. Agreement against the held-out labels
+      jumped 21.4 % → 25.0 %. `tenure 0.15 → 0.10` considered and rejected
+      (would have introduced a new hard mismatch on a long-tenure
+      labeled-keep). `moonrisecrystals` resolved post-commit via
+      `keep_allowlist.txt`, shifting the working state to 481 / 155 / 7
+      with 0 hard mismatches. Full notes in TUNING.md round 3.
 - [x] **Brand / public-figure heuristic** + user-maintained allowlist
       (2026-05-27) — added `aho-corasick` and `src/features/account_class.rs`:
       `Classifier` wraps a case-insensitive aho-corasick automaton over the
@@ -229,21 +236,24 @@ behind each item.
       bucket split shifted 481 / 159 / 3 → 481 / 160 / 2 (one account
       `butt_news` moved from Unfollow to Review on the `"news"` substring —
       acceptable false positive, the allowlist is the user-side override).
-      **Round-4 lexicon expansion (2026-05-27):** added `books`, `press`,
-      `games`, `store`, `comics`, `zine`, `shop`, `cafe` (8 new tokens, 4-char
-      floor relaxed from 5). Empirical 0-FP audit per token against the
-      643-followee export. Brand count 19 → 44; bucket split unchanged
-      because all newly-classified brands sit above `unfollow_max` and so
-      the gate has no work to do at current weights — the value is
-      forward-looking robustness (future Unfollow widening can't
-      accidentally swallow these accounts). `design` deliberately held
-      out: ambiguous between brand and personal-designer portfolios,
-      `keep_allowlist.txt` is the right venue. `bar` / `art` deferred
-      until word-boundary matcher semantics is on the table. Same slice
-      also tightened test isolation in `tests/cli.rs` (spawned binary's
-      cwd is `temp_dir()` so per-user `config/labels.txt` /
-      `keep_allowlist.txt` at repo root no longer contaminate the
-      fixture-count test).
+- [x] **Brand-lexicon expansion (round 4)** (2026-05-27) — extended
+      `BRAND_LEXICON` 8 → 16 tokens: added `books`, `press`, `games`,
+      `store`, `comics` (5+ chars) and `zine`, `shop`, `cafe` (4 chars;
+      floor relaxed from ≥ 5 chars with a per-token empirical FP audit
+      against the real 643-followee export). Brand count 19 → 44; bucket
+      split unchanged from the post-allowlist 481 / 155 / 7 anchor
+      because all newly-classified brands already sit above
+      `unfollow_max = 0.35`, so the gate has no work to do at current
+      weights — value is forward-looking robustness (future Unfollow
+      widening can't accidentally swallow these accounts). `design`
+      deliberately held out (ambiguous between brand and personal-
+      designer portfolios; `keep_allowlist.txt` is the right venue
+      case-by-case). `bar` / `art` deferred pending word-boundary
+      matcher semantics. Same slice also tightened test isolation in
+      `tests/cli.rs` (spawned binary's cwd is `temp_dir()` so per-user
+      `config/labels.txt` / `keep_allowlist.txt` at the repo root no
+      longer contaminate the fixture-count test). Full notes in
+      [`docs/TUNING.md`](docs/TUNING.md) round 4.
 - [x] **CSV + Markdown output writers** (2026-05-27) — `src/output/` with
       `csv` and `markdown` submodules. CSV columns pin
       [`docs/DESIGN.md`](docs/DESIGN.md) "Output" verbatim; rows emit

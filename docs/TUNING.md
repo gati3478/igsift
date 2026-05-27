@@ -21,9 +21,12 @@ as the weights rounds. Same shape as the round-3-precursor "brand gate
 ### Verdict
 
 Brand count `19 → 44` on 643 followings. Bucket split `481 / 155 / 7`
-**unchanged** — all 25 newly-classified brands already sit at
-`keep_prob > unfollow_max` (= 0.35) so the gate has no work to do at
-current weights. Confusion matrix vs `config/labels.txt` also unchanged
+**unchanged from the round-3 post-allowlist anchor** (`481 / 154 / 8` at
+round-3 commit → `481 / 155 / 7` after `moonrisecrystals` was added to
+`keep_allowlist.txt`; the round-4 lexicon then shifts nothing because
+all 25 newly-classified brands already sit at
+`keep_prob > unfollow_max = 0.35`, so the gate has no work to do at
+current weights). Confusion matrix vs `config/labels.txt` also unchanged
 (`agreement: 7/28, hard mismatches: none`) — the labeled brand-shaped
 accounts were already in `bucket=review` based on `keep_prob` alone, and
 brand-class promotion doesn't shift them out of Review (the gate floors
@@ -49,6 +52,19 @@ doesn't), which is a structural matcher change not justified by the
 marginal recall gain at current scale.
 
 ### Per-token audit (real export, 643 followees)
+
+**Scope note (audit recommendation):** the FP counts below are
+**0 false-positives against this specific 643-followee export**, not a
+universal 0-FP claim. The substrings (`books`, `press`, `games`, …) are
+substring-matched without word boundaries, so on a different user's
+larger followee set they will hit personal handles that contain these
+letter-runs (`audiobookslover`, `pressureguy`, `gamestop_lover`,
+`bookshopper`, `cafelover_mara` are all plausible misses). The
+brand-gate semantics (Unfollow → Review, never Personal → silently
+suppressed Unfollow) keeps each such miss cheap — one manual triage
+event — but a future maintainer porting the lexicon to a different
+export should **re-run the per-token grep against their own followee
+list** before trusting these numbers transitively.
 
 | Token  | Chars | Hits | FPs | Net new brand catches¹                               |
 | ------ | ----- | ---- | --- | ---------------------------------------------------- |
@@ -108,9 +124,18 @@ rationale are what's preserved here.
 
 `481 / 154 / 8` (Keep / Review / Unfollow) on 643 followings, up from
 `481 / 160 / 2`. Single edit: `unfollow_max 0.3 → 0.35`. Agreement
-against labels improved 6/28 → 7/28 (21.4 % → 25.0 %); the single hard
-mismatch (`moonrisecrystals`, label=keep ∩ bucket=unfollow) persists
-because the fix is allowlist-side, not weights-side.
+against labels improved 6/28 → 7/28 (21.4 % → 25.0 %). The single hard
+mismatch at commit time (a brand-shaped shop-page, label=keep
+∩ bucket=unfollow, identified in `keep_allowlist.txt` as the allowlist
+target) was resolved post-commit via the user-side allowlist — see
+**Addendum** below for the post-commit state.
+
+Personal handles named in the original drafting of this entry have been
+replaced with structural descriptors per the round-3 audit (privacy
+posture in `CLAUDE.md`: per-user `keep`/`drop` intent paired with
+followee identity is the same disclosure as the gitignored `labels.txt`).
+Brand-business handles (`butt_news`, `moonrisecrystals`,
+`kona_books_`, …) are retained because the brand names are public.
 
 ### Before
 
@@ -132,13 +157,12 @@ Reading the matrix — three patterns, ranked by signal strength:
    Brand-gate already floors 4 of them to Review; the remaining 11 are
    allowlist or future lexicon-expansion territory.
 2. **6 drop-labels in bucket=review** — algorithm marks them borderline
-   correctly but doesn't push below the 0.3 cutoff. One (`san___ndro`,
-   0.302) sits just above `unfollow_max`; the rest (`gosip.12` 0.426,
-   `dvidmakesthings` 0.480, `mahouuun` 0.562, `_zeromus__` 0.649,
-   `modekeyboards` 0.678) are pure-tenure with no engagement —
-   indistinguishable from interleaved keep-labels in the same band, so
-   not addressable by a pure-tenure weight cut without breaking the
-   keeps.
+   correctly but doesn't push below the 0.3 cutoff. One labeled-drop
+   sits just above `unfollow_max` at `keep_prob=0.302`; the other five
+   land in `keep_prob ∈ [0.43, 0.68]`, all pure-tenure with no
+   engagement — feature-indistinguishable from interleaved keep-labels
+   in the same band, so not addressable by a pure-tenure weight cut
+   without breaking the keeps.
 3. **1 hard mismatch** — `moonrisecrystals` (label=keep, bucket=unfollow,
    0.276). Shop page; brand lexicon doesn't catch `moonrise` or
    `crystals`. Allowlist territory, not weight-tunable.
@@ -146,21 +170,34 @@ Reading the matrix — three patterns, ranked by signal strength:
 ### Decision — raise `unfollow_max` (0.3 → 0.35)
 
 The labeled-drop band has a discrete cluster right above the existing
-cutoff: `san___ndro` at 0.302. No labeled-keep sits in `[0.30, 0.35)`
-— the lowest labeled-keep `keep_prob`s are `butt_news` 0.264
-(brand-gated to Review regardless) and `moonrisecrystals` 0.276
+cutoff: one labeled-drop at `keep_prob = 0.302`. No labeled-keep sits in
+`[0.30, 0.35)` — the lowest labeled-keep `keep_prob`s are `butt_news`
+0.264 (brand-gated to Review regardless) and `moonrisecrystals` 0.276
 (already in Unfollow at the old cutoff). So widening Unfollow to 0.35
 captures one labeled-drop into agreement with **zero risk** of pulling
 a labeled-keep down. Same single-variable methodology as rounds 1 and 2
 of the first calibration pass — the effect is fully attributable.
 
 **Considered and rejected: `tenure 0.15 → 0.10`.** Would widen Unfollow
-into the mid-review band but pull `firstpressgames` (label=keep, 412 d
-tenure, 0.355) and `tamarashubitidze` (label=keep, 446 d, 0.470) into
-Unfollow alongside `dvidmakesthings` (label=drop, 144 d, 0.480) — no
-engagement signal to discriminate. Net would be +2 agreements but +2
-new hard mismatches. Trading soft mismatches for hard ones is strictly
-worse than the smaller move.
+into the mid-review band. Empirical re-run during the round audit
+showed the move would pull a labeled-keep account at
+`keep_prob ≈ 0.40` (1471 d tenure, pure-tenure, business-page handle)
+down to ~0.316 — under `unfollow_max = 0.35` and so into Unfollow,
+creating a **new hard mismatch where none currently exists**. The
+labeled-drops in the mid-review band stay above 0.35 even at
+`tenure = 0.10` (lowest drop ends at ~0.27 only if its tenure is short
+enough — none of the labeled drops have tenure short enough for that),
+so the move trades structural-protection of long-tenure labeled-keeps
+for ~0–1 new agreement. Soft-for-hard is strictly worse than the
+smaller `unfollow_max` move.
+
+_(The original draft of this rejection named two specific labeled-keep
+accounts as the predicted hard mismatches; the audit re-derivation
+found one of those two would actually have stayed in Review, and that
+the real hard mismatch was a different account. The conclusion is
+unchanged but the math was sloppy — preserved here as a methodology
+note: when rejecting a knob, derive the displaced accounts from the
+current scoring, don't reason in-head from feature shape alone.)_
 
 ### After
 
@@ -177,13 +214,14 @@ agreement: 7/28 (25.0%)
 hard mismatches (1): moonrisecrystals (unchanged)
 ```
 
-The matrix moved exactly as predicted: `san___ndro` shifted
-`bucket=review → bucket=unfollow`, joining `nikolszi` in the
+The matrix moved exactly as predicted: the labeled-drop at 0.302 shifted
+`bucket=review → bucket=unfollow`, joining a second labeled-drop at
+0.297 (already in Unfollow under the old cutoff) in the
 `label=drop ∩ bucket=unfollow` agreement cell. Five unlabeled accounts
-in `[0.30, 0.35)` also moved to Unfollow: `ivan28h`, `tiedtopsf`,
-`lukasmuller19980`, `__deleted__bhiebeaaibgjcgedb`, `too_old_emulsion`
-— all zero-engagement, short-to-medium tenure, no display name in the
-CSV. Conservative widening into actionable territory.
+in `[0.30, 0.35)` also moved to Unfollow — all zero-engagement,
+short-to-medium tenure, no display name in the CSV (most likely
+disabled or abandoned accounts the user impulse-followed).
+Conservative widening into actionable territory.
 
 ### Why we stopped
 
@@ -203,19 +241,47 @@ CSV. Conservative widening into actionable territory.
 
 ### Open follow-ups
 
-- Add `moonrisecrystals` (and similar shop-page false negatives) to
-  `keep_allowlist.txt`. The brand lexicon will never catch store names
-  without unacceptable collateral.
-- The 5 mid-band labeled drops (`gosip.12`, `dvidmakesthings`,
-  `mahouuun`, `_zeromus__`, `modekeyboards`) won't move via weights as
-  currently designed. Realistic options: extend the labeled set toward
-  50+ entries to surface a clearer pattern; or accept that the keep_prob
-  ranking is a manual-triage signal rather than a bucket-assignment
-  ground truth for these accounts.
+- **RESOLVED 2026-05-27.** Add `moonrisecrystals` (and similar shop-page
+  false negatives) to `keep_allowlist.txt`. The brand lexicon will never
+  catch store names without unacceptable collateral. Actioned immediately
+  post-commit; see Addendum below.
+- The 5 mid-band labeled drops at `keep_prob ∈ [0.43, 0.68]` won't move
+  via weights as currently designed. Realistic options: extend the
+  labeled set toward 50+ entries to surface a clearer pattern; or accept
+  that the keep_prob ranking is a manual-triage signal rather than a
+  bucket-assignment ground truth for these accounts.
 - Brand-lexicon expansion candidates this round surfaced: `books`
   (`kona_books_`), `bar` (`klaras_bar`), `zine` (would catch
-  `danarti_zine` among others). Defer until the labeled set is thicker
-  or a specific evaluation justifies absorbing the false-positive cost.
+  `danarti_zine` among others). **PARTIALLY RESOLVED** in round 4 —
+  `books`, `zine`, plus six others added. `bar` deferred pending
+  word-boundary semantics.
+
+### Addendum — post-commit allowlist resolution
+
+Immediately after the `unfollow_max` commit landed, the open follow-up
+above was actioned: `moonrisecrystals` added to
+`config/keep_allowlist.txt`. The allowlist gate floors
+`Unfollow → Review`, producing the post-commit state below — this is
+what the binary reports today.
+
+```
+bucket keep: 481
+bucket review: 155
+bucket unfollow: 7
+
+confusion matrix:
+                 bucket=keep  bucket=review  bucket=unfollow
+  label=keep               5             16                0
+  label=drop               0              5                2
+agreement: 7/28 (25.0%)
+hard mismatches: none
+```
+
+Agreement unchanged (a `label=keep ∩ bucket=unfollow` hard mismatch
+becoming a `label=keep ∩ bucket=review` soft mismatch is not an
+agreement gain). Hard-mismatch count: 1 → 0 — the cleanest matrix state
+achievable without code changes. Round 4 then anchors against this
+post-allowlist `481 / 155 / 7`, not the `481 / 154 / 8` at-commit state.
 
 ## 2026-05-27 — brand gate (structural change, not a weights edit)
 
@@ -314,8 +380,9 @@ above `unfollow_max = 0.3`.
 Decision 2c: the bottom of the ranking was **uniformly**
 `dominant=tenure` after round 1, which is the explicit signal in the
 slice prompt that `w_tenure` is doing more work than designed. `--trace`
-confirmed bottom-10 had _zero_ other contributions — `butt_news` /
-`nikolszi` / `gregorybonsignore` were pure-tenure accounts.
+confirmed bottom-10 had _zero_ other contributions — `butt_news` plus
+two personal handles (anonymized per the round-3 audit privacy posture)
+were the canonical pure-tenure accounts at the bottom.
 
 ```
 bucket keep: 481

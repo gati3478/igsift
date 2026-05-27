@@ -219,10 +219,16 @@ threaded into the aggregator via `AggregateInputs`.
   `cafe`) using **`aho-corasick`** (single automaton, one pass over each
   input). Floor is 4 chars; the rule is **empirical 0-false-positives
   against the real export's followee list**, not a length cutoff per se.
-  3-char tokens like `bar` and `art` would be safe under a word-boundary
-  matcher (`klaras_bar` matches but `barbara` doesn't) but are deferred
-  until a labeled round demonstrates the recall need — the structural
-  matcher change isn't justified at current scale. False positives are
+  **Adding a token under 5 chars requires both** (a) the 0-FP grep
+  against the export AND (b) a plausibility check that the substring
+  isn't a common personal-handle root in English, Georgian, or Russian
+  (the project's user language mix). When (b) is in doubt, defer the
+  token until word-boundary matcher semantics is on the table — the
+  `bar` / `art` deferrals model the right discipline: each was rejected
+  on plausibility grounds (`bardic.cub`, `barbara`, `martin`, `bart`)
+  before the FP grep was even run. 3-char tokens are uniformly deferred
+  pending word-boundary semantics regardless of how clean the FP grep
+  looks on the current export. False positives are
   costlier here than false negatives — a missed brand stays Personal and
   remains eligible for the close_friend / favorited / allowlist gates,
   whereas a falsely-flagged brand silently suppresses a real Unfollow
