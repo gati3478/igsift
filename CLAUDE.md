@@ -8,14 +8,19 @@ unfollow vs. keep, with a `keep_probability` per account. One-shot run, no UI,
 no network, no database, no automated unfollow. The user acts on the output
 manually inside Instagram.
 
-**Current state: parsers landing in slices.** Schema validation, the
-relationship readers (`following`, `followers_*`, `close_friends`,
-`profiles_you've_favorited`, `blocked_profiles`, `restricted_profiles`,
-`hide_story_from`, `recently_unfollowed_profiles`, `removed_suggestions`), DM
-threads in `inbox/` and `message_requests/`, and the fixture-driven
-acceptance test exist. Feature aggregation, scoring, and CSV/Markdown output
-remain stubs. Read [`docs/DESIGN.md`](docs/DESIGN.md) for the algorithm and
-[`ROADMAP.md`](ROADMAP.md) for build order before writing pipeline code.
+**Current state: pipeline landed, output writers remaining.** Parser
+layer (every JSON source DESIGN.md lists — relationships, DM inbox +
+message requests, nested-`Owner` activity, shape-A activity, shape-D
+comments, the `me` identity and `display_name → handle` resolver),
+per-account feature aggregation (raw counts, decay-weighted versions,
+DM features, 90d/180d windowed counts), and first-pass scoring
+(`keep_prob` + bucket per account) all run end-to-end against a real
+export. `src/output.rs` (CSV + Markdown) is the only remaining stub;
+the brand / public-figure account-class heuristic that hardens the
+`unfollow` recommendation and weight tuning against a labeled sample
+are the other open ROADMAP items. Read [`docs/DESIGN.md`](docs/DESIGN.md)
+for the algorithm and [`ROADMAP.md`](ROADMAP.md) for build order before
+writing pipeline code.
 
 ## Tech stack
 
@@ -46,14 +51,17 @@ Set up once per clone: `brew install lefthook && lefthook install` (pre-commit f
 
 ```
 src/
-  main.rs       # binary entry: parse args, init tracing, call run()
-  lib.rs        # run() orchestration, init_tracing(); re-exports modules
-  cli.rs        # clap derive: Cli (export_dir, --out, --config, --verbose)
-  config.rs     # scoring.toml deserialization               [stub]
-  export.rs     # IG export JSON parsers (relationships + threads landed)
-  features.rs   # per-account feature aggregation             [stub]
-  scoring.rs    # keep_probability + bucketing                [stub]
-  output.rs     # CSV + Markdown writers                      [stub]
+  main.rs                       # binary entry: parse args, init tracing, call run()
+  lib.rs                        # run() orchestration, init_tracing(); re-exports modules
+  cli.rs                        # clap derive: Cli (export_dir, --out, --config, --verbose)
+  config.rs                     # scoring.toml deserialization (decay + weights + scoring params)
+  export.rs                     # IG export JSON parsers — every source DESIGN.md lists
+  features/
+    mod.rs                      # re-exports
+    aggregate.rs                # per-account features: raw + decayed + windowed counts
+    name_resolution.rs          # display_name → handle bridge for DM attribution
+  scoring.rs                    # score_raw composition, sigmoid, bucket assignment
+  output.rs                     # CSV + Markdown writers                       [stub]
 tests/
   cli.rs                  # smoke tests + fixture-count assertions (locked-in)
   fixtures/sample_export/ # sanitized synthetic export
@@ -65,9 +73,11 @@ scripts/
 docs/DESIGN.md  ROADMAP.md
 ```
 
-`[stub]` modules are doc-comment-only and document their intended
-responsibility and planned submodules. Each graduates to `<name>/mod.rs`
-when submodules land (e.g., `output.rs` → `output/mod.rs`).
+`src/output.rs` is the remaining `[stub]` — doc-comment-only, documents
+its intended responsibility and planned submodules (`csv`, `markdown`).
+It graduates to `output/mod.rs` when those land, matching the pattern
+`features.rs` followed when `name_resolution` arrived alongside
+`aggregate`.
 
 ## Conventions
 

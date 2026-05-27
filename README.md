@@ -18,11 +18,16 @@ the unfollows by hand.
 
 ## Status
 
-**Active — scaffolding.** This repository is set up but the analysis pipeline
-is **not implemented yet**. The binary builds, the CLI surface and module
-boundaries exist, and CI is wired; running it prints a "scaffold only" notice.
-See [`ROADMAP.md`](ROADMAP.md) for what's next and [`docs/DESIGN.md`](docs/DESIGN.md)
-for the full design.
+**Active — pipeline landed, output writers remaining.** The parser layer,
+per-account feature aggregation (raw + decay-weighted + windowed counts),
+and first-pass scoring (`keep_prob` + `keep` / `review` / `unfollow`
+bucket per account) all run end-to-end against a real export today; the
+binary prints per-source counts plus top-10 keep / bottom-10 unfollow
+candidates with their dominant feature. Remaining: the CSV + Markdown
+output writers, the brand / public-figure account-class heuristic that
+hardens the `unfollow` recommendation, and weight tuning against a
+labeled sample. See [`ROADMAP.md`](ROADMAP.md) for the task list and
+[`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
 
 > A previous SvelteKit web-app prototype (card-deck review UI, SQLite/Drizzle)
 > was retired — the interactive direction is friction I don't need for a
