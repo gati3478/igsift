@@ -211,6 +211,7 @@ pub fn run(cli: Cli) -> Result<()> {
 
     let inputs = features::aggregate::AggregateInputs {
         followings: &following,
+        followers: &followers,
         close_friends: &close_friends,
         favorited: &favorited,
         blocked: &blocked,

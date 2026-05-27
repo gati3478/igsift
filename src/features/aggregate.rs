@@ -58,7 +58,8 @@ use jiff::Timestamp;
 
 use crate::config::DecayConfig;
 use crate::export::{
-    CommentEntry, DmThread, FollowingEntry, MeIdentity, ShapeAEntry, ShapeCEntry, owner_username,
+    CommentEntry, DmThread, FollowerEntry, FollowingEntry, MeIdentity, ShapeAEntry, ShapeCEntry,
+    owner_username,
 };
 use crate::features::account_class::Classifier;
 use crate::features::name_resolution::NameResolver;
@@ -112,6 +113,13 @@ pub struct AccountFeatures {
     pub is_hide_story_from: bool,
     pub is_removed_suggestion: bool,
     pub recently_unfollowed: bool,
+    /// `true` iff the followee also appears in `followers_*.json` —
+    /// the relationship is reciprocal. Carried for decision support
+    /// only (surfaces in CSV + MD card "one-sided?" hint); not used
+    /// by scoring, which intentionally treats one-sided follows
+    /// neutrally. The CLAUDE.md "one_sided_them_is_not_a_penalty"
+    /// scoring test pins that policy.
+    pub is_mutual: bool,
     /// Handle is in `config/keep_allowlist.txt` — user-maintained
     /// never-unfollow override. Parallel signal to `is_close_friend` /
     /// `is_favorited`, gated at [`crate::scoring::assign_bucket`] to floor
@@ -164,6 +172,9 @@ pub struct AccountFeatures {
 #[derive(Debug)]
 pub struct AggregateInputs<'a> {
     pub followings: &'a [FollowingEntry],
+    /// Used only to populate [`AccountFeatures::is_mutual`] via a set
+    /// intersection with `followings`. Not consumed by scoring.
+    pub followers: &'a [FollowerEntry],
 
     pub close_friends: &'a [ShapeCEntry],
     pub favorited: &'a [ShapeCEntry],
@@ -215,6 +226,11 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
     let restricted = collect_handles(inputs.restricted);
     let removed_suggestion = collect_handles(inputs.removed_suggestions);
     let hide_story_target = flag_username(inputs.hide_story_from);
+    let follower_handles: HashSet<&str> = inputs
+        .followers
+        .iter()
+        .map(|f| f.username.as_str())
+        .collect();
 
     let mut by_handle: HashMap<&str, AccountFeatures> =
         HashMap::with_capacity(inputs.followings.len());
@@ -242,6 +258,7 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
             is_hide_story_from: hide_story_target == Some(handle),
             is_removed_suggestion: removed_suggestion.contains(handle),
             recently_unfollowed: false,
+            is_mutual: follower_handles.contains(handle),
             is_keep_allowlisted: inputs.classifier.is_allowlisted(handle),
             likes_given: 0,
             comments_given: 0,
@@ -652,6 +669,7 @@ mod tests {
     ) -> AggregateInputs<'a> {
         AggregateInputs {
             followings,
+            followers: &[],
             close_friends: &[],
             favorited: &[],
             blocked: &[],

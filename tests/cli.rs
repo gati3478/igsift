@@ -274,7 +274,7 @@ fn writes_csv_and_markdown_at_out_path() {
         "username,display_name,profile_url,bucket,keep_prob,dm_msgs,last_dm_days,\
          reactions_given_180d,reactions_received_180d,\
          likes_given_90d,comments_given_90d,follow_tenure_days,\
-         account_class,notes",
+         account_class,mutual,notes",
     );
     // 1 header + 4 rows (fixture has 4 followings: alice/bob/carol_synth
     // + nytimes_official as the brand-gate test case).
@@ -291,6 +291,27 @@ fn writes_csv_and_markdown_at_out_path() {
         csv.lines()
             .any(|line| line.starts_with("nytimes_official,") && line.contains(",brand,")),
         "nytimes_official row must carry account_class=brand:\n{csv}",
+    );
+
+    // Mutual flag: fixture followers = [alice_synth, dave_synth]; only
+    // alice_synth is also in following. Pin both directions (alice=true,
+    // bob=false) so a regression in the followers-input wire-through or
+    // the HashSet intersection fails here, not silently.
+    let alice_row = csv
+        .lines()
+        .find(|l| l.starts_with("alice_synth,"))
+        .expect("alice_synth row");
+    assert!(
+        alice_row.contains(",true,"),
+        "alice_synth must be mutual=true: {alice_row}",
+    );
+    let bob_row = csv
+        .lines()
+        .find(|l| l.starts_with("bob_synth,"))
+        .expect("bob_synth row");
+    assert!(
+        bob_row.contains(",false,"),
+        "bob_synth must be mutual=false: {bob_row}",
     );
 
     // Markdown self-documents the run.

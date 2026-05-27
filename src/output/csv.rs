@@ -45,6 +45,11 @@ struct CsvRow<'a> {
     comments_given_90d: u32,
     follow_tenure_days: Option<u32>,
     account_class: &'static str,
+    /// `true` iff the followee also follows back. Decision support only —
+    /// scoring is neutral on reciprocity (see `is_mutual` doc in
+    /// `AccountFeatures`). Emitted as the bare word `true`/`false` so a
+    /// spreadsheet filter on `mutual == false` works without arithmetic.
+    mutual: bool,
     /// The `dominant_feature` from scoring — the term with the largest
     /// signed contribution to `score_raw`. Tells the user **why** this
     /// account landed where it did at a glance.
@@ -92,6 +97,7 @@ pub fn write_to(scored: &[ScoredAccount], writer: impl Write) -> Result<()> {
             comments_given_90d: s.features.comments_given_90d,
             follow_tenure_days: s.features.follow_tenure_days,
             account_class: s.features.account_class.as_str(),
+            mutual: s.features.is_mutual,
             notes: s.dominant_feature,
         };
         wtr.serialize(&row).context("serializing CSV row")?;
@@ -126,6 +132,7 @@ mod tests {
                 is_hide_story_from: false,
                 is_removed_suggestion: false,
                 recently_unfollowed: false,
+                is_mutual: false,
                 is_keep_allowlisted: false,
                 likes_given: 0,
                 comments_given: 0,
@@ -174,7 +181,7 @@ mod tests {
             "username,display_name,profile_url,bucket,keep_prob,dm_msgs,last_dm_days,\
              reactions_given_180d,reactions_received_180d,\
              likes_given_90d,comments_given_90d,follow_tenure_days,\
-             account_class,notes",
+             account_class,mutual,notes",
             "CSV header must match DESIGN.md 'Output' section verbatim",
         );
     }
