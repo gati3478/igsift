@@ -162,6 +162,7 @@ mod tests {
             keep_prob,
             bucket: Bucket::Review,
             dominant_feature: "none",
+            top_terms: [("", 0.0); 3],
         }
     }
 

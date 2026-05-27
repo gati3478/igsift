@@ -78,9 +78,14 @@ pub struct ScoredAccount {
     pub keep_prob: f64,
     pub bucket: Bucket,
     /// Label of the term with the largest signed contribution to
-    /// `score_raw`. Drives the dominant-feature column in the Markdown
-    /// top/bottom summary.
+    /// `score_raw`. Drives the `notes` CSV column.
     pub dominant_feature: &'static str,
+    /// Top-3 signed contributions to `score_raw`, by absolute
+    /// magnitude descending. Used by the Markdown card writer for
+    /// "Why this bucket". A `0.0` entry signals "fewer than 3 non-zero
+    /// terms" and renders as omitted; the dominant term is always
+    /// `top_terms[0]`.
+    pub top_terms: [(&'static str, f64); 3],
 }
 
 /// Score every account in `features` with the weights and bucket
@@ -96,7 +101,7 @@ pub fn score(features: &[AccountFeatures], cfg: &ScoringConfig) -> Vec<ScoredAcc
 }
 
 fn score_one(f: &AccountFeatures, w: &WeightsConfig, p: &ScoringParams) -> ScoredAccount {
-    let (score_raw, dominant_feature) = compose_score(f, w);
+    let (score_raw, dominant_feature, top_terms) = compose_score(f, w);
     let keep_prob = sigmoid((score_raw - p.threshold) / p.scale);
     let bucket = assign_bucket(f, keep_prob, p);
     ScoredAccount {
@@ -105,6 +110,7 @@ fn score_one(f: &AccountFeatures, w: &WeightsConfig, p: &ScoringParams) -> Score
         keep_prob,
         bucket,
         dominant_feature,
+        top_terms,
     }
 }
 
@@ -186,27 +192,41 @@ pub fn term_contributions(
     ]
 }
 
-/// Apply the per-weight composition formula and return both the raw
-/// score and the label of the largest-magnitude contribution.
-fn compose_score(f: &AccountFeatures, w: &WeightsConfig) -> (f64, &'static str) {
+/// Apply the per-weight composition formula and return the raw score,
+/// the dominant term label, and the top-3 signed contributions.
+fn compose_score(
+    f: &AccountFeatures,
+    w: &WeightsConfig,
+) -> (f64, &'static str, [(&'static str, f64); 3]) {
     let contribs = term_contributions(f, w);
     let score_raw: f64 = contribs.iter().map(|(_, v)| v).sum();
 
-    // Dominant feature: largest absolute contribution. Penalties are
-    // signed negative in `term_contributions` so a hide-story account
-    // whose penalty dominates surfaces as "hide_story_penalty" rather
-    // than getting hidden behind a small positive engagement term.
-    let dominant = contribs
-        .iter()
-        .max_by(|(_, a), (_, b)| {
-            a.abs()
-                .partial_cmp(&b.abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|(label, val)| if *val == 0.0 { "none" } else { *label })
-        .unwrap_or("none");
+    // Sort by |contribution| descending so dominant_feature == top_terms[0]
+    // and the writer can read both off the same array.
+    let mut ranked = contribs;
+    ranked.sort_by(|(_, a), (_, b)| {
+        b.abs()
+            .partial_cmp(&a.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    (score_raw, dominant)
+    let mut top_terms: [(&'static str, f64); 3] = [("", 0.0); 3];
+    for (slot, (label, val)) in top_terms.iter_mut().zip(ranked.iter().take(3)) {
+        if *val != 0.0 {
+            *slot = (*label, *val);
+        }
+    }
+
+    // Penalties surface signed negative so a hide-story account whose
+    // penalty dominates renders as "hide_story_penalty", not as a
+    // small positive engagement term.
+    let dominant = if top_terms[0].1 != 0.0 {
+        top_terms[0].0
+    } else {
+        "none"
+    };
+
+    (score_raw, dominant, top_terms)
 }
 
 /// `max(0, dm_balance - 0.5) * 2` ∈ [0, 1], gated on a minimum DM volume.
