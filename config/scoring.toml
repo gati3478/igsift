@@ -29,7 +29,7 @@ reactions_received = 2.0          # DM reactions they sent on my messages — th
                                   # only true inbound signal Instagram ships
 
 # --- tenure ---
-tenure = 0.3                      # log(follow_tenure_days + 1) — longstanding
+tenure = 0.15                     # log(follow_tenure_days + 1) — longstanding
                                   # follow = mild commitment proxy
 
 # --- penalties (subtracted from score_raw) ---
@@ -51,7 +51,7 @@ tau_content_days = 365
 
 # Sigmoid mapping score_raw -> keep_probability, and the bucket cut-offs.
 [scoring]
-threshold = 0.0    # center of the sigmoid (score_raw at keep_prob = 0.5)
+threshold = 1.5    # center of the sigmoid (score_raw at keep_prob = 0.5)
 scale = 1.0        # spread; larger = softer transition
 keep_min = 0.7     # keep_prob >= keep_min            -> keep
 unfollow_max = 0.3 # keep_prob <  unfollow_max (+gates) -> unfollow

@@ -197,8 +197,16 @@ behind each item.
       keep_prob 0.72–0.86 dominated by `tenure` (passive longevity, no
       interaction). With the first-pass weights the distribution skews
       heavily Keep (641 / 2 / 0); weight tuning is the next bullet.
-- [ ] **Tune weights and decay constants** — consider a small labeled set of
-      ~30 accounts I already know I want to keep/drop, fit weights to match.
+- [x] **Tune weights and decay constants** (2026-05-27) — first calibration
+      pass: 481 / 159 / 3 (Keep / Review / Unfollow) on 643 followings, down
+      from 641 / 2 / 0 baseline. Two edits — `threshold 0.0 → 1.5`,
+      `tenure 0.3 → 0.15` — both attributable through the new histogram +
+      `--trace` surface in `lib::run`. Decay constants unchanged. Hybrid
+      methodology per DESIGN.md "Open questions": iterate on the live
+      ranking, with optional `config/labels.txt` (loader + confusion matrix
+      in `src/labels.rs`) as the held-out accuracy floor when laid down.
+      Further Unfollow widening deferred until the brand / public-figure
+      heuristic ships. Full notes: [`docs/TUNING.md`](docs/TUNING.md).
 - [ ] **Brand / public-figure heuristic** + user-maintained allowlist.
 - [ ] **CSV + Markdown output writers.**
 - [ ] **Run on the real export**, do the cleanup, evaluate regret a few weeks
