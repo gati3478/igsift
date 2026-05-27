@@ -1,0 +1,57 @@
+# Labeled set for the accuracy report — copy this file to `labels.txt`
+# (next to it, NOT a rename) and fill in the handles you have an opinion
+# on. `config/labels.txt` is gitignored; this `.example` is the
+# checked-in template.
+#
+# ============================================================
+# Format
+# ============================================================
+#
+#   <handle> keep    # account belongs in the Keep bucket
+#   <handle> drop    # account belongs in the Unfollow bucket
+#
+# `#` starts a comment to end-of-line. Blank lines are fine. Duplicate
+# handles are a HARD error — silent dedup would hide a typo. The label
+# `review` is intentionally NOT supported: review is "I haven't decided",
+# and a label means "I have decided".
+#
+# When `config/labels.txt` exists, `ig-mgr` prints a confusion matrix
+# (label × bucket) after the standard report, plus a per-account list
+# of hard mismatches (label=keep ∩ bucket=unfollow OR
+# label=drop ∩ bucket=keep). Soft mismatches (anything involving
+# `review`) are visible in the matrix but not listed.
+#
+# ============================================================
+# Recommended labeling strategy
+# ============================================================
+#
+# Aim for ~30 labels — that's where the confusion matrix gets useful
+# without the labeling itself becoming the time sink. Best distribution:
+#
+#   - 5 labels at the very TOP of `keep_prob` (top-5 in the Markdown
+#     summary). These should all be obvious keeps for you. If any of
+#     these come back as label=keep & bucket=review or worse, the
+#     weights are broken in an obvious way.
+#
+#   - 5 labels at the very BOTTOM of `keep_prob` (bottom-5 in the
+#     Markdown summary). These should all be obvious drops. Same
+#     calibration role for the other end.
+#
+#   - 20 labels from the REVIEW band (keep_prob ~0.3-0.7) — the
+#     discriminative cases where you actually have an opinion. This
+#     is where weight tuning moves accounts and where the confusion
+#     matrix earns its keep.
+#
+# Open `recommendations_<DATE>.md` from a recent run, pick handles
+# you have a strong feeling about, paste them below. The Markdown
+# summary already shows `display_name` and `dominant_feature` so
+# you have context without opening Instagram.
+#
+# ============================================================
+# Example entries
+# ============================================================
+
+# best_friend_irl      keep
+# college_roommate     keep
+# brand_account_xyz    drop
+# follow_for_follow    drop

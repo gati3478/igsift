@@ -112,8 +112,14 @@ slice. Unfollow stays narrow but trustworthy.
 - After the brand / public-figure account-class heuristic lands,
   re-run and decide whether to widen Unfollow (raise `unfollow_max` or
   further lower `tenure`).
-- If `config/labels.txt` is committed, use the confusion-matrix report
-  in `lib::run` as the accuracy floor for the next round of edits.
+- Lay down `config/labels.txt` (copy from `config/labels.txt.example`)
+  and use the confusion-matrix report as the accuracy floor for the
+  next round of edits. Recommended ~30-label distribution: **5 from
+  the top of `keep_prob` (calibration), 5 from the bottom (calibration),
+  20 from the Review band 0.3–0.7 (discriminative)**. Pick handles from
+  `recommendations_<DATE>.md` — the Markdown summary already shows
+  `display_name` and `dominant_feature` so you can label without
+  re-opening Instagram. The template explains format and rationale.
 - Decay constants stay first-pass guesses (180d DM, 365d content);
   revisit only when a specific account's ranking contradicts user
   judgment in a way that points at the decay term.

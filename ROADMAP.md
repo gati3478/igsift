@@ -208,6 +208,18 @@ behind each item.
       Further Unfollow widening deferred until the brand / public-figure
       heuristic ships. Full notes: [`docs/TUNING.md`](docs/TUNING.md).
 - [ ] **Brand / public-figure heuristic** + user-maintained allowlist.
-- [ ] **CSV + Markdown output writers.**
+- [x] **CSV + Markdown output writers** (2026-05-27) — `src/output/` with
+      `csv` and `markdown` submodules. CSV columns pin
+      [`docs/DESIGN.md`](docs/DESIGN.md) "Output" verbatim; rows emit
+      ascending by `keep_prob` so actionable accounts surface at the top
+      of the file. Markdown is the skim artifact: bucket counts plus
+      bottom-20 / top-20 tables with `dominant_feature` per row. Default
+      stem `<export-parent>/recommendations_<YYYY-MM-DD>`, overridable
+      via `--out`. Display names resolve via `NameResolver::display_name_for`
+      (the reverse direction added in this slice; same "no guessing on
+      collision" posture as the forward direction). `account_class`
+      stub-materialized as a single `Personal` variant — the brand /
+      public-figure slice upgrades that field in place rather than
+      adding a new one.
 - [ ] **Run on the real export**, do the cleanup, evaluate regret a few weeks
       later, iterate.

@@ -14,6 +14,10 @@
 recommendations_*.csv
 recommendations_*.md
 
+# Personal labels file — handle → user intent (keep / drop). Per-user data,
+# never committed. `config/labels.txt.example` is the checked-in template.
+/config/labels.txt
+
 # insta: uncommitted pending snapshots (review then accept with `cargo insta`)
 *.snap.new
 *.pending-snap
