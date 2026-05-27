@@ -1,10 +1,26 @@
 use anyhow::Result;
 use clap::Parser;
 
-use ig_mgr::cli::Cli;
+use ig_mgr::cli::{Cli, Command};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    ig_mgr::init_tracing(cli.verbose);
-    ig_mgr::run(cli)
+    match cli.command {
+        Some(Command::Init { force }) => {
+            ig_mgr::init_tracing(0);
+            ig_mgr::init(force)
+        }
+        Some(Command::Check { export_dir }) => {
+            ig_mgr::init_tracing(0);
+            ig_mgr::check(&export_dir)
+        }
+        Some(Command::Run(args)) => {
+            ig_mgr::init_tracing(args.verbose);
+            ig_mgr::run(args)
+        }
+        None => {
+            ig_mgr::init_tracing(cli.run_args.verbose);
+            ig_mgr::run(cli.run_args)
+        }
+    }
 }

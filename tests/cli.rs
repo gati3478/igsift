@@ -72,6 +72,69 @@ fn nonexistent_export_dir_fails_gracefully() {
 }
 
 #[test]
+fn check_subcommand_validates_fixture_and_exits_zero() {
+    // `ig-mgr check <export>` exits zero against a well-shaped fixture
+    // and prints a per-source success line for each parser. Acts as the
+    // dispatch test (subcommand reaches the `check` handler) AND the
+    // per-source-status format test in one go.
+    ig_mgr()
+        .arg("check")
+        .arg(sample_export())
+        .assert()
+        .success()
+        .stdout(contains("Validating export:"))
+        .stdout(contains("following.json"))
+        .stdout(contains("All sources parsed cleanly"));
+}
+
+#[test]
+fn check_subcommand_fails_on_non_export_dir() {
+    // Point check at a directory that isn't an IG export — the
+    // pre-flight validator should surface every missing top-level
+    // marker in one error.
+    let empty = std::env::temp_dir().join(format!("ig-mgr-check-empty-{}", std::process::id()));
+    std::fs::create_dir_all(&empty).expect("mktemp");
+    let result = ig_mgr().arg("check").arg(&empty).assert().failure();
+    let stderr = String::from_utf8_lossy(&result.get_output().stderr).into_owned();
+    std::fs::remove_dir(&empty).ok();
+    assert!(
+        stderr.contains("does not look like"),
+        "expected pre-flight diagnosis in stderr, got:\n{stderr}",
+    );
+}
+
+#[test]
+fn init_subcommand_writes_template_files() {
+    // Spawn from an empty temp dir so the cwd-relative `config/`
+    // doesn't exist; init must create it and lay down the two
+    // template files.
+    let cwd = std::env::temp_dir().join(format!("ig-mgr-init-{}", std::process::id()));
+    std::fs::create_dir_all(&cwd).expect("mktemp");
+
+    let mut cmd = Command::cargo_bin("ig-mgr").expect("binary");
+    cmd.current_dir(&cwd)
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(contains("wrote: config/keep_allowlist.txt"))
+        .stdout(contains("wrote: config/labels.txt"));
+
+    assert!(cwd.join("config/keep_allowlist.txt").is_file());
+    assert!(cwd.join("config/labels.txt").is_file());
+
+    // Re-running without --force skips both files.
+    let mut cmd2 = Command::cargo_bin("ig-mgr").expect("binary");
+    cmd2.current_dir(&cwd)
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(contains("skipped: config/keep_allowlist.txt"))
+        .stdout(contains("skipped: config/labels.txt"));
+
+    std::fs::remove_dir_all(&cwd).ok();
+}
+
+#[test]
 fn trace_unknown_handle_fails_loudly() {
     // A `--trace <handle>` that doesn't match any aggregated account is
     // almost certainly a typo at the command line. The run errors with

@@ -31,11 +31,11 @@ pub mod output;
 pub mod scoring;
 pub mod text;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::cli::Cli;
+use crate::cli::RunArgs;
 
 /// Initialize structured logging. Verbosity comes from `-v`/`-vv` flags, with
 /// `RUST_LOG` (if set) taking precedence.
@@ -56,6 +56,191 @@ pub fn init_tracing(verbose: u8) {
         .init();
 }
 
+/// `ig-mgr init` — scaffold per-user `config/` files from their
+/// checked-in templates. The .example files are embedded in the
+/// binary at compile time so a fresh user who has only the binary
+/// (no repo checkout) can still bootstrap.
+///
+/// Writes to `./config/<file>`. Skips if the target exists unless
+/// `force` is true. Creates `./config/` if missing.
+pub fn init(force: bool) -> Result<()> {
+    use std::fs;
+
+    const KEEP_ALLOWLIST_TEMPLATE: &str = include_str!("../config/keep_allowlist.txt.example");
+    const LABELS_TEMPLATE: &str = include_str!("../config/labels.txt.example");
+
+    let config_dir = PathBuf::from("config");
+    fs::create_dir_all(&config_dir)
+        .map_err(|e| anyhow::anyhow!("create config/ directory: {e}"))?;
+
+    let targets: &[(&str, &str)] = &[
+        ("config/keep_allowlist.txt", KEEP_ALLOWLIST_TEMPLATE),
+        ("config/labels.txt", LABELS_TEMPLATE),
+    ];
+
+    let mut wrote = 0u32;
+    let mut skipped = 0u32;
+    for (rel_path, body) in targets {
+        let path = PathBuf::from(rel_path);
+        if path.exists() && !force {
+            println!("skipped: {rel_path} (exists; pass --force to overwrite)");
+            skipped += 1;
+            continue;
+        }
+        fs::write(&path, body).map_err(|e| anyhow::anyhow!("write {rel_path}: {e}"))?;
+        println!("wrote: {rel_path}");
+        wrote += 1;
+    }
+    println!("\n{wrote} written, {skipped} skipped.");
+    if wrote > 0 {
+        println!("Edit config/keep_allowlist.txt to mark accounts that must stay in Keep.");
+        println!("Edit config/labels.txt with your hand-labels to enable the accuracy report.");
+    }
+    Ok(())
+}
+
+/// `ig-mgr check <export>` — validate that an export folder is
+/// parseable without scoring it. Runs the shape pre-flight, then
+/// attempts every parser, surfacing per-source status. Exits
+/// non-zero (Err) on any failure.
+///
+/// Useful for verifying a freshly-extracted multipart archive
+/// before paying the cost of a full run, or as a CI dry-run
+/// against a sanitized fixture.
+pub fn check(export_dir: &Path) -> Result<()> {
+    use anyhow::ensure;
+
+    ensure!(
+        export_dir.is_dir(),
+        "export directory does not exist or is not a directory: {}",
+        export_dir.display()
+    );
+    export::validate_shape(export_dir)?;
+
+    println!("Validating export: {}", export_dir.display());
+    println!("✓ shape: top-level markers present\n");
+
+    // Each reader is called in isolation so one failure doesn't mask
+    // others. The closure pattern keeps the listing dense — adding a
+    // new parser is one new line.
+    let mut failures: u32 = 0;
+    let mut report = |label: &str, result: Result<usize>| match result {
+        Ok(n) => println!("✓ {label:30} {n} entries"),
+        Err(e) => {
+            println!("✗ {label:30} {e}");
+            failures += 1;
+        }
+    };
+
+    report(
+        "following.json",
+        export::read_following(export_dir).map(|v| v.len()),
+    );
+    report(
+        "followers.json",
+        export::read_followers(export_dir).map(|v| v.len()),
+    );
+    report(
+        "DM inbox threads",
+        export::read_inbox(export_dir).map(|v| v.len()),
+    );
+    report(
+        "message_requests threads",
+        export::read_message_requests(export_dir).map(|v| v.len()),
+    );
+
+    report(
+        "close_friends.json",
+        export::read_close_friends(export_dir).map(|v| v.len()),
+    );
+    report(
+        "favorited.json",
+        export::read_favorited(export_dir).map(|v| v.len()),
+    );
+    report(
+        "blocked.json",
+        export::read_blocked(export_dir).map(|v| v.len()),
+    );
+    report(
+        "restricted.json",
+        export::read_restricted(export_dir).map(|v| v.len()),
+    );
+    report(
+        "hide_story_from.json",
+        export::read_hide_story_from(export_dir).map(|_| 1),
+    );
+    report(
+        "recently_unfollowed.json",
+        export::read_recently_unfollowed(export_dir).map(|v| v.len()),
+    );
+    report(
+        "removed_suggestions.json",
+        export::read_removed_suggestions(export_dir).map(|v| v.len()),
+    );
+
+    report(
+        "liked_posts.json",
+        export::read_liked_posts(export_dir).map(|v| v.len()),
+    );
+    report(
+        "story_likes.json",
+        export::read_story_likes(export_dir).map(|v| v.len()),
+    );
+    report(
+        "stories_viewed.json",
+        export::read_stories_viewed(export_dir).map(|v| v.len()),
+    );
+    report(
+        "saved_posts.json",
+        export::read_saved_posts(export_dir).map(|v| v.len()),
+    );
+
+    report(
+        "liked_comments.json",
+        export::read_liked_comments(export_dir).map(|v| v.len()),
+    );
+    report(
+        "story polls/quizzes/etc",
+        export::read_story_polls(export_dir).and_then(|polls| {
+            let quizzes = export::read_story_quizzes(export_dir)?;
+            let questions = export::read_story_questions(export_dir)?;
+            let sliders = export::read_story_emoji_sliders(export_dir)?;
+            let reactions = export::read_story_emoji_reactions(export_dir)?;
+            let stickers = export::read_story_reaction_stickers(export_dir)?;
+            let countdowns = export::read_story_countdowns(export_dir)?;
+            Ok(polls.len()
+                + quizzes.len()
+                + questions.len()
+                + sliders.len()
+                + reactions.len()
+                + stickers.len()
+                + countdowns.len())
+        }),
+    );
+
+    report(
+        "post_comments.json",
+        export::read_post_comments(export_dir).map(|v| v.len()),
+    );
+    report(
+        "reels_comments.json",
+        export::read_reels_comments(export_dir).map(|v| v.len()),
+    );
+    report("hype.json", export::read_hype(export_dir).map(|v| v.len()));
+
+    report(
+        "personal_information.json",
+        export::read_me_identity(export_dir).map(|_| 1),
+    );
+
+    if failures == 0 {
+        println!("\nAll sources parsed cleanly.");
+        Ok(())
+    } else {
+        anyhow::bail!("{failures} source(s) failed to parse")
+    }
+}
+
 /// Entry point for the analysis run.
 ///
 /// At this stage the pipeline parses every export source, loads the
@@ -65,49 +250,54 @@ pub fn init_tracing(verbose: u8) {
 /// flags, DM signals, decay-weighted sums, and 90d/180d windowed counts).
 /// Scoring composition and the CSV / Markdown output writers land in
 /// later ROADMAP steps.
-pub fn run(cli: Cli) -> Result<()> {
-    use anyhow::ensure;
+pub fn run(args: RunArgs) -> Result<()> {
+    use anyhow::{anyhow, ensure};
+
+    let export_dir = args
+        .export_dir
+        .as_deref()
+        .ok_or_else(|| anyhow!("export directory required — pass a path or use `ig-mgr --help`"))?;
 
     ensure!(
-        cli.export_dir.is_dir(),
+        export_dir.is_dir(),
         "export directory does not exist or is not a directory: {}",
-        cli.export_dir.display()
+        export_dir.display()
     );
-    export::validate_shape(&cli.export_dir)?;
+    export::validate_shape(export_dir)?;
 
-    let following = export::read_following(&cli.export_dir)?;
-    let followers = export::read_followers(&cli.export_dir)?;
-    let threads = export::read_inbox(&cli.export_dir)?;
+    let following = export::read_following(export_dir)?;
+    let followers = export::read_followers(export_dir)?;
+    let threads = export::read_inbox(export_dir)?;
     let total_messages: usize = threads.iter().map(|t| t.messages.len()).sum();
 
-    let close_friends = export::read_close_friends(&cli.export_dir)?;
-    let favorited = export::read_favorited(&cli.export_dir)?;
-    let blocked = export::read_blocked(&cli.export_dir)?;
-    let restricted = export::read_restricted(&cli.export_dir)?;
-    let hide_story_from = export::read_hide_story_from(&cli.export_dir)?;
-    let recently_unfollowed = export::read_recently_unfollowed(&cli.export_dir)?;
-    let removed_suggestions = export::read_removed_suggestions(&cli.export_dir)?;
-    let message_request_threads = export::read_message_requests(&cli.export_dir)?;
+    let close_friends = export::read_close_friends(export_dir)?;
+    let favorited = export::read_favorited(export_dir)?;
+    let blocked = export::read_blocked(export_dir)?;
+    let restricted = export::read_restricted(export_dir)?;
+    let hide_story_from = export::read_hide_story_from(export_dir)?;
+    let recently_unfollowed = export::read_recently_unfollowed(export_dir)?;
+    let removed_suggestions = export::read_removed_suggestions(export_dir)?;
+    let message_request_threads = export::read_message_requests(export_dir)?;
 
-    let liked_posts = export::read_liked_posts(&cli.export_dir)?;
-    let story_likes = export::read_story_likes(&cli.export_dir)?;
-    let stories_viewed = export::read_stories_viewed(&cli.export_dir)?;
-    let saved_posts = export::read_saved_posts(&cli.export_dir)?;
+    let liked_posts = export::read_liked_posts(export_dir)?;
+    let story_likes = export::read_story_likes(export_dir)?;
+    let stories_viewed = export::read_stories_viewed(export_dir)?;
+    let saved_posts = export::read_saved_posts(export_dir)?;
 
-    let liked_comments = export::read_liked_comments(&cli.export_dir)?;
-    let story_polls = export::read_story_polls(&cli.export_dir)?;
-    let story_quizzes = export::read_story_quizzes(&cli.export_dir)?;
-    let story_questions = export::read_story_questions(&cli.export_dir)?;
-    let story_emoji_sliders = export::read_story_emoji_sliders(&cli.export_dir)?;
-    let story_emoji_reactions = export::read_story_emoji_reactions(&cli.export_dir)?;
-    let story_reaction_stickers = export::read_story_reaction_stickers(&cli.export_dir)?;
-    let story_countdowns = export::read_story_countdowns(&cli.export_dir)?;
+    let liked_comments = export::read_liked_comments(export_dir)?;
+    let story_polls = export::read_story_polls(export_dir)?;
+    let story_quizzes = export::read_story_quizzes(export_dir)?;
+    let story_questions = export::read_story_questions(export_dir)?;
+    let story_emoji_sliders = export::read_story_emoji_sliders(export_dir)?;
+    let story_emoji_reactions = export::read_story_emoji_reactions(export_dir)?;
+    let story_reaction_stickers = export::read_story_reaction_stickers(export_dir)?;
+    let story_countdowns = export::read_story_countdowns(export_dir)?;
 
-    let post_comments = export::read_post_comments(&cli.export_dir)?;
-    let reels_comments = export::read_reels_comments(&cli.export_dir)?;
-    let hype = export::read_hype(&cli.export_dir)?;
+    let post_comments = export::read_post_comments(export_dir)?;
+    let reels_comments = export::read_reels_comments(export_dir)?;
+    let hype = export::read_hype(export_dir)?;
 
-    let me = export::read_me_identity(&cli.export_dir)?;
+    let me = export::read_me_identity(export_dir)?;
     let resolver = features::name_resolution::NameResolver::build(&[
         close_friends.as_slice(),
         favorited.as_slice(),
@@ -168,7 +358,7 @@ pub fn run(cli: Cli) -> Result<()> {
     // stdout stays focused on the scoring + audit summary. The
     // fixture-counts integration test passes `-v` so these assertions
     // still see the lines.
-    if cli.verbose > 0 {
+    if args.verbose > 0 {
         println!("following count: {}", following.len());
         println!("followers count: {}", followers.len());
         println!("DM thread count: {}", threads.len());
@@ -212,7 +402,7 @@ pub fn run(cli: Cli) -> Result<()> {
         println!("resolvable DM threads: {resolvable_dm_threads}");
     }
 
-    let scoring_config = config::read_scoring_config(cli.config.as_deref())?;
+    let scoring_config = config::read_scoring_config(args.config.as_deref())?;
     let keep_allowlist = allowlist::load_default()?;
     let keep_allowlist_size = keep_allowlist.len();
     let classifier = features::Classifier::new(keep_allowlist);
@@ -269,7 +459,7 @@ pub fn run(cli: Cli) -> Result<()> {
         .count();
     let agg_keep_allowlisted = aggregated.iter().filter(|f| f.is_keep_allowlisted).count();
 
-    if cli.verbose > 0 {
+    if args.verbose > 0 {
         println!("aggregated accounts: {}", aggregated.len());
         println!("aggregated close friends: {agg_close_friends}");
         println!("aggregated favorited: {agg_favorited}");
@@ -310,7 +500,7 @@ pub fn run(cli: Cli) -> Result<()> {
         .map(|f| u64::from(f.dm_reactions_received_180d))
         .sum();
 
-    if cli.verbose > 0 {
+    if args.verbose > 0 {
         println!("decayed DM messages sum: {decayed_dm_messages:.2}");
         println!("decayed reactions received sum: {decayed_reactions_received:.2}");
         println!("90d likes total: {likes_90d_total}");
@@ -375,11 +565,11 @@ pub fn run(cli: Cli) -> Result<()> {
         None => println!("labels: config/labels.txt not found (accuracy report skipped)"),
     }
 
-    if let Some(handle) = cli.trace.as_deref() {
+    if let Some(handle) = args.trace.as_deref() {
         print_trace(handle, &scored, &scoring_config.weights)?;
     }
 
-    let stem = resolve_output_stem(cli.out.as_deref(), &cli.export_dir);
+    let stem = resolve_output_stem(args.out.as_deref(), export_dir);
     let (csv_path, md_path) = output::write(&scored, &stem)?;
     println!("wrote: {}", csv_path.display());
     println!("wrote: {}", md_path.display());
