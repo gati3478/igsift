@@ -100,7 +100,6 @@ pub fn run(cli: Cli) -> Result<()> {
     let hype = export::read_hype(&cli.export_dir)?;
 
     let me = export::read_me_identity(&cli.export_dir)?;
-    let hide_story_from_list = [hide_story_from.clone()];
     let resolver = features::name_resolution::NameResolver::build(&[
         close_friends.as_slice(),
         favorited.as_slice(),
@@ -108,7 +107,7 @@ pub fn run(cli: Cli) -> Result<()> {
         restricted.as_slice(),
         recently_unfollowed.as_slice(),
         removed_suggestions.as_slice(),
-        hide_story_from_list.as_slice(),
+        std::slice::from_ref(&hide_story_from),
     ]);
 
     // Sanity count: how many 1:1 DM threads have a resolvable other
