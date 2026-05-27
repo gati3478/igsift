@@ -162,47 +162,54 @@ pub fn run(cli: Cli) -> Result<()> {
         .filter_map(export::owner_username)
         .count();
 
-    println!("following count: {}", following.len());
-    println!("followers count: {}", followers.len());
-    println!("DM thread count: {}", threads.len());
-    println!("total DM messages: {total_messages}");
-    println!("close friends count: {}", close_friends.len());
-    println!("favorited count: {}", favorited.len());
-    println!("blocked count: {}", blocked.len());
-    println!("restricted count: {}", restricted.len());
-    println!("hide_story_from count: {hide_story_from_count}");
-    println!("recently unfollowed count: {}", recently_unfollowed.len());
-    println!("removed suggestions count: {}", removed_suggestions.len());
-    println!(
-        "message request thread count: {}",
-        message_request_threads.len()
-    );
-    println!("liked posts count: {liked_posts_count}");
-    println!("story likes count: {story_likes_count}");
-    println!("stories viewed count: {stories_viewed_count}");
-    println!("saved posts count: {saved_posts_count}");
-    println!("liked comments count: {}", liked_comments.len());
-    println!("story polls count: {}", story_polls.len());
-    println!("story quizzes count: {}", story_quizzes.len());
-    println!("story questions count: {}", story_questions.len());
-    println!("story emoji sliders count: {}", story_emoji_sliders.len());
-    println!(
-        "story emoji reactions count: {}",
-        story_emoji_reactions.len()
-    );
-    println!(
-        "story reaction stickers count: {}",
-        story_reaction_stickers.len()
-    );
-    println!("story countdowns count: {}", story_countdowns.len());
-    println!("post comments count: {}", post_comments.len());
-    println!("reels comments count: {}", reels_comments.len());
-    println!("hype count: {}", hype.len());
-    println!("me handle: {}", me.handle);
-    println!("me name: {}", me.name);
-    println!("name resolver entries: {}", resolver.unique_name_count());
-    println!("name resolver collisions: {}", resolver.collision_count());
-    println!("resolvable DM threads: {resolvable_dm_threads}");
+    // Per-source smoke counts: load-bearing parser-correctness signal,
+    // but noisy in the common run. Gate behind `-v` so the default
+    // stdout stays focused on the scoring + audit summary. The
+    // fixture-counts integration test passes `-v` so these assertions
+    // still see the lines.
+    if cli.verbose > 0 {
+        println!("following count: {}", following.len());
+        println!("followers count: {}", followers.len());
+        println!("DM thread count: {}", threads.len());
+        println!("total DM messages: {total_messages}");
+        println!("close friends count: {}", close_friends.len());
+        println!("favorited count: {}", favorited.len());
+        println!("blocked count: {}", blocked.len());
+        println!("restricted count: {}", restricted.len());
+        println!("hide_story_from count: {hide_story_from_count}");
+        println!("recently unfollowed count: {}", recently_unfollowed.len());
+        println!("removed suggestions count: {}", removed_suggestions.len());
+        println!(
+            "message request thread count: {}",
+            message_request_threads.len()
+        );
+        println!("liked posts count: {liked_posts_count}");
+        println!("story likes count: {story_likes_count}");
+        println!("stories viewed count: {stories_viewed_count}");
+        println!("saved posts count: {saved_posts_count}");
+        println!("liked comments count: {}", liked_comments.len());
+        println!("story polls count: {}", story_polls.len());
+        println!("story quizzes count: {}", story_quizzes.len());
+        println!("story questions count: {}", story_questions.len());
+        println!("story emoji sliders count: {}", story_emoji_sliders.len());
+        println!(
+            "story emoji reactions count: {}",
+            story_emoji_reactions.len()
+        );
+        println!(
+            "story reaction stickers count: {}",
+            story_reaction_stickers.len()
+        );
+        println!("story countdowns count: {}", story_countdowns.len());
+        println!("post comments count: {}", post_comments.len());
+        println!("reels comments count: {}", reels_comments.len());
+        println!("hype count: {}", hype.len());
+        println!("me handle: {}", me.handle);
+        println!("me name: {}", me.name);
+        println!("name resolver entries: {}", resolver.unique_name_count());
+        println!("name resolver collisions: {}", resolver.collision_count());
+        println!("resolvable DM threads: {resolvable_dm_threads}");
+    }
 
     let scoring_config = config::read_scoring_config(cli.config.as_deref())?;
     let keep_allowlist = allowlist::load_default()?;
@@ -261,22 +268,24 @@ pub fn run(cli: Cli) -> Result<()> {
         .count();
     let agg_keep_allowlisted = aggregated.iter().filter(|f| f.is_keep_allowlisted).count();
 
-    println!("aggregated accounts: {}", aggregated.len());
-    println!("aggregated close friends: {agg_close_friends}");
-    println!("aggregated favorited: {agg_favorited}");
-    println!("aggregated brands: {agg_brands}");
-    // The allowlist file may carry handles that aren't followees (a
-    // stale entry, or an aspirational keep). The aggregated count
-    // reflects only those that intersect the followings set; the
-    // file-size line below is the loaded-from-disk count for sanity.
-    println!("aggregated keep-allowlisted: {agg_keep_allowlisted}");
-    println!("keep-allowlist size on disk: {keep_allowlist_size}");
-    println!("aggregated with likes_given > 0: {agg_with_likes}");
-    println!("aggregated with comments_given > 0: {agg_with_comments}");
-    println!("DM-attributed accounts: {agg_dm_attributed}");
-    println!("DM reactions given total: {agg_dm_reactions_given}");
-    println!("DM reactions received total: {agg_dm_reactions_received}");
-    println!("inbound DM requests: {agg_inbound_dm_requests}");
+    if cli.verbose > 0 {
+        println!("aggregated accounts: {}", aggregated.len());
+        println!("aggregated close friends: {agg_close_friends}");
+        println!("aggregated favorited: {agg_favorited}");
+        println!("aggregated brands: {agg_brands}");
+        // The allowlist file may carry handles that aren't followees (a
+        // stale entry, or an aspirational keep). The aggregated count
+        // reflects only those that intersect the followings set; the
+        // file-size line below is the loaded-from-disk count for sanity.
+        println!("aggregated keep-allowlisted: {agg_keep_allowlisted}");
+        println!("keep-allowlist size on disk: {keep_allowlist_size}");
+        println!("aggregated with likes_given > 0: {agg_with_likes}");
+        println!("aggregated with comments_given > 0: {agg_with_comments}");
+        println!("DM-attributed accounts: {agg_dm_attributed}");
+        println!("DM reactions given total: {agg_dm_reactions_given}");
+        println!("DM reactions received total: {agg_dm_reactions_received}");
+        println!("inbound DM requests: {agg_inbound_dm_requests}");
+    }
 
     let decayed_dm_messages: f64 = aggregated.iter().map(|f| f.dm_messages_total_decayed).sum();
     let decayed_reactions_received: f64 = aggregated
@@ -300,12 +309,14 @@ pub fn run(cli: Cli) -> Result<()> {
         .map(|f| u64::from(f.dm_reactions_received_180d))
         .sum();
 
-    println!("decayed DM messages sum: {decayed_dm_messages:.2}");
-    println!("decayed reactions received sum: {decayed_reactions_received:.2}");
-    println!("90d likes total: {likes_90d_total}");
-    println!("90d comments total: {comments_90d_total}");
-    println!("180d reactions given total: {reactions_given_180d_total}");
-    println!("180d reactions received total: {reactions_received_180d_total}");
+    if cli.verbose > 0 {
+        println!("decayed DM messages sum: {decayed_dm_messages:.2}");
+        println!("decayed reactions received sum: {decayed_reactions_received:.2}");
+        println!("90d likes total: {likes_90d_total}");
+        println!("90d comments total: {comments_90d_total}");
+        println!("180d reactions given total: {reactions_given_180d_total}");
+        println!("180d reactions received total: {reactions_received_180d_total}");
+    }
 
     let scored = scoring::score(&aggregated, &scoring_config);
     let keep_count = scored

@@ -149,10 +149,14 @@ fn fixture_counts_match_expected() {
     //
     // Drifting any of these numbers means the parser silently dropped data
     // — diagnose, don't relax the assertion.
+    // -v is required: per-source smoke counts move behind verbose in
+    // the default stdout. The counts themselves are still load-bearing
+    // (catch silent parser drift); the test just opts back in.
     ig_mgr()
         .arg(sample_export())
         .arg("--out")
         .arg(out_stem("fixture_counts"))
+        .arg("-v")
         .assert()
         .success()
         .stdout(contains("following count: 4"))
