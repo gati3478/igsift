@@ -114,17 +114,15 @@ pub fn run(cli: Cli) -> Result<()> {
     // participant under the current resolver? Cross-references the
     // 240/581 figure from the recon (real export) and gates regressions
     // when the seven label_values parsers, the DM thread parser, or the
-    // resolver change shape.
+    // resolver change shape. Uses the same `attributable_handle`
+    // predicate as the aggregator — single source of truth for the
+    // 1:1 / resolved / non-collision filter so this count and the
+    // aggregator's `DM-attributed accounts` can't drift on a future
+    // refactor.
     let resolvable_dm_threads = threads
         .iter()
         .filter(|thread| {
-            let others: Vec<&str> = thread
-                .participants
-                .iter()
-                .filter(|name| name.as_str() != me.name.as_str())
-                .map(String::as_str)
-                .collect();
-            others.len() == 1 && resolver.resolve(others[0]).is_some()
+            features::aggregate::attributable_handle(thread, &me.name, &resolver).is_some()
         })
         .count();
 

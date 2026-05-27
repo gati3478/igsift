@@ -60,17 +60,25 @@ pub struct DecayConfig {
 /// default falls through to the compiled-in copy — that's the "ran the
 /// binary from outside the project tree" case, not a misconfiguration.
 pub fn read_scoring_config(cli_config: Option<&Path>) -> Result<ScoringConfig> {
-    let cfg = if let Some(path) = cli_config {
-        parse_file(path)?
+    let (cfg, source) = if let Some(path) = cli_config {
+        (parse_file(path)?, format!("--config {}", path.display()))
     } else {
         let dev_tree = Path::new("config/scoring.toml");
         if dev_tree.exists() {
-            parse_file(dev_tree)?
+            (parse_file(dev_tree)?, dev_tree.display().to_string())
         } else {
-            parse_str(BUILTIN_DEFAULT, "<compiled-in default config/scoring.toml>")?
+            (
+                parse_str(BUILTIN_DEFAULT, "<compiled-in default config/scoring.toml>")?,
+                "<compiled-in default>".to_owned(),
+            )
         }
     };
     validate(&cfg)?;
+    // Surface which resolution rung fired so a user who laid down a custom
+    // `config/scoring.toml` but invoked the binary from the wrong cwd sees
+    // "<compiled-in default>" instead of silently getting baseline weights
+    // and wondering why their tuning didn't take effect.
+    tracing::info!("loaded scoring config: {source}");
     Ok(cfg)
 }
 

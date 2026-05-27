@@ -87,6 +87,13 @@ pub struct AccountFeatures {
 
     pub dm_messages_total: u32,
     pub dm_recency_days: Option<u32>,
+    /// Outbound / (outbound + inbound) over messages with a classifiable
+    /// sender. `None` ⇔ no classifiable senders (zero-message thread, or
+    /// every message had `sender_name = None`). `Some(1.0)` is fully
+    /// one-sided me; `Some(0.0)` fully one-sided them; `Some(0.5)`
+    /// balanced. The scoring layer's `dm_balance_penalty` should gate on
+    /// volume (`dm_messages_total`) — `Some(0.5)` over 2 greetings is
+    /// not the same relationship as `Some(0.5)` over 1000 messages.
     pub dm_balance: Option<f32>,
     pub dm_reactions_given: u32,
     pub dm_reactions_received: u32,
@@ -371,7 +378,11 @@ struct DmAccum {
 /// others), and any thread whose other-party display name is unknown to
 /// the resolver or maps to multiple handles (collision). Matches DESIGN.md
 /// "DM display_name ↔ handle bridge" exclusions.
-fn attributable_handle<'r>(
+///
+/// `pub(crate)` so [`crate::run`]'s `resolvable DM threads` sanity count
+/// can use the same predicate as the aggregator — single source of truth
+/// for the 1:1 / resolved / non-collision filter.
+pub(crate) fn attributable_handle<'r>(
     thread: &DmThread,
     me_name: &str,
     resolver: &'r NameResolver,
