@@ -88,6 +88,41 @@ valuable bidirectional signal in the export and underpins `dm_reactions_received
 `messages/message_requests/` (10 threads in this export) is also inbound — DM
 attempts from accounts I never accepted. Weak signal but real.
 
+### DM `display_name ↔ handle` bridge — 37% coverage by design
+
+DM threads ship `participants[].name` and `messages[].sender_name` as **display
+names**, never handles, while every other source keys by handle. The
+aggregator joins them via the seven `label_values` files (`close_friends`,
+`profiles_you've_favorited`, `blocked_profiles`, `restricted_profiles`,
+`recently_unfollowed_profiles`, `removed_suggestions`, `hide_story_from`) —
+each entry carries both a `Name` and a `Username` label at the outer
+`label_values` level. Recon on the 2026-05-11 export:
+
+- **281 unique `(Name, Username)` pairs** across the seven files.
+- **12 name collisions** — `"Mike"` → {`bermudalckt`, `hairycub81`,
+  `leahcim333`} and similar. The resolver returns `None` on collision
+  rather than guessing; misattribution is worse than missing attribution.
+- **217/581 (37%) of 1:1 DM threads** resolve to a followee handle under
+  this strict policy. The remaining 63% of followings score from
+  activity-side features (handle-keyed at source) only — `dm_*` features
+  are sparse by design, not by bug.
+
+The DM thread folder name `<inbox>/<thread>/` looks like a bridge but
+isn't: validation showed the prefix is the participant's display name
+sanitized (lowercased, spaces stripped), not the handle. Only 3 of 30
+sampled followings appeared as folder prefixes — those were coincidences
+where display name happens to equal handle. Don't read the folder.
+
+Group chats (≥ 3 participants — 9 threads in this export) and abandoned
+threads (only `me` as participant — 3 threads) are dropped from `dm_*`
+aggregation: per-participant attribution in groups doesn't fit the 1:1
+feature model and group counts are weak signal in v1.
+
+`me.name` (`"Gati Petriashvili"`) comes from
+`personal_information/personal_information/personal_information.json`
+→ `profile_user[0].string_map_data["Name"].value`. Missing or empty here
+is a HARD ERROR — every DM-direction classification depends on it.
+
 ### Parsing notes
 
 These bit the validation pass and will bite the parser too — call them out

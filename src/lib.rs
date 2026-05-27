@@ -51,11 +51,13 @@ pub fn init_tracing(verbose: u8) {
 
 /// Entry point for the analysis run.
 ///
-/// At this stage the pipeline parses relationships, DM threads, the four
-/// nested-`Owner` activity files, the eight shape-A activity files, and
-/// the three shape-D comment files, then prints the per-source count
-/// lines that gate the parser-pass acceptance criteria. Feature
-/// aggregation, scoring, and output writers land in later ROADMAP steps.
+/// At this stage the pipeline parses every export source and prints
+/// per-source count lines that gate the parser-pass acceptance criteria,
+/// plus the `me` identity from `personal_information.json` and a name →
+/// handle resolver built from the seven `label_values` files (the bridge
+/// that lets DM display names attribute to followed handles in the
+/// feature aggregator). Aggregation, scoring, and output writers land in
+/// later ROADMAP steps.
 pub fn run(cli: Cli) -> Result<()> {
     use anyhow::ensure;
 
@@ -96,6 +98,36 @@ pub fn run(cli: Cli) -> Result<()> {
     let post_comments = export::read_post_comments(&cli.export_dir)?;
     let reels_comments = export::read_reels_comments(&cli.export_dir)?;
     let hype = export::read_hype(&cli.export_dir)?;
+
+    let me = export::read_me_identity(&cli.export_dir)?;
+    let hide_story_from_list = [hide_story_from.clone()];
+    let resolver = features::name_resolution::NameResolver::build(&[
+        close_friends.as_slice(),
+        favorited.as_slice(),
+        blocked.as_slice(),
+        restricted.as_slice(),
+        recently_unfollowed.as_slice(),
+        removed_suggestions.as_slice(),
+        hide_story_from_list.as_slice(),
+    ]);
+
+    // Sanity count: how many 1:1 DM threads have a resolvable other
+    // participant under the current resolver? Cross-references the
+    // 240/581 figure from the recon (real export) and gates regressions
+    // when the seven label_values parsers, the DM thread parser, or the
+    // resolver change shape.
+    let resolvable_dm_threads = threads
+        .iter()
+        .filter(|thread| {
+            let others: Vec<&str> = thread
+                .participants
+                .iter()
+                .filter(|name| name.as_str() != me.name.as_str())
+                .map(String::as_str)
+                .collect();
+            others.len() == 1 && resolver.resolve(others[0]).is_some()
+        })
+        .count();
 
     // `hide_story_from.json` is a single shape-C entry, not an array. With
     // every field carrying `#[serde(default)]`, an empty object `{}` parses
@@ -162,6 +194,11 @@ pub fn run(cli: Cli) -> Result<()> {
     println!("post comments count: {}", post_comments.len());
     println!("reels comments count: {}", reels_comments.len());
     println!("hype count: {}", hype.len());
+    println!("me handle: {}", me.handle);
+    println!("me name: {}", me.name);
+    println!("name resolver entries: {}", resolver.unique_name_count());
+    println!("name resolver collisions: {}", resolver.collision_count());
+    println!("resolvable DM threads: {resolvable_dm_threads}");
 
     Ok(())
 }

@@ -72,6 +72,34 @@ behind each item.
           extraction time rather than passing through silently. Validated
           against the 2026-05-11 export: 631 post comments, 63 reels
           comments, 48 hype.
+    - [x] **Resolver infrastructure** (2026-05-27) — added
+          `read_me_identity` returning `MeIdentity { handle, name }` from
+          `personal_information/personal_information/personal_information.json`
+          (load-bearing for DM direction classification — missing or empty
+          `Username`/`Name` is a HARD ERROR, not a silent default).
+          Promoted `features.rs` → `features/mod.rs` and added
+          `features::name_resolution::NameResolver` that builds a
+          `display_name → handle` map from the seven `label_values` files
+          (close_friends, favorited, blocked, restricted,
+          recently_unfollowed, removed_suggestions, hide_story_from) —
+          the only export-internal bridge since `following.json` ships
+          handle-only. Collisions return `None` (no guessing); empty-string
+          Name or Username entries are dropped so the empty key cannot
+          become a phantom resolution path. Validated against the
+          2026-05-11 export: handle `gati3478`, name `Gati Petriashvili`,
+          281 unique names, 12 collisions, 217 (37%) of 1:1 DM threads
+          resolve.
+- [ ] **Feature aggregation** — `features::aggregate(...)` produces
+      `Vec<AccountFeatures>` keyed by handle, filtered to followings. Boolean
+      flags (close_friend/favorited/blocked/restricted/etc.), activity
+      counts (likes_given/comments_given/story_interactions_out/etc.),
+      DM features (dm_messages_total/dm_recency_days/dm_balance/
+      dm_reactions_given/dm_reactions_received/inbound_dm_request) gated
+      on resolvable threads via [`features::name_resolution`], and
+      `follow_tenure_days` from `FollowingEntry.followed_at`. Decay-weighted
+      counts per `config/scoring.toml [decay]` plus raw 90d/180d windowed
+      counts for the CSV columns (DESIGN.md is explicit these are different
+      aggregations).
 - [ ] **First-pass scoring** with hand-set weights; eyeball top/bottom 50.
 - [ ] **Tune weights and decay constants** — consider a small labeled set of
       ~30 accounts I already know I want to keep/drop, fit weights to match.

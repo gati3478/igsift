@@ -1,0 +1,25 @@
+{
+  "profile_user": [
+    {
+      "title": "User Information",
+      "media_map_data": {},
+      "string_map_data": {
+        "Username": {
+          "href": "",
+          "value": "me_synth",
+          "timestamp": 0
+        },
+        "Name": {
+          "href": "",
+          "value": "Test User",
+          "timestamp": 0
+        },
+        "Email": {
+          "href": "",
+          "value": "test@example.invalid",
+          "timestamp": 0
+        }
+      }
+    }
+  ]
+}

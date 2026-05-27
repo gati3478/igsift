@@ -61,13 +61,25 @@ fn fixture_counts_match_expected() {
     // from the third slice — 2 liked posts (distinct owners), 1 story like,
     // 1 stories viewed, 1 saved post — the eight shape-A activity files
     // from the fourth slice — 2 liked comments, 1 of each of the seven
-    // story_interactions files — and the three shape-D comment files from
+    // story_interactions files — the three shape-D comment files from
     // the fifth slice — 2 post comments (distinct targets), 1 reel
-    // comment, 1 hype (story comment). The activity counts come from
-    // honest extraction (`owner_username` for nested-Owner, empty-title
-    // filter for shape A, empty `Media Owner` filter for shape D), not
-    // raw entry count, so they double as a structural assertion that the
-    // deserializer walks the wrapper key and entry interior correctly.
+    // comment, 1 hype (story comment) — and the slice-6 resolver
+    // infrastructure: `me` identity from `personal_information.json`
+    // (`me_synth` / `Test User`) plus a NameResolver over the eight
+    // (Name, Username) pairs in the seven `label_values` fixtures (no
+    // collisions on the synthetic data). `resolvable DM threads: 0`
+    // because the existing inbox threads spell participants with the
+    // handle (e.g. `alice_synth`), not the display name (`Alice Synth`)
+    // — the resolution path is structurally exercised by the unit tests
+    // in `src/features/name_resolution.rs`; this 0 is the intended
+    // baseline that catches regressions where the resolver suddenly
+    // starts matching the handle spelling.
+    //
+    // The activity counts come from honest extraction (`owner_username`
+    // for nested-Owner, empty-title filter for shape A, empty
+    // `Media Owner` filter for shape D), not raw entry count, so they
+    // double as a structural assertion that the deserializer walks the
+    // wrapper key and entry interior correctly.
     //
     // Drifting any of these numbers means the parser silently dropped data
     // — diagnose, don't relax the assertion.
@@ -101,5 +113,10 @@ fn fixture_counts_match_expected() {
         .stdout(contains("story countdowns count: 1"))
         .stdout(contains("post comments count: 2"))
         .stdout(contains("reels comments count: 1"))
-        .stdout(contains("hype count: 1"));
+        .stdout(contains("hype count: 1"))
+        .stdout(contains("me handle: me_synth"))
+        .stdout(contains("me name: Test User"))
+        .stdout(contains("name resolver entries: 8"))
+        .stdout(contains("name resolver collisions: 0"))
+        .stdout(contains("resolvable DM threads: 0"));
 }

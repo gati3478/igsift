@@ -15,8 +15,10 @@
 //! `story_likes`, `stories_viewed`, `saved_posts`) plus the
 //! [`owner_username`] helper, the eight shape-A activity files
 //! (`liked_comments` and the seven `story_interactions/*` files) returning
-//! [`ShapeAEntry`], and the three shape-D comment files (`post_comments_*`,
-//! `reels_comments`, `hype`) returning [`CommentEntry`].
+//! [`ShapeAEntry`], the three shape-D comment files (`post_comments_*`,
+//! `reels_comments`, `hype`) returning [`CommentEntry`], and the user's own
+//! `(handle, name)` from `personal_information.json` returning
+//! [`MeIdentity`].
 //!
 //! Robustness approach:
 //!
@@ -61,6 +63,8 @@ const STORY_COUNTDOWNS: &str = "your_instagram_activity/story_interactions/count
 const POST_COMMENTS_DIR: &str = "your_instagram_activity/comments";
 const REELS_COMMENTS: &str = "your_instagram_activity/comments/reels_comments.json";
 const HYPE: &str = "your_instagram_activity/comments/hype.json";
+
+const PERSONAL_INFO: &str = "personal_information/personal_information/personal_information.json";
 
 // ── Public output types ──────────────────────────────────────────────────────
 
@@ -177,6 +181,22 @@ pub struct ShapeCInnerEntry {
 pub struct ShapeAEntry {
     pub username: String,
     pub timestamp: Option<Timestamp>,
+}
+
+/// The user's own identity — handle and display name from the export.
+///
+/// `name` is what appears in `participants[].name` and `messages[].sender_name`
+/// on every DM thread (Instagram ships display names there, never handles),
+/// so it's the load-bearing key for classifying DM message direction (`me`
+/// vs. partner) and DM-reaction direction (`given` vs. `received`) in the
+/// feature aggregator. `handle` is the user's Instagram username.
+///
+/// Source: `personal_information/personal_information/personal_information.json`,
+/// extracted from `profile_user[0].string_map_data["Username"|"Name"].value`.
+#[derive(Debug, Clone)]
+pub struct MeIdentity {
+    pub handle: String,
+    pub name: String,
 }
 
 /// One outbound comment I left — on a post, a reel, or a story.
@@ -376,6 +396,35 @@ struct ShapeDValue {
     value: Option<String>,
     #[serde(default)]
     timestamp: Option<i64>,
+}
+
+// ── personal_information.json structs ────────────────────────────────────────
+//
+// The file ships `{profile_user: [{string_map_data: {Username|Name|Email|...:
+// {href, value, timestamp}, ...}}]}`. Only `Username` and `Name` are read;
+// every other sub-key (Email, Phone Number, Bio, …) is PII and ignored by
+// serde's default ignore-unknown-fields posture. Same named-fields-with-
+// `#[serde(rename)]` approach as shape D: the IG-specific spellings are
+// compile-checked in code, drift to None on rename.
+
+#[derive(Debug, Deserialize)]
+struct PersonalInfoFileRaw {
+    #[serde(default)]
+    profile_user: Vec<ProfileUserRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProfileUserRaw {
+    #[serde(default)]
+    string_map_data: ProfileUserStringMap,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ProfileUserStringMap {
+    #[serde(default, rename = "Username")]
+    username: ShapeDValue,
+    #[serde(default, rename = "Name")]
+    name: ShapeDValue,
 }
 
 // ── Public readers ───────────────────────────────────────────────────────────
@@ -647,6 +696,45 @@ pub fn read_hype(export_dir: &Path) -> Result<Vec<CommentEntry>> {
     Ok(shape_d_entries(raw.comments_story_comments))
 }
 
+/// Read the user's own `(handle, name)` from
+/// `personal_information/personal_information/personal_information.json`.
+///
+/// Unlike the activity-parsers, missing or empty fields here are a HARD
+/// ERROR rather than a soft None: every downstream DM-direction
+/// classification in the feature aggregator depends on these values. If
+/// IG renames `"Username"` or `"Name"` the run cannot meaningfully
+/// proceed — fail loud at parse time with the offending path (via
+/// `serde_path_to_error`) instead of producing garbage attributions.
+pub fn read_me_identity(export_dir: &Path) -> Result<MeIdentity> {
+    let raw: PersonalInfoFileRaw = parse_json(&export_dir.join(PERSONAL_INFO))?;
+    let profile = raw.profile_user.into_iter().next().ok_or_else(|| {
+        anyhow::anyhow!(
+            "personal_information.json: `profile_user` is empty — cannot determine `me` identity"
+        )
+    })?;
+    let handle = profile
+        .string_map_data
+        .username
+        .value
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "personal_information.json: `profile_user[0].string_map_data[\"Username\"].value` missing or empty"
+            )
+        })?;
+    let name = profile
+        .string_map_data
+        .name
+        .value
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "personal_information.json: `profile_user[0].string_map_data[\"Name\"].value` missing or empty"
+            )
+        })?;
+    Ok(MeIdentity { handle, name })
+}
+
 /// Extract the `Owner.Username` from a shape-C entry that carries a nested
 /// `Owner` section (the four activity files above). Walks
 /// `label_values → title == "Owner" → dict[0].dict → label == "Username" →
@@ -872,7 +960,9 @@ mod tests {
     //! pinned by `post_comments_extracts_media_owner_and_time` (the
     //! `string_map_data → "Media Owner" → value` walk plus the `"Time" →
     //! timestamp` extraction) and `shape_d_entries_drops_empty_owner` (the
-    //! honest-count filter).
+    //! honest-count filter). The `personal_information.json` parser is
+    //! pinned by `me_identity_extracts_handle_and_name`, which catches a
+    //! rename of either sub-key.
     use super::*;
 
     fn fixture_root() -> PathBuf {
@@ -983,6 +1073,18 @@ mod tests {
         assert_eq!(entries[0].target_username, "first_post_target_synth");
         assert!(entries[0].timestamp.is_some());
         assert_eq!(entries[1].target_username, "second_post_target_synth");
+    }
+
+    #[test]
+    fn me_identity_extracts_handle_and_name() {
+        let me = read_me_identity(&fixture_root()).expect("fixture parse");
+        // If "Username" or "Name" gets renamed in IG's export the
+        // ProfileUserStringMap field defaults to ShapeDValue::default()
+        // (value=None) and read_me_identity returns the hard-error
+        // anyhow message — this test pins that the rename-checked field
+        // walk currently succeeds against the synthetic fixture.
+        assert_eq!(me.handle, "me_synth");
+        assert_eq!(me.name, "Test User");
     }
 
     #[test]
