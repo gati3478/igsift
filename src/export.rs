@@ -523,10 +523,16 @@ mod tests {
     //! regression that returns N empty-default `ShapeCEntry`s would
     //! print the right count and pass.
     //!
-    //! Scope of this slice: assert the parser walks into nested arrays and
-    //! preserves leaf values. `Owner` extraction (the three-level
-    //! `label_values → dict → dict → Username` walk) is deferred to the
-    //! slice that adds `liked_posts.json`.
+    //! Coverage spans both shape-C variants. The flat shape is pinned by
+    //! `close_friends_parses_label_values` (URL/Name/Username at the outer
+    //! `label_values` level) and by `hide_story_from_parses_as_single_entry`.
+    //! The nested-`Owner` shape is pinned by
+    //! `liked_posts_owner_username_extracts`, which exercises the
+    //! three-level `label_values → title == "Owner" → dict[0].dict → label
+    //! == "Username" → value` walk on two distinct entries.
+    //! `owner_username_returns_none_without_owner_section` guards the
+    //! accessor against silently promoting the outer-level `Username` that
+    //! the relationship-flag files carry.
     use super::*;
 
     fn fixture_root() -> PathBuf {
