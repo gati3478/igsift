@@ -1,0 +1,76 @@
+[
+  {
+    "timestamp": 1701100000,
+    "media": [],
+    "label_values": [
+      {
+        "label": "URL",
+        "value": "https://www.instagram.com/p/SYNTH001/",
+        "href": "https://www.instagram.com/p/SYNTH001/"
+      },
+      {
+        "label": "Caption",
+        "value": "synthetic caption one"
+      },
+      {
+        "label": "Title",
+        "value": ""
+      },
+      {
+        "dict": [],
+        "title": "Hashtags"
+      },
+      {
+        "dict": [
+          {
+            "dict": [
+              { "label": "URL", "value": "" },
+              { "label": "Name", "value": "Jeremy Synth" },
+              { "label": "Username", "value": "jeremy_synth" }
+            ],
+            "title": ""
+          }
+        ],
+        "title": "Owner"
+      }
+    ],
+    "fbid": "20000000000000001"
+  },
+  {
+    "timestamp": 1701200000,
+    "media": [],
+    "label_values": [
+      {
+        "label": "URL",
+        "value": "https://www.instagram.com/p/SYNTH002/",
+        "href": "https://www.instagram.com/p/SYNTH002/"
+      },
+      {
+        "label": "Caption",
+        "value": "synthetic caption two"
+      },
+      {
+        "label": "Title",
+        "value": ""
+      },
+      {
+        "dict": [],
+        "title": "Hashtags"
+      },
+      {
+        "dict": [
+          {
+            "dict": [
+              { "label": "URL", "value": "https://maria.example/" },
+              { "label": "Name", "value": "Maria Synth" },
+              { "label": "Username", "value": "maria_synth" }
+            ],
+            "title": ""
+          }
+        ],
+        "title": "Owner"
+      }
+    ],
+    "fbid": "20000000000000002"
+  }
+]

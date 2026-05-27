@@ -56,10 +56,15 @@ fn nonexistent_export_dir_fails_gracefully() {
 fn fixture_counts_match_expected() {
     // Sanitized fixture: 3 followings, 2 followers, 2 inbox threads, 7 total
     // inbox messages (one thread is multi-part: 3 in message_1 + 2 in
-    // message_2), plus the relationship-flag files and one message request
-    // thread added in the second parser slice. Drifting any of these numbers
-    // means the parser silently dropped data — diagnose, don't relax the
-    // assertion.
+    // message_2), the seven relationship-flag files and one message request
+    // thread from the second slice, and the four nested-`Owner` activity
+    // files from the third slice — 2 liked posts (distinct owners), 1 story
+    // like, 1 stories viewed, 1 saved post. The activity counts come from
+    // `owner_username` extraction, not raw entry count, so they double as a
+    // structural assertion that the nested `dict.dict` walk still works.
+    //
+    // Drifting any of these numbers means the parser silently dropped data
+    // — diagnose, don't relax the assertion.
     ig_mgr()
         .arg(sample_export())
         .assert()
@@ -75,5 +80,9 @@ fn fixture_counts_match_expected() {
         .stdout(contains("hide_story_from count: 1"))
         .stdout(contains("recently unfollowed count: 1"))
         .stdout(contains("removed suggestions count: 1"))
-        .stdout(contains("message request thread count: 1"));
+        .stdout(contains("message request thread count: 1"))
+        .stdout(contains("liked posts count: 2"))
+        .stdout(contains("story likes count: 1"))
+        .stdout(contains("stories viewed count: 1"))
+        .stdout(contains("saved posts count: 1"));
 }

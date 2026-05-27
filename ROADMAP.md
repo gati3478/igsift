@@ -30,6 +30,18 @@ behind each item.
           5 recently unfollowed, 24 removed suggestions, 10 message request
           threads. Owner extraction from `label_values.dict.dict` deferred to
           the next slice (lands with `liked_posts.json`).
+    - [x] **Nested-`Owner` activity parsers** (2026-05-27) — extended
+          `ShapeCLabelValue` with the `{title, dict}` nesting and added
+          `read_liked_posts`, `read_story_likes`, `read_stories_viewed`,
+          `read_saved_posts` (shape C with nested `Owner`) plus the
+          `owner_username` helper that walks
+          `label_values → title == "Owner" → dict[0].dict → label ==
+    "Username" → value`. Count lines in `lib::run` derive from
+          `filter_map(owner_username).count()` so a silent serde drop of the
+          nested fields surfaces as a zero count rather than a confidently
+          wrong number. Validated against the 2026-05-11 export: 46,398
+          liked posts, 28,357 story likes, 2,247 stories viewed, 205 saved
+          posts.
 - [ ] **First-pass scoring** with hand-set weights; eyeball top/bottom 50.
 - [ ] **Tune weights and decay constants** — consider a small labeled set of
       ~30 accounts I already know I want to keep/drop, fit weights to match.

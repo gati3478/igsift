@@ -7,11 +7,15 @@
 //!
 //! Implemented in this pass: `following.json`, `followers_*.json`, DM
 //! threads under `messages/inbox/<thread>/message_*.json` and the same shape
-//! under `messages/message_requests/<thread>/`, and the seven shape-C /
+//! under `messages/message_requests/<thread>/`, the seven shape-C /
 //! single-entry relationship-flag files (`close_friends`,
 //! `profiles_you've_favorited`, `blocked_profiles`, `restricted_profiles`,
-//! `hide_story_from`, `recently_unfollowed_profiles`, `removed_suggestions`).
-//! Likes, comments, stories, saved, and shape-C `Owner` extraction are
+//! `hide_story_from`, `recently_unfollowed_profiles`, `removed_suggestions`),
+//! and the four shape-C-with-nested-`Owner` activity files (`liked_posts`,
+//! `story_likes`, `stories_viewed`, `saved_posts`) plus the
+//! [`owner_username`] helper that walks the three-level `label_values → dict
+//! → dict → Username` shape. Comments (shape D), liked_comments (shape A
+//! activity), and the remaining `story_interactions/*` activity files are
 //! deferred per `ROADMAP.md`.
 //!
 //! Robustness approach:
@@ -38,6 +42,10 @@ use serde::Deserialize;
 const FOLLOW_DIR: &str = "connections/followers_and_following";
 const INBOX_DIR: &str = "your_instagram_activity/messages/inbox";
 const MESSAGE_REQUESTS_DIR: &str = "your_instagram_activity/messages/message_requests";
+const LIKED_POSTS: &str = "your_instagram_activity/likes/liked_posts.json";
+const STORY_LIKES: &str = "your_instagram_activity/story_interactions/story_likes.json";
+const STORIES_VIEWED: &str = "your_instagram_activity/story_interactions/stories_viewed.json";
+const SAVED_POSTS: &str = "your_instagram_activity/saved/saved_posts.json";
 
 // ── Public output types ──────────────────────────────────────────────────────
 
@@ -81,15 +89,27 @@ pub struct DmReaction {
     pub actor: Option<String>,
 }
 
-/// One row from a "label-values" relationship file (shape **C** in DESIGN).
+/// One row from a "label-values" relationship or activity file (shape **C**
+/// in DESIGN).
 ///
-/// Backs `close_friends.json`, `profiles_you've_favorited.json`,
-/// `blocked_profiles.json`, `restricted_profiles.json`,
-/// `recently_unfollowed_profiles.json`, `removed_suggestions.json`, and the
-/// single-entry `hide_story_from.json`. The username sits three levels deep
-/// inside `label_values` (`label == "Username"`) — this slice keeps the raw
-/// labels so the next slice (which adds `Owner` extraction for
-/// `liked_posts.json` and friends) can reuse the same struct.
+/// Backs the seven relationship-flag files (`close_friends`,
+/// `profiles_you've_favorited`, `blocked_profiles`, `restricted_profiles`,
+/// `recently_unfollowed_profiles`, `removed_suggestions`, single-entry
+/// `hide_story_from`) plus the four nested-`Owner` activity files
+/// (`liked_posts`, `story_likes`, `stories_viewed`, `saved_posts`).
+///
+/// Two coexisting shapes appear inside `label_values`:
+///
+/// - flat: `{label, value}` — URL, Caption, Username on the relationship
+///   files, etc. The username on `close_friends.json` lives here.
+/// - nested: `{title, dict}` — used for `Owner` (the post author on activity
+///   files) and `Hashtags`. The activity-file username lives **inside**
+///   `dict[0].dict[label == "Username"].value`, which is what
+///   [`owner_username`] extracts.
+///
+/// One struct fits both because the field set is disjoint and every leaf
+/// carries `#[serde(default)]`; a missing field defaults to `None`/empty
+/// rather than aborting the parse — the schema-drift posture per `CLAUDE.md`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ShapeCEntry {
     #[serde(default)]
@@ -102,6 +122,26 @@ pub struct ShapeCEntry {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ShapeCLabelValue {
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub dict: Vec<ShapeCInnerGroup>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ShapeCInnerGroup {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub dict: Vec<ShapeCInnerEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ShapeCInnerEntry {
     #[serde(default)]
     pub label: Option<String>,
     #[serde(default)]
@@ -295,6 +335,58 @@ pub fn read_hide_story_from(export_dir: &Path) -> Result<ShapeCEntry> {
     parse_json(&path)
 }
 
+/// Parse `your_instagram_activity/likes/liked_posts.json` — shape **C** with
+/// nested `Owner`. Each entry is a like I gave; the target account is
+/// reachable via [`owner_username`].
+pub fn read_liked_posts(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
+    read_shape_c_at(export_dir, LIKED_POSTS)
+}
+
+/// Parse `your_instagram_activity/story_interactions/story_likes.json` —
+/// shape **C** with nested `Owner`. Each entry is a story like I gave.
+pub fn read_story_likes(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
+    read_shape_c_at(export_dir, STORY_LIKES)
+}
+
+/// Parse `your_instagram_activity/story_interactions/stories_viewed.json` —
+/// shape **C** with nested `Owner`. Passive views (low-intent), but the
+/// entries carry the same structure as story_likes.
+pub fn read_stories_viewed(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
+    read_shape_c_at(export_dir, STORIES_VIEWED)
+}
+
+/// Parse `your_instagram_activity/saved/saved_posts.json` — shape **C** with
+/// nested `Owner`. Each entry is a post I saved; the target account is the
+/// post owner.
+pub fn read_saved_posts(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
+    read_shape_c_at(export_dir, SAVED_POSTS)
+}
+
+/// Extract the `Owner.Username` from a shape-C entry that carries a nested
+/// `Owner` section (the four activity files above). Walks
+/// `label_values → title == "Owner" → dict[0].dict → label == "Username" →
+/// value`. Returns `None` if any step of the walk is missing — schema drift
+/// surfaces as a parse path mismatch on the next walker re-run, not as a
+/// runtime panic.
+///
+/// This helper is **not** the username accessor for the relationship-flag
+/// files (`close_friends.json`, etc.). Those carry the username at the outer
+/// `label_values` level with `label == "Username"`, not nested under
+/// `Owner`; they need a different accessor when `features.rs` lands.
+pub fn owner_username(entry: &ShapeCEntry) -> Option<&str> {
+    entry
+        .label_values
+        .iter()
+        .find(|lv| lv.title.as_deref() == Some("Owner"))?
+        .dict
+        .first()?
+        .dict
+        .iter()
+        .find(|d| d.label.as_deref() == Some("Username"))?
+        .value
+        .as_deref()
+}
+
 // ── Internals ────────────────────────────────────────────────────────────────
 
 /// Shared between `read_inbox` and `read_message_requests`. Walks one base
@@ -367,6 +459,14 @@ fn read_thread_dir(base: &Path) -> Result<Vec<DmThread>> {
 fn read_shape_c_array(export_dir: &Path, file_name: &str) -> Result<Vec<ShapeCEntry>> {
     let path = export_dir.join(FOLLOW_DIR).join(file_name);
     parse_json(&path)
+}
+
+/// Deserialize a shape-C bare-array file at an arbitrary path relative to the
+/// export root. Sibling of [`read_shape_c_array`] for activity files that
+/// don't live under `connections/followers_and_following/` (likes,
+/// story_interactions, saved). Same shape, different parent directory.
+fn read_shape_c_at(export_dir: &Path, rel_path: &str) -> Result<Vec<ShapeCEntry>> {
+    parse_json(&export_dir.join(rel_path))
 }
 
 /// Read `message_1.json`, `message_2.json`, … sorted by numeric suffix.
@@ -461,5 +561,30 @@ mod tests {
             "fixture entry must carry label_values so the count line in \
              lib::run derives `1`, not `0`",
         );
+    }
+
+    #[test]
+    fn liked_posts_owner_username_extracts() {
+        let entries = read_liked_posts(&fixture_root()).expect("fixture parse");
+        assert_eq!(entries.len(), 2, "fixture has two liked posts");
+
+        // Pin the full three-level walk on the first entry. If serde silently
+        // drops `dict` (rename, shape change), this drops to None.
+        let owner = owner_username(&entries[0]);
+        assert_eq!(owner, Some("jeremy_synth"));
+
+        // Second entry exercises a distinct owner — guards against the helper
+        // picking up a hard-coded match on a single label_values element.
+        let other = owner_username(&entries[1]);
+        assert_eq!(other, Some("maria_synth"));
+    }
+
+    #[test]
+    fn owner_username_returns_none_without_owner_section() {
+        // close_friends.json entries carry Username at the outer label_values
+        // level, not nested under Owner. owner_username must NOT silently
+        // promote that — it is the accessor for the nested-Owner shape only.
+        let entries = read_close_friends(&fixture_root()).expect("fixture parse");
+        assert!(owner_username(&entries[0]).is_none());
     }
 }

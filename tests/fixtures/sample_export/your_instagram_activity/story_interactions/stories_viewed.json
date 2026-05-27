@@ -1,0 +1,42 @@
+[
+  {
+    "timestamp": 1701400000,
+    "media": [],
+    "label_values": [
+      {
+        "label": "URL",
+        "value": "https://www.instagram.com/reel/SYNTH_REEL_01/",
+        "href": "https://www.instagram.com/reel/SYNTH_REEL_01/"
+      },
+      {
+        "label": "Caption",
+        "value": "synthetic reel caption"
+      },
+      {
+        "label": "Title",
+        "value": ""
+      },
+      {
+        "dict": [
+          { "dict": [{ "label": "Name", "value": "tag_one" }], "title": "" },
+          { "dict": [{ "label": "Name", "value": "tag_two" }], "title": "" }
+        ],
+        "title": "Hashtags"
+      },
+      {
+        "dict": [
+          {
+            "dict": [
+              { "label": "URL", "value": "" },
+              { "label": "Name", "value": "Fat Film Synth" },
+              { "label": "Username", "value": "fat_film_synth" }
+            ],
+            "title": ""
+          }
+        ],
+        "title": "Owner"
+      }
+    ],
+    "fbid": "20000000000000020"
+  }
+]

@@ -1,0 +1,39 @@
+[
+  {
+    "timestamp": 1701500000,
+    "media": [],
+    "label_values": [
+      {
+        "label": "URL",
+        "value": "https://www.instagram.com/reel/SYNTH_SAVED_01/",
+        "href": "https://www.instagram.com/reel/SYNTH_SAVED_01/"
+      },
+      {
+        "label": "Caption",
+        "value": "synthetic saved caption"
+      },
+      {
+        "label": "Title",
+        "value": ""
+      },
+      {
+        "dict": [],
+        "title": "Hashtags"
+      },
+      {
+        "dict": [
+          {
+            "dict": [
+              { "label": "URL", "value": "" },
+              { "label": "Name", "value": "Anomalists Synth" },
+              { "label": "Username", "value": "theanomalists_synth" }
+            ],
+            "title": ""
+          }
+        ],
+        "title": "Owner"
+      }
+    ],
+    "fbid": "20000000000000030"
+  }
+]

@@ -13,7 +13,11 @@
 //!            ──▶ output::*   (CSV + Markdown writers)
 //! ```
 //!
-//! Status: scaffold only. No parsing or scoring is implemented yet.
+//! Status: parsers landing in slices. Relationship-flag and DM readers
+//! complete; nested-`Owner` activity readers (likes, story likes, stories
+//! viewed, saved) now land alongside `owner_username` extraction. Feature
+//! aggregation, scoring, and output writers are still stubs — see
+//! `ROADMAP.md`.
 
 pub mod cli;
 pub mod config;
@@ -47,10 +51,10 @@ pub fn init_tracing(verbose: u8) {
 
 /// Entry point for the analysis run.
 ///
-/// At this stage the pipeline parses relationships and DM threads and prints
-/// the four count lines that gate the parser-pass acceptance criteria. The
-/// feature aggregation, scoring, and output writers land in later ROADMAP
-/// steps.
+/// At this stage the pipeline parses relationships, DM threads, and the four
+/// nested-`Owner` activity files, then prints the per-source count lines that
+/// gate the parser-pass acceptance criteria. Feature aggregation, scoring,
+/// and output writers land in later ROADMAP steps.
 pub fn run(cli: Cli) -> Result<()> {
     use anyhow::ensure;
 
@@ -74,12 +78,39 @@ pub fn run(cli: Cli) -> Result<()> {
     let removed_suggestions = export::read_removed_suggestions(&cli.export_dir)?;
     let message_request_threads = export::read_message_requests(&cli.export_dir)?;
 
+    let liked_posts = export::read_liked_posts(&cli.export_dir)?;
+    let story_likes = export::read_story_likes(&cli.export_dir)?;
+    let stories_viewed = export::read_stories_viewed(&cli.export_dir)?;
+    let saved_posts = export::read_saved_posts(&cli.export_dir)?;
+
     // `hide_story_from.json` is a single shape-C entry, not an array. With
     // every field carrying `#[serde(default)]`, an empty object `{}` parses
     // successfully — so "the file is shaped right" isn't enough to count
     // someone as a real hide. Treat the entry as real iff it carries at
     // least one label value (the username sits inside that list).
     let hide_story_from_count = usize::from(!hide_story_from.label_values.is_empty());
+
+    // Same shape-hardening concern for the nested-Owner activity files: an
+    // entry whose `label_values` parsed but contains no extractable Owner is
+    // schema drift, not a real interaction. Count only entries that yield a
+    // username so the count line answers "how many like signals fed the
+    // scoring", not "how many objects deserialized".
+    let liked_posts_count = liked_posts
+        .iter()
+        .filter_map(export::owner_username)
+        .count();
+    let story_likes_count = story_likes
+        .iter()
+        .filter_map(export::owner_username)
+        .count();
+    let stories_viewed_count = stories_viewed
+        .iter()
+        .filter_map(export::owner_username)
+        .count();
+    let saved_posts_count = saved_posts
+        .iter()
+        .filter_map(export::owner_username)
+        .count();
 
     println!("following count: {}", following.len());
     println!("followers count: {}", followers.len());
@@ -96,6 +127,10 @@ pub fn run(cli: Cli) -> Result<()> {
         "message request thread count: {}",
         message_request_threads.len()
     );
+    println!("liked posts count: {liked_posts_count}");
+    println!("story likes count: {story_likes_count}");
+    println!("stories viewed count: {stories_viewed_count}");
+    println!("saved posts count: {saved_posts_count}");
 
     Ok(())
 }
