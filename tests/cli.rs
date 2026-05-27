@@ -104,6 +104,62 @@ fn check_subcommand_fails_on_non_export_dir() {
 }
 
 #[test]
+fn check_subcommand_accepts_a_zip_archive() {
+    // Zip the sanitized fixture into a tempfile, then run
+    // `ig-mgr check <tempfile.zip>`. End-to-end coverage of the
+    // archive resolver -> validate_shape -> per-parser path.
+    use std::io::Write as _;
+    let zip_path = std::env::temp_dir().join(format!("ig-mgr-cli-zip-{}.zip", std::process::id()));
+    let _ = std::fs::remove_file(&zip_path);
+    {
+        let file = std::fs::File::create(&zip_path).expect("create zip");
+        let mut writer = zip::ZipWriter::new(file);
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        let root = sample_export();
+        fn walk(
+            writer: &mut zip::ZipWriter<std::fs::File>,
+            base: &std::path::Path,
+            dir: &std::path::Path,
+            opts: zip::write::SimpleFileOptions,
+        ) {
+            for entry in std::fs::read_dir(dir).expect("read dir") {
+                let entry = entry.expect("entry");
+                let path = entry.path();
+                let rel = path
+                    .strip_prefix(base)
+                    .expect("strip")
+                    .to_string_lossy()
+                    .into_owned();
+                if path.is_dir() {
+                    writer.add_directory(&rel, opts).expect("add_dir");
+                    walk(writer, base, &path, opts);
+                } else {
+                    writer.start_file(&rel, opts).expect("start_file");
+                    let bytes = std::fs::read(&path).expect("read");
+                    writer.write_all(&bytes).expect("write");
+                }
+            }
+        }
+        walk(&mut writer, &root, &root, opts);
+        writer.finish().expect("finish zip");
+    }
+
+    ig_mgr()
+        .arg("check")
+        .arg(&zip_path)
+        .assert()
+        .success()
+        .stdout(contains("All sources parsed cleanly"));
+
+    // Cleanup: cache dir and zip file.
+    let parent = zip_path.parent().expect("parent");
+    let stem = zip_path.file_stem().and_then(|s| s.to_str()).expect("stem");
+    let _ = std::fs::remove_dir_all(parent.join(format!(".ig-mgr-extracted-{stem}")));
+    let _ = std::fs::remove_file(&zip_path);
+}
+
+#[test]
 fn init_subcommand_writes_template_files() {
     // Spawn from an empty temp dir so the cwd-relative `config/`
     // doesn't exist; init must create it and lay down the two

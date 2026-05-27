@@ -46,8 +46,14 @@ pub struct Cli {
 
 #[derive(Debug, Args)]
 pub struct RunArgs {
-    /// Path to the unzipped Instagram "Download Your Information" export
-    /// (the folder containing `connections/` and `your_instagram_activity/`).
+    /// Path to the Instagram "Download Your Information" export. Accepts:
+    ///
+    /// - an unzipped directory (the folder containing `connections/` and
+    ///   `your_instagram_activity/`)
+    /// - a single `.zip` archive — extracted on first run, cached for
+    ///   re-runs
+    /// - a directory containing the multipart `*.zip` parts IG ships
+    ///   for large exports — merged into one cache on extraction
     ///
     /// Optional only because clap requires every flatten-d arg to be
     /// optional when a subcommand could be used instead. In practice
@@ -79,6 +85,12 @@ pub struct RunArgs {
     /// scoring code.
     #[arg(long, value_name = "HANDLE")]
     pub trace: Option<String>,
+
+    /// Force re-extraction of an archive input, ignoring any
+    /// `.ig-mgr-extracted/` cache. No effect when the input is an
+    /// already-extracted directory.
+    #[arg(long)]
+    pub rebuild_cache: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -98,8 +110,15 @@ pub enum Command {
     /// Validate that an export folder is parseable without running
     /// the scorer. Exits non-zero if any source fails to parse.
     Check {
-        /// Path to the unzipped Instagram export.
+        /// Path to the IG export — extracted directory, single .zip,
+        /// or directory containing multipart `*.zip` parts.
         export_dir: PathBuf,
+
+        /// Force re-extraction of an archive input, ignoring any
+        /// `.ig-mgr-extracted/` cache. No effect when the input is
+        /// already an extracted directory.
+        #[arg(long)]
+        rebuild_cache: bool,
     },
 }
 
@@ -107,8 +126,17 @@ pub enum Command {
 /// short and copy-pasteable; the README has the longer narrative.
 const EXAMPLES: &str = "\
 EXAMPLES:
-  # Basic run — writes following-audit_<DATE>.{csv,md} next to the export
+  # Basic run — writes following-audit_<DATE>.{csv,md} next to the input
   ig-mgr ./ig-exported-data
+
+  # Run against a single .zip directly (extracts on first run, then caches)
+  ig-mgr ~/Downloads/instagram-username-2026-05-11-abc.zip
+
+  # Run against a folder of multipart .zip parts (merged into one cache)
+  ig-mgr ~/Downloads/instagram-username-2026-05-11/
+
+  # Force a fresh extract, ignoring the cache
+  ig-mgr ./ig-exported-data --rebuild-cache
 
   # Custom output stem (writes /tmp/audit.csv + /tmp/audit.md)
   ig-mgr ./ig-exported-data --out /tmp/audit
@@ -124,7 +152,4 @@ EXAMPLES:
 
   # Dry-run: validate the export shape without scoring
   ig-mgr check ./ig-exported-data
-
-The export directory must be the unzipped \"Download Your Information\"
-folder — the one containing connections/ and your_instagram_activity/.
 ";

@@ -1,0 +1,349 @@
+//! Detect and extract Instagram export archives.
+//!
+//! Instagram's "Download Your Information" ships as one of:
+//! - a directory the user already extracted (`connections/` at the top)
+//! - a single `.zip` archive
+//! - a set of multipart `.zip` files (large exports are split by SIZE
+//!   when downloaded — confirmed against the 8.4 GB / 4-part example
+//!   in the user memory)
+//!
+//! Per the chunking note ([[project_ig_export_chunking]] memory),
+//! multipart chunks overlap on path prefixes (the same thread folder
+//! shows up in multiple parts) but the actual files inside each
+//! overlap are disjoint, so a flat sequential extract into one cache
+//! directory merges cleanly with no special handling — last-write-wins
+//! on path collisions is safe.
+//!
+//! Cache layout: hidden directory next to the input. A `.complete`
+//! marker file pins the last successful extract; the cache is reused
+//! when the marker is at least as fresh as every source zip.
+//! `rebuild = true` forces a clean re-extract.
+
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use zip::ZipArchive;
+
+const CACHE_MARKER: &str = ".complete";
+
+/// Marker path that indicates "this directory is an extracted IG
+/// export". Picked to overlap with [`crate::export::validate_shape`]'s
+/// most-load-bearing check so the two stay aligned.
+const EXTRACTED_MARKER: &str = "connections/followers_and_following/following.json";
+
+/// Resolve an input path to an extracted-export directory.
+///
+/// - A directory that already contains [`EXTRACTED_MARKER`] → returned
+///   as-is.
+/// - A directory containing one or more `*.zip` files → all extracted
+///   to `<dir>/.ig-mgr-extracted/`.
+/// - A single `.zip` file → extracted to
+///   `<parent>/.ig-mgr-extracted-<stem>/`.
+/// - Anything else → returned as-is so the caller's existing
+///   `validate_shape` can surface a precise diagnosis.
+///
+/// `progress_enabled` matches the run-level flag — disabled when the
+/// user passed `-v` or stderr isn't a TTY.
+pub fn resolve(input: &Path, rebuild: bool, progress_enabled: bool) -> Result<PathBuf> {
+    if input.is_dir() {
+        if input.join(EXTRACTED_MARKER).is_file() {
+            return Ok(input.to_path_buf());
+        }
+        let zips = find_zip_parts(input)?;
+        if !zips.is_empty() {
+            let cache = input.join(".ig-mgr-extracted");
+            return extract_or_reuse(&zips, &cache, rebuild, progress_enabled);
+        }
+        // No marker, no zips — fall through and let validate_shape
+        // produce the "missing X, Y, Z" diagnosis.
+        return Ok(input.to_path_buf());
+    }
+    if input.is_file() && is_zip(input) {
+        let parent = input.parent().unwrap_or_else(|| Path::new("."));
+        let stem = input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("export");
+        let cache = parent.join(format!(".ig-mgr-extracted-{stem}"));
+        return extract_or_reuse(&[input.to_path_buf()], &cache, rebuild, progress_enabled);
+    }
+    Ok(input.to_path_buf())
+}
+
+fn is_zip(p: &Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.eq_ignore_ascii_case("zip"))
+        .unwrap_or(false)
+}
+
+fn find_zip_parts(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut zips: Vec<PathBuf> = fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && is_zip(p))
+        .collect();
+    // Sort by filename. Instagram ships parts as
+    // `instagram-<handle>-YYYY-MM-DD-<hash>-N.zip` so lexicographic
+    // order matches part order; if a future export uses different
+    // naming, last-write-wins on overlapping files still merges
+    // correctly per the chunking memory.
+    zips.sort();
+    Ok(zips)
+}
+
+fn extract_or_reuse(
+    zips: &[PathBuf],
+    cache: &Path,
+    rebuild: bool,
+    progress_enabled: bool,
+) -> Result<PathBuf> {
+    if rebuild && cache.exists() {
+        fs::remove_dir_all(cache).context("removing cache for --rebuild-cache")?;
+    }
+    if cache_is_fresh(cache, zips)? {
+        return Ok(extracted_root(cache));
+    }
+    if cache.exists() {
+        fs::remove_dir_all(cache).context("removing stale cache")?;
+    }
+    fs::create_dir_all(cache)
+        .with_context(|| format!("creating cache directory {}", cache.display()))?;
+    extract_zips_with_progress(zips, cache, progress_enabled)?;
+    fs::write(cache.join(CACHE_MARKER), "ok").context("writing cache marker")?;
+    Ok(extracted_root(cache))
+}
+
+fn cache_is_fresh(cache: &Path, zips: &[PathBuf]) -> Result<bool> {
+    let marker = cache.join(CACHE_MARKER);
+    if !marker.is_file() {
+        return Ok(false);
+    }
+    let marker_mtime = fs::metadata(&marker)?.modified()?;
+    for z in zips {
+        let z_mtime = fs::metadata(z)?.modified()?;
+        if z_mtime > marker_mtime {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// After extraction, find the directory that actually contains the
+/// IG export tree. Instagram's zips ship with a single top-level
+/// wrapper directory (`instagram-<handle>-YYYY-...`); without this
+/// descent the cache root would have one subdir and `validate_shape`
+/// would fail with "missing connections/…" even though the data is
+/// there one level down.
+fn extracted_root(cache: &Path) -> PathBuf {
+    if cache.join(EXTRACTED_MARKER).is_file() {
+        return cache.to_path_buf();
+    }
+    if let Ok(entries) = fs::read_dir(cache) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() && p.join(EXTRACTED_MARKER).is_file() {
+                return p;
+            }
+        }
+    }
+    // No descent helps — return the cache root and let validate_shape
+    // diagnose. The bail is delayed by one function call but the user
+    // gets the missing-paths list instead of a generic archive error.
+    cache.to_path_buf()
+}
+
+fn extract_zips_with_progress(
+    zips: &[PathBuf],
+    cache: &Path,
+    progress_enabled: bool,
+) -> Result<()> {
+    let total_bytes: u64 = zips
+        .iter()
+        .map(|z| fs::metadata(z).map(|m| m.len()).unwrap_or(0))
+        .sum();
+    let target = if progress_enabled {
+        ProgressDrawTarget::stderr()
+    } else {
+        ProgressDrawTarget::hidden()
+    };
+    let bar = ProgressBar::with_draw_target(Some(total_bytes), target);
+    bar.set_style(
+        ProgressStyle::with_template(
+            "{spinner:.cyan} extracting [{bar:30.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}",
+        )
+        .expect("static template is valid")
+        .progress_chars("##-"),
+    );
+
+    for zip_path in zips {
+        let zip_size = fs::metadata(zip_path)?.len();
+        let label = zip_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("zip");
+        bar.set_message(label.to_owned());
+        extract_one(zip_path, cache)
+            .with_context(|| format!("extracting {}", zip_path.display()))?;
+        bar.inc(zip_size);
+    }
+    bar.finish_and_clear();
+    Ok(())
+}
+
+fn extract_one(zip_path: &Path, cache: &Path) -> Result<()> {
+    let file =
+        fs::File::open(zip_path).with_context(|| format!("opening {}", zip_path.display()))?;
+    let mut archive =
+        ZipArchive::new(file).with_context(|| format!("opening zip {}", zip_path.display()))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        // `enclosed_name()` rejects entries that would escape the
+        // extraction directory via `../` or absolute paths — the
+        // zip-slip guard. Skipping the entry is the safe fail mode.
+        let Some(rel) = entry.enclosed_name() else {
+            continue;
+        };
+        let outpath = cache.join(rel);
+        if entry.is_dir() {
+            fs::create_dir_all(&outpath)
+                .with_context(|| format!("creating {}", outpath.display()))?;
+        } else {
+            if let Some(parent) = outpath.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            let mut out = fs::File::create(&outpath)
+                .with_context(|| format!("creating {}", outpath.display()))?;
+            io::copy(&mut entry, &mut out)
+                .with_context(|| format!("writing {}", outpath.display()))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn fixture_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample_export")
+    }
+
+    /// Zip the sanitized fixture into a temp file and return its path.
+    /// Mirrors the IG export shape: a single top-level wrapper folder
+    /// inside the zip so we exercise the [`extracted_root`] descent.
+    fn synth_zip(test_id: &str, with_wrapper: bool) -> PathBuf {
+        let tmp = std::env::temp_dir().join(format!("ig-mgr-archive-{test_id}.zip"));
+        let _ = fs::remove_file(&tmp);
+        let file = fs::File::create(&tmp).expect("create zip");
+        let mut writer = zip::ZipWriter::new(file);
+        let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        let root = fixture_root();
+        let wrapper = if with_wrapper {
+            "instagram-test-2026-05-11-abc/"
+        } else {
+            ""
+        };
+        write_dir_to_zip(&mut writer, &root, &root, wrapper, options);
+        writer.finish().expect("finalize zip");
+        tmp
+    }
+
+    fn write_dir_to_zip(
+        writer: &mut zip::ZipWriter<fs::File>,
+        base: &Path,
+        dir: &Path,
+        prefix: &str,
+        options: zip::write::SimpleFileOptions,
+    ) {
+        for entry in fs::read_dir(dir).expect("read fixture dir") {
+            let entry = entry.expect("entry");
+            let path = entry.path();
+            let rel = path.strip_prefix(base).expect("strip base");
+            let zip_path = format!("{prefix}{}", rel.to_string_lossy());
+            if path.is_dir() {
+                writer.add_directory(&zip_path, options).expect("add dir");
+                write_dir_to_zip(writer, base, &path, prefix, options);
+            } else {
+                writer.start_file(&zip_path, options).expect("start file");
+                let bytes = fs::read(&path).expect("read file");
+                writer.write_all(&bytes).expect("write zip entry");
+            }
+        }
+    }
+
+    #[test]
+    fn already_extracted_dir_passes_through() {
+        let resolved = resolve(&fixture_root(), false, false).expect("resolve");
+        assert_eq!(resolved, fixture_root());
+    }
+
+    #[test]
+    fn single_zip_extracts_and_descends_wrapper() {
+        let zip_path = synth_zip("single", true);
+        let resolved = resolve(&zip_path, true, false).expect("resolve");
+        // Auto-descent: resolved should point inside the wrapper folder,
+        // not at the cache root. validate_shape's marker must be findable.
+        assert!(
+            resolved.join(EXTRACTED_MARKER).is_file(),
+            "expected wrapper-descent to find marker at {}",
+            resolved.display(),
+        );
+        let _ = fs::remove_dir_all(zip_path.parent().unwrap().join(format!(
+            ".ig-mgr-extracted-{}",
+            zip_path.file_stem().unwrap().to_string_lossy()
+        )));
+        let _ = fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn single_zip_without_wrapper_extracts_to_cache_root() {
+        let zip_path = synth_zip("flat", false);
+        let resolved = resolve(&zip_path, true, false).expect("resolve");
+        assert!(resolved.join(EXTRACTED_MARKER).is_file());
+        let _ = fs::remove_dir_all(zip_path.parent().unwrap().join(format!(
+            ".ig-mgr-extracted-{}",
+            zip_path.file_stem().unwrap().to_string_lossy()
+        )));
+        let _ = fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn cache_is_reused_on_second_resolve() {
+        let zip_path = synth_zip("cache-reuse", false);
+        let first = resolve(&zip_path, true, false).expect("first resolve");
+        // Touch a sentinel file inside the cache root that won't be
+        // re-written if cache reuse fires. If the cache were rebuilt,
+        // the sentinel disappears (re-extract clears the cache).
+        let sentinel = first.join(".sentinel");
+        fs::write(&sentinel, "x").expect("sentinel");
+        let second = resolve(&zip_path, false, false).expect("second resolve");
+        assert_eq!(first, second);
+        assert!(
+            sentinel.is_file(),
+            "cache must not be rebuilt on warm resolve"
+        );
+
+        // Now force rebuild — sentinel must be gone.
+        let _ = resolve(&zip_path, true, false).expect("rebuild resolve");
+        assert!(
+            !sentinel.is_file(),
+            "rebuild=true must clear the cache before extracting"
+        );
+
+        let _ = fs::remove_dir_all(zip_path.parent().unwrap().join(format!(
+            ".ig-mgr-extracted-{}",
+            zip_path.file_stem().unwrap().to_string_lossy()
+        )));
+        let _ = fs::remove_file(&zip_path);
+    }
+}

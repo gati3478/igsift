@@ -10,9 +10,12 @@ fn main() -> Result<()> {
             ig_mgr::init_tracing(0);
             ig_mgr::init(force)
         }
-        Some(Command::Check { export_dir }) => {
+        Some(Command::Check {
+            export_dir,
+            rebuild_cache,
+        }) => {
             ig_mgr::init_tracing(0);
-            ig_mgr::check(&export_dir)
+            ig_mgr::check(&export_dir, rebuild_cache)
         }
         Some(Command::Run(args)) => {
             ig_mgr::init_tracing(args.verbose);

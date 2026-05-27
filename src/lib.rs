@@ -22,6 +22,7 @@
 //! CSV + Markdown artifacts next to the export directory.
 
 pub mod allowlist;
+pub mod archive;
 pub mod cli;
 pub mod config;
 pub mod export;
@@ -108,8 +109,12 @@ pub fn init(force: bool) -> Result<()> {
 /// Useful for verifying a freshly-extracted multipart archive
 /// before paying the cost of a full run, or as a CI dry-run
 /// against a sanitized fixture.
-pub fn check(export_dir: &Path) -> Result<()> {
+pub fn check(input: &Path, rebuild_cache: bool) -> Result<()> {
     use anyhow::ensure;
+
+    // Accept dirs and archives transparently; resolve returns the
+    // extracted root or the input as-is if it's already extracted.
+    let export_dir = &archive::resolve(input, rebuild_cache, true)?;
 
     ensure!(
         export_dir.is_dir(),
@@ -254,14 +259,23 @@ pub fn check(export_dir: &Path) -> Result<()> {
 pub fn run(args: RunArgs) -> Result<()> {
     use anyhow::{anyhow, ensure};
 
-    let export_dir = args
+    let input = args
         .export_dir
         .as_deref()
         .ok_or_else(|| anyhow!("export directory required — pass a path or use `ig-mgr --help`"))?;
 
+    let progress_enabled = args.verbose == 0;
+
+    // Archive resolution runs BEFORE the phase spinner so the
+    // extraction bar (a real bytes bar, not a spinner) is the active
+    // UI while it's working. On an already-extracted directory this
+    // is a near-zero-cost passthrough.
+    let export_dir = archive::resolve(input, args.rebuild_cache, progress_enabled)?;
+    let export_dir = export_dir.as_path();
+
     // Progress spinner: visible at default verbosity on a TTY, hidden
     // when -v / -vv (logs would interleave) or when stderr is piped.
-    let progress = progress::Reporter::new(args.verbose == 0);
+    let progress = progress::Reporter::new(progress_enabled);
 
     progress.phase("Validating export shape");
     ensure!(
@@ -590,7 +604,10 @@ pub fn run(args: RunArgs) -> Result<()> {
         print_trace(handle, &scored, &scoring_config.weights)?;
     }
 
-    let stem = resolve_output_stem(args.out.as_deref(), export_dir);
+    // Output stem is derived from the user-provided INPUT path (not
+    // the extracted dir): when input was a .zip, the audit should
+    // land next to that zip, not buried inside the cache.
+    let stem = resolve_output_stem(args.out.as_deref(), input);
     let (csv_path, md_path) = output::write(&scored, &stem)?;
     println!("wrote: {}", csv_path.display());
     println!("wrote: {}", md_path.display());

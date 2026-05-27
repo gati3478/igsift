@@ -41,15 +41,23 @@ regret" feedback loop. See [`ROADMAP.md`](ROADMAP.md) for the task list,
 ## Build & run
 
 ```bash
-cargo build --release            # binary at target/release/ig-mgr
-cargo run -- /path/to/export     # run against an unzipped export folder
+cargo build --release             # binary at target/release/ig-mgr
+cargo run -- /path/to/export      # run against an unzipped export folder
+cargo run -- /path/to/export.zip  # single .zip — extracted + cached
+cargo run -- /path/to/parts/      # directory of multipart .zip parts
 cargo run -- /path/to/export --out ~/cleanup --verbose
 ```
+
+Three input shapes are accepted transparently: an already-extracted
+directory, a single `.zip` file, or a directory of multipart `*.zip`
+parts that IG ships for large exports. Archives extract to
+`.ig-mgr-extracted*/` next to the input and are cached on re-runs.
+Use `--rebuild-cache` to force a fresh extract.
 
 Options:
 
 - `--out <PATH>` — output stem; defaults to `following-audit_<DATE>.{csv,md}`
-  next to the export.
+  next to the input.
 - `--config <PATH>` — scoring weights TOML; when omitted, resolved as
   `./config/scoring.toml` in the cwd, then a compiled-in default. A
   platform config dir (`~/.config/ig-mgr/`) is not yet wired — fresh
