@@ -13,11 +13,12 @@
 //!            ──▶ output::*   (CSV + Markdown writers)
 //! ```
 //!
-//! Status: parser layer complete, feature aggregation complete
-//! ([`features::aggregate`] — handle-keyed features, DM-derived features,
-//! decay-weighted versions of every count, and the four DESIGN.md CSV
-//! windowed counts). Scoring and output writers remain stubs — see
-//! `ROADMAP.md`.
+//! Status: parser layer, feature aggregation, and first-pass scoring all
+//! landed. The pipeline composes a `keep_prob` per account and bucket
+//! assignment (`keep` / `review` / `unfollow`) via the DESIGN.md formula
+//! plus the restricted/boost gates. The CSV + Markdown output writers
+//! and the account-class heuristic that hardens the `unfollow`
+//! recommendation remain on the ROADMAP.
 
 pub mod cli;
 pub mod config;
@@ -282,6 +283,53 @@ pub fn run(cli: Cli) -> Result<()> {
     println!("90d comments total: {comments_90d_total}");
     println!("180d reactions given total: {reactions_given_180d_total}");
     println!("180d reactions received total: {reactions_received_180d_total}");
+
+    let scored = scoring::score(&aggregated, &scoring_config);
+    let keep_count = scored
+        .iter()
+        .filter(|s| s.bucket == scoring::Bucket::Keep)
+        .count();
+    let review_count = scored
+        .iter()
+        .filter(|s| s.bucket == scoring::Bucket::Review)
+        .count();
+    let unfollow_count = scored
+        .iter()
+        .filter(|s| s.bucket == scoring::Bucket::Unfollow)
+        .count();
+    println!("bucket keep: {keep_count}");
+    println!("bucket review: {review_count}");
+    println!("bucket unfollow: {unfollow_count}");
+
+    // Top/bottom 10 as the human-readable sanity surface. Borrows into
+    // `scored` rather than cloning — the full ranking stays a Vec<ScoredAccount>
+    // for the CSV writer to consume in a later slice.
+    let mut by_prob: Vec<&scoring::ScoredAccount> = scored.iter().collect();
+    by_prob.sort_by(|a, b| {
+        b.keep_prob
+            .partial_cmp(&a.keep_prob)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    println!("top 10 keep candidates:");
+    for s in by_prob.iter().take(10) {
+        println!(
+            "  {}  keep_prob={:.3}  bucket={}  dominant={}",
+            s.features.username,
+            s.keep_prob,
+            s.bucket.as_str(),
+            s.dominant_feature,
+        );
+    }
+    println!("bottom 10 unfollow candidates:");
+    for s in by_prob.iter().rev().take(10) {
+        println!(
+            "  {}  keep_prob={:.3}  bucket={}  dominant={}",
+            s.features.username,
+            s.keep_prob,
+            s.bucket.as_str(),
+            s.dominant_feature,
+        );
+    }
 
     Ok(())
 }

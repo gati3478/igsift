@@ -172,7 +172,31 @@ behind each item.
       `decayed reactions received sum: 3485.06` (raw 39,724), `90d
       likes total: 1489`, `90d comments total: 8`, `180d reactions
       given total: 3361`, `180d reactions received total: 3022`.
-- [ ] **First-pass scoring** with hand-set weights; eyeball top/bottom 50.
+- [x] **First-pass scoring** (2026-05-27) — extended `ScoringConfig`
+      with `WeightsConfig` (16 fields, 1:1 with `[weights]` in
+      `config/scoring.toml`) and `ScoringParams` (`threshold`, `scale`,
+      `keep_min`, `unfollow_max`). `validate()` now rejects non-finite
+      weights, `scale <= 0`, `keep_min <= unfollow_max`, and
+      keep_min/unfollow_max outside `[0, 1]` — same NaN/poison posture
+      that gated zero τ in slice 7B-2. `src/scoring.rs` composes
+      decayed counts + log-tenure + boolean boosts − derived penalties
+      (`dm_balance_penalty` and `reaction_balance_penalty` computed in
+      scoring with volume gates of 5 messages / 5 reactions; asymmetric
+      so one-sided-them is reciprocity not over-extension), runs the
+      sum through `keep_prob = sigmoid((score_raw - threshold) / scale)`,
+      and assigns a bucket per DESIGN.md (restricted floors at review;
+      unfollow requires `!is_close_friend && !is_favorited` for now —
+      the `account_class == personal` gate lands with the brand /
+      public-figure slice). Each `ScoredAccount` carries a
+      `dominant_feature: &'static str` for the Markdown summary,
+      chosen as the largest-magnitude contribution with penalties
+      signed negative so a penalty-driven account surfaces as
+      "hide_story_penalty" rather than the smaller positive term.
+      Validated against the 2026-05-11 export: 643 accounts scored,
+      top 10 keep_prob = 1.000 dominated by `dm` / `likes`, bottom 10
+      keep_prob 0.72–0.86 dominated by `tenure` (passive longevity, no
+      interaction). With the first-pass weights the distribution skews
+      heavily Keep (641 / 2 / 0); weight tuning is the next bullet.
 - [ ] **Tune weights and decay constants** — consider a small labeled set of
       ~30 accounts I already know I want to keep/drop, fit weights to match.
 - [ ] **Brand / public-figure heuristic** + user-maintained allowlist.

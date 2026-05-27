@@ -3,12 +3,10 @@
 //! Keeping weights and decay constants in TOML lets them be tuned without a
 //! rebuild — the main ergonomic gap Rust has versus a notebook workflow.
 //!
-//! Slice 7B-2 loads only the `[decay]` section that the aggregator's
-//! exponential-decay weighting needs ([`DecayConfig`]). The scoring slice
-//! will extend [`ScoringConfig`] with the `[weights]` and `[scoring]`
-//! sections — serde's default ignore-unknown-fields posture means a
-//! partial target type parses the full file harmlessly today and gains
-//! fields without churning the read path.
+//! Slice 7B-2 wired `[decay]` ([`DecayConfig`]). The first-pass scoring
+//! slice extends the same target type with [`WeightsConfig`] and
+//! [`ScoringParams`] — one config struct backs the whole pipeline so the
+//! read path stays single-purpose.
 //!
 //! Path resolution:
 //!
@@ -32,12 +30,14 @@ use std::path::Path;
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
-/// Top-level scoring configuration. Slice 7B-2 surfaces only [`decay`];
-/// the scoring slice will add `weights: WeightsConfig` and `scoring:
-/// ScoringParams` here without changing the read path.
+/// Top-level scoring configuration. Backs the whole pipeline — decay
+/// constants feed the aggregator, weights and scoring params feed
+/// [`crate::scoring`].
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScoringConfig {
     pub decay: DecayConfig,
+    pub weights: WeightsConfig,
+    pub scoring: ScoringParams,
 }
 
 /// Exponential-decay half-lives, in **days**.
@@ -50,6 +50,49 @@ pub struct ScoringConfig {
 pub struct DecayConfig {
     pub tau_dm_days: u32,
     pub tau_content_days: u32,
+}
+
+/// Per-feature weights. Every field corresponds 1:1 with a key in the
+/// `[weights]` section of `config/scoring.toml` and appears exactly once
+/// in DESIGN.md's "Scoring composition" formula. The composition function
+/// in [`crate::scoring`] reproduces that 1:1 mapping by naming each
+/// local term identically to its field here — so a weight change in TOML
+/// can be traced through to a single line of scoring code.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WeightsConfig {
+    pub dm: f64,
+    pub likes: f64,
+    pub comments: f64,
+    pub story_out: f64,
+    pub stories_viewed: f64,
+    pub saved: f64,
+    pub reactions_given: f64,
+    pub reactions_received: f64,
+    pub tenure: f64,
+    pub dm_balance_penalty: f64,
+    pub reaction_balance_penalty: f64,
+    pub hide_story_penalty: f64,
+    pub removed_suggestion_penalty: f64,
+    pub close_friend_boost: f64,
+    pub favorite_boost: f64,
+    pub inbound_request: f64,
+}
+
+/// Sigmoid mapping `score_raw → keep_prob` plus the bucket cut-offs.
+///
+/// `keep_prob = sigmoid((score_raw - threshold) / scale)` with the
+/// bucketing rule:
+///
+/// - `keep_prob >= keep_min` → keep
+/// - `keep_prob < unfollow_max` → unfollow (with the additional gates
+///   documented in DESIGN.md "Buckets")
+/// - everything in between → review
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScoringParams {
+    pub threshold: f64,
+    pub scale: f64,
+    pub keep_min: f64,
+    pub unfollow_max: f64,
 }
 
 /// Read and parse the scoring config, following the documented resolution
@@ -83,9 +126,14 @@ pub fn read_scoring_config(cli_config: Option<&Path>) -> Result<ScoringConfig> {
 }
 
 /// Reject degenerate values that would silently poison downstream
-/// arithmetic. `tau_days = 0` is the case worth catching: `exp(-0/0)` is
-/// `NaN`, and a single NaN propagates through every `+=` into the
-/// decayed sums, contaminating sort order once scoring lands.
+/// arithmetic.
+///
+/// `tau_days = 0` produces `exp(-0/0) = NaN`, and a single NaN propagates
+/// through every `+=` into the decayed sums — contaminating sort order
+/// the moment scoring runs. The same NaN-propagation risk extends to the
+/// weight and scoring-param fields: a non-finite weight contaminates
+/// `score_raw`; `scale = 0` divides by zero inside the sigmoid;
+/// `keep_min <= unfollow_max` collapses the review band.
 fn validate(cfg: &ScoringConfig) -> Result<()> {
     ensure!(
         cfg.decay.tau_dm_days > 0,
@@ -97,6 +145,65 @@ fn validate(cfg: &ScoringConfig) -> Result<()> {
         "decay.tau_content_days must be > 0 (got 0). To make content decay effectively negligible, \
          set a very large τ — never 0, which produces NaN at Δt=0.",
     );
+
+    for (name, w) in [
+        ("dm", cfg.weights.dm),
+        ("likes", cfg.weights.likes),
+        ("comments", cfg.weights.comments),
+        ("story_out", cfg.weights.story_out),
+        ("stories_viewed", cfg.weights.stories_viewed),
+        ("saved", cfg.weights.saved),
+        ("reactions_given", cfg.weights.reactions_given),
+        ("reactions_received", cfg.weights.reactions_received),
+        ("tenure", cfg.weights.tenure),
+        ("dm_balance_penalty", cfg.weights.dm_balance_penalty),
+        (
+            "reaction_balance_penalty",
+            cfg.weights.reaction_balance_penalty,
+        ),
+        ("hide_story_penalty", cfg.weights.hide_story_penalty),
+        (
+            "removed_suggestion_penalty",
+            cfg.weights.removed_suggestion_penalty,
+        ),
+        ("close_friend_boost", cfg.weights.close_friend_boost),
+        ("favorite_boost", cfg.weights.favorite_boost),
+        ("inbound_request", cfg.weights.inbound_request),
+    ] {
+        ensure!(
+            w.is_finite(),
+            "weights.{name} must be finite (got {w}). NaN/Inf propagates through every `+=` in scoring."
+        );
+    }
+
+    ensure!(
+        cfg.scoring.scale > 0.0 && cfg.scoring.scale.is_finite(),
+        "scoring.scale must be a finite positive number (got {}). 0 divides by zero inside the sigmoid.",
+        cfg.scoring.scale,
+    );
+    ensure!(
+        cfg.scoring.threshold.is_finite(),
+        "scoring.threshold must be finite (got {}).",
+        cfg.scoring.threshold,
+    );
+    ensure!(
+        (0.0..=1.0).contains(&cfg.scoring.keep_min),
+        "scoring.keep_min must lie in [0, 1] (got {}); it is a probability.",
+        cfg.scoring.keep_min,
+    );
+    ensure!(
+        (0.0..=1.0).contains(&cfg.scoring.unfollow_max),
+        "scoring.unfollow_max must lie in [0, 1] (got {}); it is a probability.",
+        cfg.scoring.unfollow_max,
+    );
+    ensure!(
+        cfg.scoring.keep_min > cfg.scoring.unfollow_max,
+        "scoring.keep_min ({}) must be strictly greater than scoring.unfollow_max ({}); \
+         otherwise the review band collapses.",
+        cfg.scoring.keep_min,
+        cfg.scoring.unfollow_max,
+    );
+
     Ok(())
 }
 
@@ -115,16 +222,52 @@ fn parse_str(body: &str, source_label: &str) -> Result<ScoringConfig> {
 #[cfg(test)]
 mod tests {
     //! Unit tests pin (a) the compiled-in default parses, (b) explicit
-    //! `--config` paths route through `fs::read_to_string`, and (c) parse
-    //! failures surface with the source label (so users see *which* file
-    //! is malformed, not just "TOML error").
+    //! `--config` paths route through `fs::read_to_string`, (c) parse
+    //! failures surface with the source label, and (d) the validate()
+    //! posture loudly rejects each NaN-poisoning input vector (zero τ,
+    //! non-finite weights, zero scale, inverted bucket cut-offs).
     use super::*;
+
+    /// A complete, valid TOML body. Tests start from this baseline and
+    /// override only the field under test so each case stays focused on
+    /// the one input it pins, rather than restating the whole config.
+    const VALID_BODY: &str = r#"
+[decay]
+tau_dm_days = 180
+tau_content_days = 365
+
+[weights]
+dm = 3.0
+likes = 1.0
+comments = 1.5
+story_out = 1.0
+stories_viewed = 0.2
+saved = 0.5
+reactions_given = 1.0
+reactions_received = 2.0
+tenure = 0.3
+dm_balance_penalty = 1.0
+reaction_balance_penalty = 0.5
+hide_story_penalty = 2.0
+removed_suggestion_penalty = 0.3
+close_friend_boost = 5.0
+favorite_boost = 3.0
+inbound_request = 0.5
+
+[scoring]
+threshold = 0.0
+scale = 1.0
+keep_min = 0.7
+unfollow_max = 0.3
+"#;
 
     #[test]
     fn builtin_default_parses() {
         let cfg = read_scoring_config(None).expect("builtin default must parse");
         assert!(cfg.decay.tau_dm_days > 0);
         assert!(cfg.decay.tau_content_days > 0);
+        assert!(cfg.weights.dm.is_finite());
+        assert!(cfg.scoring.scale > 0.0);
     }
 
     #[test]
@@ -150,35 +293,47 @@ mod tests {
     }
 
     #[test]
+    fn valid_body_parses_and_validates() {
+        let cfg = parse_str(VALID_BODY, "/synthetic.toml").expect("baseline must parse");
+        validate(&cfg).expect("baseline must validate");
+    }
+
+    #[test]
     fn missing_decay_section_fails() {
-        // serde ignores unknown top-level keys but a missing required
-        // section (no [decay]) must surface as a parse error rather than
-        // defaulting to zero τ — `exp(-Δt / 0)` would be NaN.
-        let err = parse_str("[weights]\ndm = 3.0\n", "/synthetic.toml")
-            .expect_err("missing [decay] must fail");
+        // A complete TOML missing only the [decay] table must surface as
+        // a parse error — defaulting to τ=0 would poison every decayed
+        // sum with `exp(-Δt/0) = NaN`.
+        let body = VALID_BODY.replace("[decay]\ntau_dm_days = 180\ntau_content_days = 365\n", "");
+        let err = parse_str(&body, "/synthetic.toml").expect_err("missing [decay] must fail");
         let msg = format!("{err:#}");
         assert!(msg.contains("decay"), "error must mention `decay`: {msg}");
+    }
+
+    #[test]
+    fn missing_weights_section_fails() {
+        let body = VALID_BODY.split("\n[weights]").next().unwrap().to_owned()
+            + "\n[scoring]\nthreshold = 0.0\nscale = 1.0\nkeep_min = 0.7\nunfollow_max = 0.3\n";
+        let err = parse_str(&body, "/synthetic.toml").expect_err("missing [weights] must fail");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("weights"),
+            "error must mention `weights`: {msg}",
+        );
     }
 
     #[test]
     fn zero_tau_is_rejected_at_load() {
         // `tau_days = 0` parses cleanly (u32 accepts 0) but `decay_weight`
         // would then evaluate `exp(-0/0) = NaN` at Δt=0 — silently
-        // poisoning every decayed sum and breaking sort order. The
-        // loader must reject it loudly with a message that names the
-        // offending key so users can correct the typo.
-        for (key, body) in [
-            (
-                "tau_dm_days",
-                "[decay]\ntau_dm_days = 0\ntau_content_days = 365\n",
-            ),
-            (
-                "tau_content_days",
-                "[decay]\ntau_dm_days = 180\ntau_content_days = 0\n",
-            ),
+        // poisoning every decayed sum and breaking sort order.
+        for (key, replacement) in [
+            ("tau_dm_days", "tau_dm_days = 0"),
+            ("tau_content_days", "tau_content_days = 0"),
         ] {
-            // Parse succeeds; validate must fail.
-            let cfg: ScoringConfig = toml::from_str(body).expect("toml parses");
+            let body = VALID_BODY
+                .replace(&format!("{key} = 180"), replacement)
+                .replace(&format!("{key} = 365"), replacement);
+            let cfg: ScoringConfig = toml::from_str(&body).expect("toml parses");
             let err = validate(&cfg).expect_err("τ = 0 must be rejected");
             let msg = format!("{err:#}");
             assert!(
@@ -186,5 +341,58 @@ mod tests {
                 "error must name the offending key `{key}`: {msg}",
             );
         }
+    }
+
+    #[test]
+    fn zero_scale_is_rejected() {
+        let body = VALID_BODY.replace("scale = 1.0", "scale = 0.0");
+        let cfg: ScoringConfig = toml::from_str(&body).expect("toml parses");
+        let err = validate(&cfg).expect_err("scale = 0 must be rejected");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("scale"), "error must mention `scale`: {msg}");
+    }
+
+    #[test]
+    fn non_finite_weight_is_rejected() {
+        // TOML doesn't have a literal NaN, but `nan` is accepted as a
+        // float keyword. Verify both NaN and inf are caught.
+        for (val, label) in [("nan", "NaN"), ("inf", "Inf")] {
+            let body = VALID_BODY.replace("dm = 3.0", &format!("dm = {val}"));
+            let cfg: ScoringConfig = toml::from_str(&body).expect("toml parses");
+            let err = validate(&cfg).expect_err("{label} weight must be rejected");
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("dm"),
+                "error for {label} must name the offending weight `dm`: {msg}",
+            );
+        }
+    }
+
+    #[test]
+    fn inverted_bucket_cutoffs_are_rejected() {
+        // keep_min ≤ unfollow_max collapses the review band — every
+        // account lands in either keep or unfollow with no middle.
+        let body = VALID_BODY
+            .replace("keep_min = 0.7", "keep_min = 0.2")
+            .replace("unfollow_max = 0.3", "unfollow_max = 0.5");
+        let cfg: ScoringConfig = toml::from_str(&body).expect("toml parses");
+        let err = validate(&cfg).expect_err("inverted cut-offs must be rejected");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("keep_min") && msg.contains("unfollow_max"),
+            "error must reference both cut-offs: {msg}",
+        );
+    }
+
+    #[test]
+    fn out_of_range_keep_min_is_rejected() {
+        let body = VALID_BODY.replace("keep_min = 0.7", "keep_min = 1.5");
+        let cfg: ScoringConfig = toml::from_str(&body).expect("toml parses");
+        let err = validate(&cfg).expect_err("keep_min > 1 must be rejected");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("keep_min"),
+            "error must mention `keep_min`: {msg}",
+        );
     }
 }

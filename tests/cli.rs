@@ -152,5 +152,14 @@ fn fixture_counts_match_expected() {
         .stdout(contains("DM-attributed accounts: 1"))
         .stdout(contains("DM reactions given total: 1"))
         .stdout(contains("DM reactions received total: 1"))
-        .stdout(contains("inbound DM requests: 0"));
+        .stdout(contains("inbound DM requests: 0"))
+        // First-pass scoring: alice (close_friend, boost 5.0), bob and
+        // carol (favorited, boost 3.0) all land in Keep. carol picks up
+        // additional DM signal (1 message in each direction, 1 reaction
+        // each way) but the boost dominates regardless. No fixture
+        // account is restricted, hide_story'd, or removed_suggestion'd,
+        // so the review band is empty and unfollow is empty.
+        .stdout(contains("bucket keep: 3"))
+        .stdout(contains("bucket review: 0"))
+        .stdout(contains("bucket unfollow: 0"));
 }
