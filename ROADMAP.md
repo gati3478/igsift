@@ -122,15 +122,40 @@ behind each item.
           followed), `aggregated with likes_given > 0: 561`, `aggregated
           with comments_given > 0: 139`. Intersections cross-checked with
           `comm -12` against `jq`-extracted handle sets.
-- [ ] **Feature aggregation (slice 7B)** — extend the slice-7A aggregator
-      with DM-derived features gated on resolvable threads via
-      [`features::name_resolution`] (`dm_messages_total` / `dm_recency_days`
-      / `dm_balance` / `dm_reactions_given` / `dm_reactions_received` /
-      `inbound_dm_request`), me-identity-based direction classification,
-      group-chat and abandoned-thread exclusion. Apply exponential decay
-      per `config/scoring.toml [decay]` to the count features and emit
-      raw 90d/180d windowed counts for the CSV columns (DESIGN.md is
-      explicit these are different aggregations).
+- [x] **DM features (slice 7B-1)** (2026-05-27) — extended
+      `AggregateInputs` with `inbox_threads`, `message_request_threads`,
+      `me`, `resolver`. The aggregator now resolves each 1:1 inbox thread
+      via `attributable_handle` (display name → handle through the
+      `NameResolver`, after stripping `me.name` from participants and
+      rejecting both group chats with ≥ 2 other participants and
+      abandoned threads with 0 others — both exclusions explicit in
+      DESIGN.md). Threads that resolve and whose handle is in the
+      followings set credit `dm_messages_total`, direction-classified
+      counters, reactions (`actor == me.name` → given, otherwise
+      received, `None` skipped), and a max-timestamp `dm_recency_days`.
+      `dm_balance` and `dm_recency_days` finalize from a sidecar
+      `DmAccum` map so multi-thread aliasing (a followee surfaced under
+      two `(Name, Username)` pairs in different `label_values` files)
+      composes by union, not last-thread-wins. A separate pass over
+      `message_request_threads` flips `inbound_dm_request` (the boolean
+      is the only signal DESIGN sources from `message_requests/`;
+      counts and reactions stay sourced from inbox-only). Validated
+      against the 2026-05-11 export: `DM-attributed accounts: 214`
+      (217 resolvable threads minus 3 whose resolved handle is no
+      longer a followee), `DM reactions given total: 36027`, `DM
+      reactions received total: 39724` (the true inbound signal —
+      received > given, consistent with DESIGN's "DM reactions are the
+      single most valuable bidirectional signal" framing), `inbound
+      DM requests: 1`.
+- [ ] **Decay + windowed counts + config (slice 7B-2)** — load
+      `[decay]` from `config/scoring.toml` (and the rest of the TOML
+      structure for future slices), add decay-weighted `*_decayed: f64`
+      fields for each count feature via `exp(-Δt / τ)`, and emit the
+      four raw `*_90d` / `*_180d` windowed counts (`likes_given_90d`,
+      `comments_given_90d`, `dm_reactions_given_180d`,
+      `dm_reactions_received_180d`) for the CSV columns. DESIGN.md is
+      explicit these are *different aggregations* than the
+      decay-weighted score inputs.
 - [ ] **First-pass scoring** with hand-set weights; eyeball top/bottom 50.
 - [ ] **Tune weights and decay constants** — consider a small labeled set of
       ~30 accounts I already know I want to keep/drop, fit weights to match.

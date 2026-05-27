@@ -222,18 +222,36 @@ pub fn run(cli: Cli) -> Result<()> {
         post_comments: &post_comments,
         reels_comments: &reels_comments,
         hype: &hype,
+        inbox_threads: &threads,
+        message_request_threads: &message_request_threads,
+        me: &me,
+        resolver: &resolver,
     };
     let aggregated = features::aggregate(&inputs, jiff::Timestamp::now());
     let agg_close_friends = aggregated.iter().filter(|f| f.is_close_friend).count();
     let agg_favorited = aggregated.iter().filter(|f| f.is_favorited).count();
     let agg_with_likes = aggregated.iter().filter(|f| f.likes_given > 0).count();
     let agg_with_comments = aggregated.iter().filter(|f| f.comments_given > 0).count();
+    let agg_dm_attributed = aggregated
+        .iter()
+        .filter(|f| f.dm_messages_total > 0)
+        .count();
+    let agg_dm_reactions_given: u64 = aggregated.iter().map(|f| f.dm_reactions_given as u64).sum();
+    let agg_dm_reactions_received: u64 = aggregated
+        .iter()
+        .map(|f| f.dm_reactions_received as u64)
+        .sum();
+    let agg_inbound_dm_requests = aggregated.iter().filter(|f| f.inbound_dm_request).count();
 
     println!("aggregated accounts: {}", aggregated.len());
     println!("aggregated close friends: {agg_close_friends}");
     println!("aggregated favorited: {agg_favorited}");
     println!("aggregated with likes_given > 0: {agg_with_likes}");
     println!("aggregated with comments_given > 0: {agg_with_comments}");
+    println!("DM-attributed accounts: {agg_dm_attributed}");
+    println!("DM reactions given total: {agg_dm_reactions_given}");
+    println!("DM reactions received total: {agg_dm_reactions_received}");
+    println!("inbound DM requests: {agg_inbound_dm_requests}");
 
     Ok(())
 }

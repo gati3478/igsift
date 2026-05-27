@@ -1,4 +1,5 @@
-//! Per-account feature aggregation — handle-keyed half (slice 7A).
+//! Per-account feature aggregation — handle-keyed half (slice 7A) plus
+//! raw DM features (slice 7B-1).
 //!
 //! Folds the parsed [`crate::export`] outputs into one [`AccountFeatures`]
 //! record per followed account. Scope is the followings set per
@@ -15,12 +16,25 @@
 //!   `comments_given`, `story_interactions_out`, `stories_viewed`,
 //!   `saved_their_content`.
 //!
-//! Slice 7B will populate the DM features (defaulted to zero/`None` here),
-//! apply exponential decay per `config/scoring.toml` `[decay]`, and emit the
-//! `*_90d` / `*_180d` windowed counts for the CSV columns. DESIGN.md is
-//! explicit that the decay-weighted score inputs and the windowed
-//! human-readable counts are *different aggregations*; both live in this
-//! module once 7B lands.
+//! Slice 7B-1 added:
+//! - raw DM features per followee whose 1:1 inbox thread resolves through
+//!   [`crate::features::name_resolution`]: `dm_messages_total`,
+//!   `dm_recency_days`, `dm_balance`, `dm_reactions_given`,
+//!   `dm_reactions_received`,
+//! - the `inbound_dm_request` boolean from a resolved thread in
+//!   `messages/message_requests/`.
+//!
+//! Group chats (≥ 3 participants) and abandoned threads (only `me` as
+//! participant) are dropped entirely — DESIGN.md "DM display_name ↔ handle
+//! bridge" makes both exclusions explicit. Threads whose resolver call
+//! returns `None` (unknown display name OR colliding name) do not credit
+//! any followee — misattribution is worse than missing attribution.
+//!
+//! Slice 7B-2 will load `[decay]` from `config/scoring.toml`, layer
+//! exponential-decay-weighted versions onto the count features, and emit
+//! the four raw `*_90d` / `*_180d` windowed counts that the CSV columns
+//! consume. DESIGN.md is explicit that decay-weighted score inputs and
+//! windowed human-readable counts are *different aggregations*.
 //!
 //! Honest-counting posture inherited from the parsers: an activity entry
 //! whose target handle is not in the followings set is silently dropped at
@@ -31,7 +45,10 @@ use std::collections::{HashMap, HashSet};
 
 use jiff::Timestamp;
 
-use crate::export::{CommentEntry, FollowingEntry, ShapeAEntry, ShapeCEntry, owner_username};
+use crate::export::{
+    CommentEntry, DmThread, FollowingEntry, MeIdentity, ShapeAEntry, ShapeCEntry, owner_username,
+};
+use crate::features::name_resolution::NameResolver;
 
 /// One row of per-account features. Slice 7A populates the handle-keyed
 /// fields; DM-derived fields are defaulted to zero / `None` and filled in
@@ -98,6 +115,11 @@ pub struct AggregateInputs<'a> {
     pub post_comments: &'a [CommentEntry],
     pub reels_comments: &'a [CommentEntry],
     pub hype: &'a [CommentEntry],
+
+    pub inbox_threads: &'a [DmThread],
+    pub message_request_threads: &'a [DmThread],
+    pub me: &'a MeIdentity,
+    pub resolver: &'a NameResolver,
 }
 
 /// Build one [`AccountFeatures`] row per followee, keyed by handle.
@@ -132,7 +154,7 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
         }
         let features = AccountFeatures {
             username: f.username.clone(),
-            follow_tenure_days: f.followed_at.and_then(|ts| tenure_days(ts, now)),
+            follow_tenure_days: f.followed_at.and_then(|ts| days_since(ts, now)),
             is_close_friend: close_friend.contains(handle),
             is_favorited: favorited.contains(handle),
             is_blocked: false,
@@ -210,7 +232,125 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
         }
     }
 
+    apply_dm_features(&mut by_handle, inputs, now);
+
     by_handle.into_values().collect()
+}
+
+/// Slice 7B-1 DM aggregation pass.
+///
+/// Walks `inbox_threads` to populate `dm_messages_total`,
+/// `dm_recency_days`, `dm_balance`, `dm_reactions_given`,
+/// `dm_reactions_received` on each followee with a resolvable 1:1 thread;
+/// walks `message_request_threads` to flip `inbound_dm_request`.
+///
+/// `outbound`/`inbound`/`latest` accumulate in a sidecar [`HashMap`] (not
+/// on `AccountFeatures`) so multiple threads attributing to the same handle
+/// — which can happen when display-name aliases in the seven `label_values`
+/// files all resolve to one handle — compose to one correct `dm_balance`
+/// and one correct `dm_recency_days` at finalization, rather than the
+/// last-thread-wins behaviour a per-thread-finalize loop would produce.
+fn apply_dm_features<'a>(
+    by_handle: &mut HashMap<&'a str, AccountFeatures>,
+    inputs: &AggregateInputs<'a>,
+    now: Timestamp,
+) {
+    for thread in inputs.message_request_threads {
+        if let Some(handle) = attributable_handle(thread, &inputs.me.name, inputs.resolver)
+            && let Some(features) = by_handle.get_mut(handle)
+        {
+            features.inbound_dm_request = true;
+        }
+    }
+
+    let mut accum: HashMap<&str, DmAccum> = HashMap::new();
+    for thread in inputs.inbox_threads {
+        let Some(handle) = attributable_handle(thread, &inputs.me.name, inputs.resolver) else {
+            continue;
+        };
+        let Some(features) = by_handle.get_mut(handle) else {
+            continue;
+        };
+        let acc = accum.entry(handle).or_default();
+        walk_inbox_thread(thread, features, acc, &inputs.me.name);
+    }
+
+    for (handle, acc) in &accum {
+        let Some(features) = by_handle.get_mut(*handle) else {
+            continue;
+        };
+        let total = acc.outbound + acc.inbound;
+        if total > 0 {
+            features.dm_balance = Some(acc.outbound as f32 / total as f32);
+        }
+        if let Some(latest) = acc.latest {
+            features.dm_recency_days = days_since(latest, now);
+        }
+    }
+}
+
+/// Tracks the per-handle running totals that don't compose by addition.
+///
+/// `dm_messages_total` and the two reaction counters compose by addition
+/// (we write straight to `AccountFeatures`), but `dm_balance` is a ratio
+/// and `dm_recency_days` is a max — both need access to the cross-thread
+/// pre-image, not the running result.
+#[derive(Debug, Default)]
+struct DmAccum {
+    outbound: u32,
+    inbound: u32,
+    latest: Option<Timestamp>,
+}
+
+/// Resolve a thread to its (single, non-me, mapped-by-resolver) handle.
+///
+/// Returns `None` for group chats (≥ 2 others), abandoned threads (0
+/// others), and any thread whose other-party display name is unknown to
+/// the resolver or maps to multiple handles (collision). Matches DESIGN.md
+/// "DM display_name ↔ handle bridge" exclusions.
+fn attributable_handle<'r>(
+    thread: &DmThread,
+    me_name: &str,
+    resolver: &'r NameResolver,
+) -> Option<&'r str> {
+    let mut others = thread.participants.iter().filter(|p| p.as_str() != me_name);
+    let first = others.next()?;
+    if others.next().is_some() {
+        return None;
+    }
+    resolver.resolve(first)
+}
+
+fn walk_inbox_thread(
+    thread: &DmThread,
+    features: &mut AccountFeatures,
+    acc: &mut DmAccum,
+    me_name: &str,
+) {
+    for msg in &thread.messages {
+        features.dm_messages_total += 1;
+
+        match msg.sender.as_deref() {
+            Some(s) if s == me_name => acc.outbound += 1,
+            Some(_) => acc.inbound += 1,
+            None => {}
+        }
+
+        if let Some(ts) = msg.timestamp {
+            acc.latest = Some(match acc.latest {
+                Some(prev) if prev >= ts => prev,
+                _ => ts,
+            });
+        }
+
+        for r in &msg.reactions {
+            match r.actor.as_deref() {
+                Some(s) if s == me_name => features.dm_reactions_given += 1,
+                Some(_) => features.dm_reactions_received += 1,
+                None => {}
+            }
+        }
+    }
 }
 
 /// Walk a relationship-flag entry to its outer-level `Username` value.
@@ -235,8 +375,13 @@ fn collect_handles(entries: &[ShapeCEntry]) -> HashSet<&str> {
     entries.iter().filter_map(flag_username).collect()
 }
 
-fn tenure_days(followed_at: Timestamp, now: Timestamp) -> Option<u32> {
-    let secs = now.duration_since(followed_at).as_secs();
+/// Whole days between `earlier` and `now` as a non-negative `u32`.
+///
+/// `None` when `earlier > now` (clock skew on the export job, hand-edited
+/// fixtures) — the duration arithmetic must not panic or wrap. Backs
+/// `follow_tenure_days` and `dm_recency_days`.
+fn days_since(earlier: Timestamp, now: Timestamp) -> Option<u32> {
+    let secs = now.duration_since(earlier).as_secs();
     if secs < 0 {
         return None;
     }
@@ -247,15 +392,20 @@ fn tenure_days(followed_at: Timestamp, now: Timestamp) -> Option<u32> {
 mod tests {
     //! Structural tests on synthetic parser outputs — no fixture I/O.
     //!
-    //! Pins the four invariants the slice-7A spec calls out: filter-to-
+    //! Pins the four invariants the slice-7A spec calls out (filter-to-
     //! followings, blocked/recently_unfollowed input-set exclusion, boolean
-    //! flag population from the seven `label_values` files, and activity-
-    //! count summation across the five source-groups (`liked_posts` +
-    //! `liked_comments`, three comment files, seven story shape-A files,
-    //! `stories_viewed`, `saved_posts`). `follow_tenure_days` is pinned
-    //! against a fixed `now` so the test never drifts against real time.
+    //! flag population from the seven `label_values` files, activity-count
+    //! summation across the five source-groups) plus the slice-7B-1 DM
+    //! semantics: 1:1 resolver gating, group/abandoned-thread exclusion,
+    //! direction classification, reaction direction, `dm_balance` /
+    //! `dm_recency_days` finalization across multiple threads to the same
+    //! handle, and `inbound_dm_request` from `message_requests/`.
+    //! `follow_tenure_days` and `dm_recency_days` are pinned against a
+    //! fixed `now` so the tests never drift against real time.
     use super::*;
-    use crate::export::{ShapeCInnerEntry, ShapeCInnerGroup, ShapeCLabelValue};
+    use crate::export::{
+        DmMessage, DmReaction, ShapeCInnerEntry, ShapeCInnerGroup, ShapeCLabelValue,
+    };
 
     fn following(username: &str, followed_at: Option<Timestamp>) -> FollowingEntry {
         FollowingEntry {
@@ -313,6 +463,8 @@ mod tests {
     fn empty_inputs<'a>(
         followings: &'a [FollowingEntry],
         hide_story_from: &'a ShapeCEntry,
+        me: &'a MeIdentity,
+        resolver: &'a NameResolver,
     ) -> AggregateInputs<'a> {
         AggregateInputs {
             followings,
@@ -337,6 +489,68 @@ mod tests {
             post_comments: &[],
             reels_comments: &[],
             hype: &[],
+            inbox_threads: &[],
+            message_request_threads: &[],
+            me,
+            resolver,
+        }
+    }
+
+    fn synth_me() -> MeIdentity {
+        MeIdentity {
+            handle: "me_handle".to_owned(),
+            name: "Me Real".to_owned(),
+        }
+    }
+
+    fn name_pair(name: &str, handle: &str) -> ShapeCEntry {
+        ShapeCEntry {
+            fbid: None,
+            timestamp: None,
+            label_values: vec![
+                ShapeCLabelValue {
+                    label: Some("Name".to_owned()),
+                    value: Some(name.to_owned()),
+                    title: None,
+                    dict: Vec::new(),
+                },
+                ShapeCLabelValue {
+                    label: Some("Username".to_owned()),
+                    value: Some(handle.to_owned()),
+                    title: None,
+                    dict: Vec::new(),
+                },
+            ],
+        }
+    }
+
+    fn resolver_from(pairs: &[(&str, &str)]) -> NameResolver {
+        let entries: Vec<ShapeCEntry> = pairs.iter().map(|(n, h)| name_pair(n, h)).collect();
+        NameResolver::build(&[&entries])
+    }
+
+    fn dm_thread(participants: &[&str], messages: Vec<DmMessage>) -> DmThread {
+        DmThread {
+            folder: String::new(),
+            title: None,
+            participants: participants.iter().map(|s| (*s).to_owned()).collect(),
+            messages,
+        }
+    }
+
+    fn msg(sender: Option<&str>, ts_secs: Option<i64>, reactions: Vec<DmReaction>) -> DmMessage {
+        DmMessage {
+            sender: sender.map(str::to_owned),
+            timestamp: ts_secs.and_then(|s| Timestamp::from_second(s).ok()),
+            content: None,
+            reactions,
+        }
+    }
+
+    fn react(actor: Option<&str>) -> DmReaction {
+        DmReaction {
+            reaction: Some("heart".to_owned()),
+            actor: actor.map(str::to_owned),
         }
     }
 
@@ -365,7 +579,9 @@ mod tests {
     fn filters_output_to_followings_set() {
         let followings = vec![following("alice", None), following("bob", None)];
         let hide = empty_hide_entry();
-        let mut inputs = empty_inputs(&followings, &hide);
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
         // close_friends includes a handle (`stranger`) that's NOT a following:
         // the aggregator must drop it from the output, not promote it.
         let close_friends = vec![flag("alice"), flag("stranger")];
@@ -385,7 +601,9 @@ mod tests {
             following("dave", None),
         ];
         let hide = empty_hide_entry();
-        let mut inputs = empty_inputs(&followings, &hide);
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
         let blocked = vec![flag("carol")];
         let recently_unfollowed = vec![flag("dave")];
         inputs.blocked = &blocked;
@@ -408,7 +626,9 @@ mod tests {
             following("carol", None),
         ];
         let hide = flag("alice");
-        let mut inputs = empty_inputs(&followings, &hide);
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
         let close_friends = vec![flag("alice")];
         let favorited = vec![flag("bob"), flag("carol")];
         let restricted = vec![flag("bob")];
@@ -441,7 +661,9 @@ mod tests {
     fn sums_activity_counts_across_sources() {
         let followings = vec![following("alice", None), following("bob", None)];
         let hide = empty_hide_entry();
-        let mut inputs = empty_inputs(&followings, &hide);
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
 
         // alice gets 2 liked_posts + 1 liked_comment → likes_given = 3.
         let liked_posts = vec![
@@ -509,7 +731,9 @@ mod tests {
             following("bob", None),
         ];
         let hide = empty_hide_entry();
-        let inputs = empty_inputs(&followings, &hide);
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver);
 
         let by = by_username(aggregate(&inputs, now));
         assert_eq!(by["alice"].follow_tenure_days, Some(30));
@@ -525,7 +749,9 @@ mod tests {
         let future = Timestamp::from_second(1_800_000_000 + 86_400).unwrap();
         let followings = vec![following("alice", Some(future))];
         let hide = empty_hide_entry();
-        let inputs = empty_inputs(&followings, &hide);
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver);
 
         let by = by_username(aggregate(&inputs, now));
         assert_eq!(by["alice"].follow_tenure_days, None);
@@ -541,7 +767,9 @@ mod tests {
         // would credit the phantom empty-handle followee.
         let followings = vec![following("", None), following("alice", None)];
         let hide = empty_hide_entry();
-        let mut inputs = empty_inputs(&followings, &hide);
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
         // Activity entries with empty `Owner.Username` and shape-A username:
         // both would route to `get_mut("")` if the empty handle existed.
         let liked_posts = vec![owner_entry("")];
@@ -567,7 +795,9 @@ mod tests {
         // followee silently gets is_close_friend = true.
         let followings = vec![following("alice", None)];
         let hide = empty_hide_entry();
-        let mut inputs = empty_inputs(&followings, &hide);
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
         let close_friends = vec![ShapeCEntry {
             fbid: None,
             timestamp: None,
@@ -582,5 +812,297 @@ mod tests {
 
         let by = by_username(aggregate(&inputs, fixed_now()));
         assert!(!by["alice"].is_close_friend);
+    }
+
+    // ── slice 7B-1: DM features ───────────────────────────────────────────
+
+    #[test]
+    fn group_chat_is_dropped_from_dm_aggregation() {
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        // Three participants including me — `attributable_handle` must
+        // refuse to single out Alice as the partner.
+        let threads = vec![dm_thread(
+            &["Alice Real", "Bob Real", "Me Real"],
+            vec![msg(Some("Alice Real"), Some(1_700_000_000), vec![])],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let by = by_username(aggregate(&inputs, fixed_now()));
+        assert_eq!(by["alice"].dm_messages_total, 0);
+        assert_eq!(by["alice"].dm_balance, None);
+        assert_eq!(by["alice"].dm_recency_days, None);
+    }
+
+    #[test]
+    fn abandoned_thread_is_dropped_from_dm_aggregation() {
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        // Only me in participants — `attributable_handle` returns None
+        // (no `first` other-participant to resolve).
+        let threads = vec![dm_thread(
+            &["Me Real"],
+            vec![msg(Some("Me Real"), Some(1_700_000_000), vec![])],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let by = by_username(aggregate(&inputs, fixed_now()));
+        assert_eq!(by["alice"].dm_messages_total, 0);
+    }
+
+    #[test]
+    fn unresolvable_display_name_credits_no_followee() {
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        // Resolver has Alice mapped, but the thread uses a display name
+        // (`Stranger`) that the resolver has never seen.
+        let resolver = resolver_from(&[("Alice Real", "alice")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let threads = vec![dm_thread(
+            &["Stranger", "Me Real"],
+            vec![msg(Some("Stranger"), Some(1_700_000_000), vec![])],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let by = by_username(aggregate(&inputs, fixed_now()));
+        assert_eq!(by["alice"].dm_messages_total, 0);
+    }
+
+    #[test]
+    fn colliding_display_name_credits_no_followee() {
+        // Resolver collisions (one Name maps to ≥ 2 distinct handles)
+        // resolve to None, mirroring the resolver's "misattribution >
+        // missing attribution" policy. Defends the DM aggregation path
+        // explicitly even though the resolver already enforces it.
+        let followings = vec![following("alice", None), following("alice2", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Mike", "alice"), ("Mike", "alice2")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let threads = vec![dm_thread(
+            &["Mike", "Me Real"],
+            vec![msg(Some("Mike"), Some(1_700_000_000), vec![])],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let by = by_username(aggregate(&inputs, fixed_now()));
+        assert_eq!(by["alice"].dm_messages_total, 0);
+        assert_eq!(by["alice2"].dm_messages_total, 0);
+    }
+
+    #[test]
+    fn resolved_handle_outside_followings_does_not_create_row() {
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Stranger", "stranger")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let threads = vec![dm_thread(
+            &["Stranger", "Me Real"],
+            vec![msg(Some("Stranger"), Some(1_700_000_000), vec![])],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let out = aggregate(&inputs, fixed_now());
+        let handles: HashSet<&str> = out.iter().map(|f| f.username.as_str()).collect();
+        assert_eq!(
+            handles,
+            HashSet::from(["alice"]),
+            "resolved-but-non-followee must not anchor a phantom output row",
+        );
+    }
+
+    #[test]
+    fn classifies_message_direction_and_skips_missing_sender() {
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let threads = vec![dm_thread(
+            &["Alice Real", "Me Real"],
+            vec![
+                msg(Some("Me Real"), Some(1_700_000_000), vec![]),
+                msg(Some("Me Real"), Some(1_700_000_010), vec![]),
+                msg(Some("Me Real"), Some(1_700_000_020), vec![]),
+                msg(Some("Alice Real"), Some(1_700_000_030), vec![]),
+                msg(Some("Alice Real"), Some(1_700_000_040), vec![]),
+                // Missing sender — counts toward dm_messages_total but
+                // not toward direction-balance denom (cannot classify).
+                msg(None, Some(1_700_000_050), vec![]),
+            ],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let alice = &by_username(aggregate(&inputs, fixed_now()))["alice"];
+        assert_eq!(alice.dm_messages_total, 6);
+        // 3 outbound, 2 inbound, 1 unclassifiable → 3 / 5 = 0.6
+        assert_eq!(alice.dm_balance, Some(0.6));
+    }
+
+    #[test]
+    fn dm_balance_is_none_when_no_classifiable_senders() {
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let threads = vec![dm_thread(
+            &["Alice Real", "Me Real"],
+            vec![msg(None, Some(1_700_000_000), vec![])],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let alice = &by_username(aggregate(&inputs, fixed_now()))["alice"];
+        assert_eq!(alice.dm_messages_total, 1);
+        assert_eq!(alice.dm_balance, None);
+    }
+
+    #[test]
+    fn classifies_reaction_direction() {
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let threads = vec![dm_thread(
+            &["Alice Real", "Me Real"],
+            vec![msg(
+                Some("Me Real"),
+                Some(1_700_000_000),
+                vec![
+                    react(Some("Me Real")),
+                    react(Some("Alice Real")),
+                    react(Some("Stranger")),
+                    react(None),
+                ],
+            )],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let alice = &by_username(aggregate(&inputs, fixed_now()))["alice"];
+        // Me → given, Alice → received, Stranger → received (anything
+        // not-me counts as received in 1:1 threads), None → skipped.
+        assert_eq!(alice.dm_reactions_given, 1);
+        assert_eq!(alice.dm_reactions_received, 2);
+    }
+
+    #[test]
+    fn dm_recency_days_uses_max_timestamp() {
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        // Out-of-order timestamps: the recency value must be derived
+        // from the maximum, not the last entry encountered.
+        let now_secs = 1_800_000_000_i64;
+        let latest_secs = now_secs - 7 * 86_400;
+        let threads = vec![dm_thread(
+            &["Alice Real", "Me Real"],
+            vec![
+                msg(Some("Me Real"), Some(latest_secs - 86_400), vec![]),
+                msg(Some("Alice Real"), Some(latest_secs), vec![]),
+                msg(Some("Me Real"), Some(latest_secs - 2 * 86_400), vec![]),
+            ],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let alice = &by_username(aggregate(&inputs, fixed_now()))["alice"];
+        assert_eq!(alice.dm_recency_days, Some(7));
+    }
+
+    #[test]
+    fn future_message_timestamp_yields_none_recency() {
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let future_secs = 1_800_000_000_i64 + 86_400;
+        let threads = vec![dm_thread(
+            &["Alice Real", "Me Real"],
+            vec![msg(Some("Alice Real"), Some(future_secs), vec![])],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let alice = &by_username(aggregate(&inputs, fixed_now()))["alice"];
+        assert_eq!(alice.dm_recency_days, None);
+    }
+
+    #[test]
+    fn cross_thread_balance_and_recency_finalize_correctly() {
+        // Display-name aliases for the same handle exist in the real
+        // export: a followee may appear under two `(Name, Username)` pairs
+        // in different `label_values` files. The aggregator must treat
+        // every inbox thread that resolves to that handle as part of one
+        // aggregation — balance/recency reduce across threads, not
+        // last-thread-wins.
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice"), ("Alice Alias", "alice")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let now_secs = 1_800_000_000_i64;
+        let threads = vec![
+            dm_thread(
+                &["Alice Real", "Me Real"],
+                vec![
+                    msg(Some("Me Real"), Some(now_secs - 31 * 86_400), vec![]),
+                    msg(Some("Me Real"), Some(now_secs - 30 * 86_400), vec![]),
+                ],
+            ),
+            dm_thread(
+                &["Alice Alias", "Me Real"],
+                vec![
+                    msg(Some("Alice Real"), Some(now_secs - 11 * 86_400), vec![]),
+                    msg(Some("Alice Real"), Some(now_secs - 10 * 86_400), vec![]),
+                ],
+            ),
+        ];
+        inputs.inbox_threads = &threads;
+
+        let alice = &by_username(aggregate(&inputs, fixed_now()))["alice"];
+        assert_eq!(alice.dm_messages_total, 4);
+        // 2 outbound + 2 inbound across the two threads — balance must
+        // reflect the union, not the second thread's local 0/2 = 0.0.
+        assert_eq!(alice.dm_balance, Some(0.5));
+        assert_eq!(alice.dm_recency_days, Some(10));
+    }
+
+    #[test]
+    fn inbound_dm_request_flips_via_message_requests_only() {
+        let followings = vec![following("alice", None), following("bob", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice"), ("Bob Real", "bob")]);
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        // Alice has only an inbox thread → inbound_dm_request stays
+        // false. Bob has only a message_requests thread → flips.
+        let inbox = vec![dm_thread(
+            &["Alice Real", "Me Real"],
+            vec![msg(Some("Alice Real"), Some(1_700_000_000), vec![])],
+        )];
+        let requests = vec![dm_thread(
+            &["Bob Real", "Me Real"],
+            vec![msg(Some("Bob Real"), Some(1_700_000_000), vec![])],
+        )];
+        inputs.inbox_threads = &inbox;
+        inputs.message_request_threads = &requests;
+
+        let by = by_username(aggregate(&inputs, fixed_now()));
+        assert!(!by["alice"].inbound_dm_request);
+        assert!(by["bob"].inbound_dm_request);
+        // message_requests must NOT credit bob's message-counts or
+        // reactions — that path sources from `inbox_threads` only.
+        assert_eq!(by["bob"].dm_messages_total, 0);
+        assert_eq!(by["bob"].dm_reactions_received, 0);
     }
 }

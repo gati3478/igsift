@@ -138,5 +138,19 @@ fn fixture_counts_match_expected() {
         .stdout(contains("aggregated close friends: 1"))
         .stdout(contains("aggregated favorited: 2"))
         .stdout(contains("aggregated with likes_given > 0: 0"))
-        .stdout(contains("aggregated with comments_given > 0: 0"));
+        .stdout(contains("aggregated with comments_given > 0: 0"))
+        // Slice-7B-1 DM aggregator: only `carol_thread` resolves (display
+        // name "Carol Synth" → handle `carol_synth` via the favorited
+        // bridge, and `carol_synth` is a followee). `alice_thread` and
+        // `bob_thread` spell their other participants with the handle
+        // (`alice_synth` / `bob_synth`) — the resolver refuses to match.
+        // So only carol picks up DM features. `carol_thread` carries one
+        // reaction in each direction (me reacting to her message →
+        // given; her reacting to my message → received). `stranger_synth`
+        // is not in any `label_values` file → message_requests doesn't
+        // resolve → no followee gets `inbound_dm_request = true`.
+        .stdout(contains("DM-attributed accounts: 1"))
+        .stdout(contains("DM reactions given total: 1"))
+        .stdout(contains("DM reactions received total: 1"))
+        .stdout(contains("inbound DM requests: 0"));
 }
