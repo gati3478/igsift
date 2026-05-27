@@ -1,0 +1,17 @@
+{
+  "comments_reels_comments": [
+    {
+      "string_map_data": {
+        "Comment": {
+          "value": "reel comment synth"
+        },
+        "Media Owner": {
+          "value": "reel_target_synth"
+        },
+        "Time": {
+          "timestamp": 1700600000
+        }
+      }
+    }
+  ]
+}

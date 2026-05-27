@@ -13,10 +13,10 @@
 //! `hide_story_from`, `recently_unfollowed_profiles`, `removed_suggestions`),
 //! the four shape-C-with-nested-`Owner` activity files (`liked_posts`,
 //! `story_likes`, `stories_viewed`, `saved_posts`) plus the
-//! [`owner_username`] helper, and the eight shape-A activity files
+//! [`owner_username`] helper, the eight shape-A activity files
 //! (`liked_comments` and the seven `story_interactions/*` files) returning
-//! [`ShapeAEntry`]. Shape-D comment files (`post_comments_*`,
-//! `reels_comments`, `hype`) are deferred per `ROADMAP.md`.
+//! [`ShapeAEntry`], and the three shape-D comment files (`post_comments_*`,
+//! `reels_comments`, `hype`) returning [`CommentEntry`].
 //!
 //! Robustness approach:
 //!
@@ -57,6 +57,10 @@ const STORY_EMOJI_REACTIONS: &str =
 const STORY_REACTION_STICKERS: &str =
     "your_instagram_activity/story_interactions/story_reaction_sticker_reactions.json";
 const STORY_COUNTDOWNS: &str = "your_instagram_activity/story_interactions/countdowns.json";
+
+const POST_COMMENTS_DIR: &str = "your_instagram_activity/comments";
+const REELS_COMMENTS: &str = "your_instagram_activity/comments/reels_comments.json";
+const HYPE: &str = "your_instagram_activity/comments/hype.json";
 
 // ── Public output types ──────────────────────────────────────────────────────
 
@@ -172,6 +176,25 @@ pub struct ShapeCInnerEntry {
 #[derive(Debug, Clone)]
 pub struct ShapeAEntry {
     pub username: String,
+    pub timestamp: Option<Timestamp>,
+}
+
+/// One outbound comment I left — on a post, a reel, or a story.
+///
+/// Backs all three shape-**D** comment files: `comments/post_comments_*.json`
+/// (bare array), `comments/reels_comments.json` (wrapped under
+/// `comments_reels_comments`), and `comments/hype.json` (wrapped under
+/// `comments_story_comments`). The target account (whose post/reel/story I
+/// commented on) is `target_username`; the comment timestamp is in Unix
+/// seconds at the source.
+///
+/// Comment text and media URI from `string_map_data` are deliberately not
+/// surfaced — DESIGN.md's `comments_given` feature consumes count, recency,
+/// and target, not the body. Adding the text would put export content on
+/// the public type without a consumer.
+#[derive(Debug, Clone)]
+pub struct CommentEntry {
+    pub target_username: String,
     pub timestamp: Option<Timestamp>,
 }
 
@@ -302,6 +325,57 @@ struct StoryReactionStickersFileRaw {
 struct StoryCountdownsFileRaw {
     #[serde(default)]
     story_activities_countdowns: Vec<RelationshipEntryRaw>,
+}
+
+// ── Shape-D wrapper + entry structs ──────────────────────────────────────────
+//
+// Shape D entry is `{string_map_data: {<FieldName>: {value?, timestamp?}}}`,
+// where each value object carries either a string `value` or a numeric
+// `timestamp` (Unix seconds) — sparsely populated, never both. The two
+// fields the scoring layer needs are codified as compile-checked struct
+// fields with `#[serde(rename)]` so the human-readable IG spellings
+// ("Media Owner", "Time") live in code as a single source of truth, not
+// only in `docs/DESIGN.md`. Same rationale as the shape-A wrapper-key
+// structs above: rename drift on a sub-key produces a None at extraction
+// time rather than silently passing through, and the honest-count filter
+// in `shape_d_entries` surfaces it as a missing count.
+//
+// `post_comments_*.json` is a bare array of these entries (no wrapper);
+// `reels_comments.json` and `hype.json` wrap the array under their
+// respective IG wrapper keys.
+
+#[derive(Debug, Deserialize)]
+struct ReelsCommentsFileRaw {
+    #[serde(default)]
+    comments_reels_comments: Vec<ShapeDEntryRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HypeFileRaw {
+    #[serde(default)]
+    comments_story_comments: Vec<ShapeDEntryRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ShapeDEntryRaw {
+    #[serde(default)]
+    string_map_data: ShapeDStringMap,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ShapeDStringMap {
+    #[serde(default, rename = "Media Owner")]
+    media_owner: ShapeDValue,
+    #[serde(default, rename = "Time")]
+    time: ShapeDValue,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ShapeDValue {
+    #[serde(default)]
+    value: Option<String>,
+    #[serde(default)]
+    timestamp: Option<i64>,
 }
 
 // ── Public readers ───────────────────────────────────────────────────────────
@@ -522,6 +596,57 @@ pub fn read_story_countdowns(export_dir: &Path) -> Result<Vec<ShapeAEntry>> {
     Ok(shape_a_entries(raw.story_activities_countdowns))
 }
 
+/// Parse every `your_instagram_activity/comments/post_comments_*.json` —
+/// shape **D**, bare array (no wrapper key). Instagram chunks high-volume
+/// comment lists across `post_comments_1.json`, `post_comments_2.json`, …
+/// — numeric-suffix sort (not lexicographic) so `_10` follows `_9`, not
+/// `_2`. Each entry is one comment I left on a post; the target account
+/// (post owner) lives at `string_map_data["Media Owner"].value`.
+pub fn read_post_comments(export_dir: &Path) -> Result<Vec<CommentEntry>> {
+    let dir = export_dir.join(POST_COMMENTS_DIR);
+    let mut parts: Vec<(u32, PathBuf)> = std::fs::read_dir(&dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter_map(|path| {
+            let stem = path.file_stem().and_then(|s| s.to_str())?;
+            let ext = path.extension().and_then(|s| s.to_str())?;
+            if ext != "json" {
+                return None;
+            }
+            let suffix = stem.strip_prefix("post_comments_")?;
+            let n: u32 = suffix.parse().ok()?;
+            Some((n, path))
+        })
+        .collect();
+    parts.sort_by_key(|(n, _)| *n);
+
+    let mut raw_all: Vec<ShapeDEntryRaw> = Vec::new();
+    for (_, path) in parts {
+        let raw: Vec<ShapeDEntryRaw> = parse_json(&path)?;
+        raw_all.extend(raw);
+    }
+    Ok(shape_d_entries(raw_all))
+}
+
+/// Parse `your_instagram_activity/comments/reels_comments.json` — shape
+/// **A** wrapper around shape-**D** entries; wrapper key
+/// `comments_reels_comments`. Each entry is one comment I left on a reel.
+pub fn read_reels_comments(export_dir: &Path) -> Result<Vec<CommentEntry>> {
+    let raw: ReelsCommentsFileRaw = parse_json(&export_dir.join(REELS_COMMENTS))?;
+    Ok(shape_d_entries(raw.comments_reels_comments))
+}
+
+/// Parse `your_instagram_activity/comments/hype.json` — shape **A** wrapper
+/// around shape-**D** entries; wrapper key `comments_story_comments`. File
+/// name and wrapper key are NOT symmetric (the file is `hype.json` but the
+/// key references `story_comments`) — codified so a future reader does not
+/// assume a 1:1 file-name ↔ wrapper-key mapping.
+pub fn read_hype(export_dir: &Path) -> Result<Vec<CommentEntry>> {
+    let raw: HypeFileRaw = parse_json(&export_dir.join(HYPE))?;
+    Ok(shape_d_entries(raw.comments_story_comments))
+}
+
 /// Extract the `Owner.Username` from a shape-C entry that carries a nested
 /// `Owner` section (the four activity files above). Walks
 /// `label_values → title == "Owner" → dict[0].dict → label == "Username" →
@@ -653,6 +778,31 @@ fn shape_a_entries(raw: Vec<RelationshipEntryRaw>) -> Vec<ShapeAEntry> {
         .collect()
 }
 
+/// Convert the raw shape-D entry list into the public [`CommentEntry`]
+/// list. Drops entries without an extractable `Media Owner` username —
+/// schema drift or empty fields, not a usable comment signal. Same
+/// honest-count posture as [`shape_a_entries`] and the
+/// `owner_username`-derived counts: surface dropped data as a missing
+/// count rather than silently inflating the total.
+fn shape_d_entries(raw: Vec<ShapeDEntryRaw>) -> Vec<CommentEntry> {
+    raw.into_iter()
+        .filter_map(|entry| {
+            let username = entry.string_map_data.media_owner.value?;
+            if username.is_empty() {
+                return None;
+            }
+            Some(CommentEntry {
+                target_username: username,
+                timestamp: entry
+                    .string_map_data
+                    .time
+                    .timestamp
+                    .and_then(seconds_to_timestamp),
+            })
+        })
+        .collect()
+}
+
 /// Read `message_1.json`, `message_2.json`, … sorted by numeric suffix.
 /// Falling back to lexicographic sort would put `message_10.json` before
 /// `message_2.json` — relevant for the `validoli` thread (10 parts).
@@ -716,7 +866,13 @@ mod tests {
     //! == "Username" → value` walk on two distinct entries.
     //! `owner_username_returns_none_without_owner_section` guards the
     //! accessor against silently promoting the outer-level `Username` that
-    //! the relationship-flag files carry.
+    //! the relationship-flag files carry. Shape A is pinned by
+    //! `liked_comments_extracts_username_and_timestamp` and the honest-
+    //! count filter by `shape_a_entries_drops_empty_title`. Shape D is
+    //! pinned by `post_comments_extracts_media_owner_and_time` (the
+    //! `string_map_data → "Media Owner" → value` walk plus the `"Time" →
+    //! timestamp` extraction) and `shape_d_entries_drops_empty_owner` (the
+    //! honest-count filter).
     use super::*;
 
     fn fixture_root() -> PathBuf {
@@ -811,5 +967,60 @@ mod tests {
         let out = shape_a_entries(raw);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].username, "ok_synth");
+    }
+
+    #[test]
+    fn post_comments_extracts_media_owner_and_time() {
+        let entries = read_post_comments(&fixture_root()).expect("fixture parse");
+        assert_eq!(entries.len(), 2, "fixture has two post comments");
+
+        // Pin both `string_map_data["Media Owner"].value → target_username`
+        // and `string_map_data["Time"].timestamp → timestamp` extraction.
+        // If the rename on either sub-key drifts, the corresponding leaf
+        // defaults to None and the honest-count filter in shape_d_entries
+        // drops the entry — this test catches both regressions because the
+        // expected len() is 2, not zero.
+        assert_eq!(entries[0].target_username, "first_post_target_synth");
+        assert!(entries[0].timestamp.is_some());
+        assert_eq!(entries[1].target_username, "second_post_target_synth");
+    }
+
+    #[test]
+    fn shape_d_entries_drops_empty_owner() {
+        // Synthetic raw list: one valid entry, one with missing Media Owner
+        // (schema drift), one with empty-string Media Owner. Both invalid
+        // entries must be filtered so the count line answers "how many
+        // real comments" rather than "how many objects deserialized" —
+        // same posture as shape_a_entries_drops_empty_title.
+        let raw = vec![
+            ShapeDEntryRaw {
+                string_map_data: ShapeDStringMap {
+                    media_owner: ShapeDValue {
+                        value: Some("ok_synth".to_owned()),
+                        timestamp: None,
+                    },
+                    time: ShapeDValue {
+                        value: None,
+                        timestamp: Some(1_700_000_000),
+                    },
+                },
+            },
+            ShapeDEntryRaw {
+                string_map_data: ShapeDStringMap::default(),
+            },
+            ShapeDEntryRaw {
+                string_map_data: ShapeDStringMap {
+                    media_owner: ShapeDValue {
+                        value: Some(String::new()),
+                        timestamp: None,
+                    },
+                    time: ShapeDValue::default(),
+                },
+            },
+        ];
+        let out = shape_d_entries(raw);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].target_username, "ok_synth");
+        assert!(out[0].timestamp.is_some());
     }
 }

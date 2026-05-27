@@ -52,10 +52,10 @@ pub fn init_tracing(verbose: u8) {
 /// Entry point for the analysis run.
 ///
 /// At this stage the pipeline parses relationships, DM threads, the four
-/// nested-`Owner` activity files, and the eight shape-A activity files,
-/// then prints the per-source count lines that gate the parser-pass
-/// acceptance criteria. Feature aggregation, scoring, and output writers
-/// land in later ROADMAP steps.
+/// nested-`Owner` activity files, the eight shape-A activity files, and
+/// the three shape-D comment files, then prints the per-source count
+/// lines that gate the parser-pass acceptance criteria. Feature
+/// aggregation, scoring, and output writers land in later ROADMAP steps.
 pub fn run(cli: Cli) -> Result<()> {
     use anyhow::ensure;
 
@@ -92,6 +92,10 @@ pub fn run(cli: Cli) -> Result<()> {
     let story_emoji_reactions = export::read_story_emoji_reactions(&cli.export_dir)?;
     let story_reaction_stickers = export::read_story_reaction_stickers(&cli.export_dir)?;
     let story_countdowns = export::read_story_countdowns(&cli.export_dir)?;
+
+    let post_comments = export::read_post_comments(&cli.export_dir)?;
+    let reels_comments = export::read_reels_comments(&cli.export_dir)?;
+    let hype = export::read_hype(&cli.export_dir)?;
 
     // `hide_story_from.json` is a single shape-C entry, not an array. With
     // every field carrying `#[serde(default)]`, an empty object `{}` parses
@@ -155,6 +159,9 @@ pub fn run(cli: Cli) -> Result<()> {
         story_reaction_stickers.len()
     );
     println!("story countdowns count: {}", story_countdowns.len());
+    println!("post comments count: {}", post_comments.len());
+    println!("reels comments count: {}", reels_comments.len());
+    println!("hype count: {}", hype.len());
 
     Ok(())
 }

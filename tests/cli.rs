@@ -59,13 +59,15 @@ fn fixture_counts_match_expected() {
     // message_2), the seven relationship-flag files and one message request
     // thread from the second slice, the four nested-`Owner` activity files
     // from the third slice — 2 liked posts (distinct owners), 1 story like,
-    // 1 stories viewed, 1 saved post — and the eight shape-A activity files
+    // 1 stories viewed, 1 saved post — the eight shape-A activity files
     // from the fourth slice — 2 liked comments, 1 of each of the seven
-    // story_interactions files. The activity counts come from honest
-    // extraction (`owner_username` for nested-Owner, empty-title filter for
-    // shape A), not raw entry count, so they double as a structural
-    // assertion that the deserializer walks the wrapper key and entry
-    // interior correctly.
+    // story_interactions files — and the three shape-D comment files from
+    // the fifth slice — 2 post comments (distinct targets), 1 reel
+    // comment, 1 hype (story comment). The activity counts come from
+    // honest extraction (`owner_username` for nested-Owner, empty-title
+    // filter for shape A, empty `Media Owner` filter for shape D), not
+    // raw entry count, so they double as a structural assertion that the
+    // deserializer walks the wrapper key and entry interior correctly.
     //
     // Drifting any of these numbers means the parser silently dropped data
     // — diagnose, don't relax the assertion.
@@ -96,5 +98,8 @@ fn fixture_counts_match_expected() {
         .stdout(contains("story emoji sliders count: 1"))
         .stdout(contains("story emoji reactions count: 1"))
         .stdout(contains("story reaction stickers count: 1"))
-        .stdout(contains("story countdowns count: 1"));
+        .stdout(contains("story countdowns count: 1"))
+        .stdout(contains("post comments count: 2"))
+        .stdout(contains("reels comments count: 1"))
+        .stdout(contains("hype count: 1"));
 }

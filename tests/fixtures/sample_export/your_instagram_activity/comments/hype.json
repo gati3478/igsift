@@ -1,0 +1,22 @@
+{
+  "comments_story_comments": [
+    {
+      "media_list_data": [
+        {
+          "uri": ""
+        }
+      ],
+      "string_map_data": {
+        "Comment": {
+          "value": "hype synth"
+        },
+        "Media Owner": {
+          "value": "hype_target_synth"
+        },
+        "Time": {
+          "timestamp": 1700700000
+        }
+      }
+    }
+  ]
+}
