@@ -19,17 +19,20 @@ the unfollows by hand.
 ## Status
 
 **Active — end-to-end pipeline landed.** Every functional ROADMAP slice is in:
-the parser layer, per-account feature aggregation (raw counts, decay-weighted
-counts, 90d/180d windowed counts), first-pass scoring (`keep_prob` plus a
+the parser layer, per-account feature aggregation (raw + decay-weighted +
+90d/180d windowed counts), scoring (`keep_prob` plus a
 `keep` / `review` / `unfollow` bucket per account), CSV + Markdown writers,
-and the brand / public-figure account-class heuristic (with the
-user-maintained keep-allowlist override) all run against a real export today.
+brand / public-figure account-class heuristic (16-token lexicon with
+user-maintained keep-allowlist override), and the held-out
+labeled-set confusion-matrix report (`config/labels.txt`) used for weight
+tuning. Four tuning rounds landed: threshold + tenure calibration,
+`unfollow_max` widening against the labeled set, brand-lexicon expansion.
 The binary prints per-source counts plus top-10 / bottom-10 candidates with
 their dominant feature, and writes `recommendations_<DATE>.csv` + `.md` next
-to the export directory. Remaining: weight tuning against a labeled sample,
-and the operational "run, clean up, evaluate regret" feedback loop. See
-[`ROADMAP.md`](ROADMAP.md) for the task list and
-[`docs/DESIGN.md`](docs/DESIGN.md) for the full design.
+to the export directory. Remaining: the operational "run, clean up, evaluate
+regret" feedback loop. See [`ROADMAP.md`](ROADMAP.md) for the task list,
+[`docs/DESIGN.md`](docs/DESIGN.md) for the full design, and
+[`docs/TUNING.md`](docs/TUNING.md) for the weight-tuning journal.
 
 > A previous SvelteKit web-app prototype (card-deck review UI, SQLite/Drizzle)
 > was retired — the interactive direction is friction I don't need for a
@@ -43,10 +46,19 @@ cargo run -- /path/to/export     # run against an unzipped export folder
 cargo run -- /path/to/export --out ~/cleanup --verbose
 ```
 
-Options: `--out <PATH>` (output stem, defaults next to the export),
-`--config <PATH>` (scoring weights; when omitted, resolved from the dev tree,
-your platform config dir, or a built-in default), `-v`/`-vv` (verbosity).
-`RUST_LOG` overrides verbosity when set.
+Options:
+
+- `--out <PATH>` — output stem; defaults to `recommendations_<DATE>.{csv,md}`
+  next to the export.
+- `--config <PATH>` — scoring weights TOML; when omitted, resolved as
+  `./config/scoring.toml` in the cwd, then a compiled-in default. A
+  platform config dir (`~/.config/ig-mgr/`) is not yet wired — fresh
+  installs use the compiled-in default.
+- `--trace <HANDLE>` — print the full per-term scoring breakdown for one
+  followee handle. Errors if the handle isn't in the followings set after
+  blocked / recently-unfollowed exclusions. Use during tuning to answer
+  "why did this account rank where it did?".
+- `-v` / `-vv` — debug / trace log verbosity. `RUST_LOG` overrides when set.
 
 ## Development
 
@@ -70,10 +82,12 @@ gate), `pre-push` runs `cargo clippy -D warnings` and `cargo nextest run`
 ## Tech stack
 
 Rust (edition 2024, stable) — single static binary, no async, no network, no
-database. `clap` (CLI) · `serde`/`serde_json` (parsing) · `jiff` (time) ·
-`rayon` (parallel scoring) · `csv` (output) · `tracing` (logs) · `anyhow` +
-`thiserror` (errors). Tests: `insta` snapshots + `assert_cmd`. Rationale and
-the deliberately-not-used list are in [`docs/DESIGN.md`](docs/DESIGN.md).
+database. `clap` (CLI) · `serde`/`serde_json` + `serde_path_to_error`
+(schema-drift-survivable parsing) · `jiff` (time) · `rayon` (parallel
+scoring) · `aho-corasick` (brand-suffix lexicon, single-pass automaton) ·
+`csv` (output) · `tracing` (logs) · `anyhow` + `thiserror` (errors). Tests:
+`insta` snapshots + `assert_cmd` + `cargo-nextest`. Rationale and the
+deliberately-not-used list are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Non-goals
 

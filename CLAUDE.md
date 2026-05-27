@@ -8,19 +8,25 @@ unfollow vs. keep, with a `keep_probability` per account. One-shot run, no UI,
 no network, no database, no automated unfollow. The user acts on the output
 manually inside Instagram.
 
-**Current state: end-to-end pipeline landed.** Every functional ROADMAP slice
-is in: parser layer (every JSON source DESIGN.md lists — relationships, DM
-inbox + message requests, nested-`Owner` activity, shape-A activity, shape-D
-comments, the `me` identity and `display_name → handle` resolver), per-account
-feature aggregation (raw counts, decay-weighted versions, DM features, 90d/180d
-windowed counts), first-pass scoring (`keep_prob` + bucket per account), CSV +
-Markdown writers, and the brand / public-figure account-class heuristic with
-the user-maintained keep-allowlist override (`config/keep_allowlist.txt`) all
-run end-to-end against a real export. Remaining: weight tuning against a
-labeled sample (`config/labels.txt`) and the operational "run, clean up,
-evaluate regret" feedback loop. Read [`docs/DESIGN.md`](docs/DESIGN.md) for the
-algorithm and [`ROADMAP.md`](ROADMAP.md) for build order before writing pipeline
-code.
+**Current state: end-to-end pipeline landed + four tuning rounds.** Every
+functional ROADMAP slice is in: parser layer (every JSON source DESIGN.md
+lists — relationships, DM inbox + message requests, nested-`Owner` activity,
+shape-A activity, shape-D comments, the `me` identity and `display_name →
+handle` resolver), per-account feature aggregation (raw + decay-weighted + DM
+features + 90d/180d windowed counts), scoring (`keep_prob` + bucket per
+account), CSV + Markdown writers, brand / public-figure account-class
+heuristic (16-token lexicon) with user-maintained keep-allowlist override
+(`config/keep_allowlist.txt`), and the held-out labeled-set confusion-matrix
+report (`config/labels.txt` loaded by `src/labels.rs`) — the accuracy floor
+for weight tuning. Four tuning rounds landed (threshold + tenure calibration,
+`unfollow_max` widening, brand-lexicon expansion); current bucket split on
+the real export is `481 / 155 / 7` (keep / review / unfollow) at `25%`
+labeled-set agreement, 0 hard mismatches. Remaining: the operational "run,
+clean up, evaluate regret" feedback loop. Read
+[`docs/DESIGN.md`](docs/DESIGN.md) for the algorithm,
+[`ROADMAP.md`](ROADMAP.md) for build order, and
+[`docs/TUNING.md`](docs/TUNING.md) for the tuning journal (newest at top)
+before writing pipeline code.
 
 ## Tech stack
 
@@ -29,10 +35,12 @@ code.
   (`src/lib.rs`) holds the logic; binary `ig-mgr` (`src/main.rs`) is a thin
   shell. **Not** a workspace. Integration tests in `tests/` use the lib.
 - **Dependencies**: the full set lives in `Cargo.toml`; per-crate rationale and
-  the deliberately-not-used list are in [`docs/DESIGN.md`](docs/DESIGN.md). Two
-  picks an agent should not "modernize away": **`jiff`** (not `chrono`) for
-  time, and **`serde_path_to_error`** wrapping every parse — it is the
-  schema-drift survival mechanism (see Conventions), not optional ceremony.
+  the deliberately-not-used list are in [`docs/DESIGN.md`](docs/DESIGN.md).
+  Three picks an agent should not "modernize away": **`jiff`** (not `chrono`)
+  for time, **`serde_path_to_error`** wrapping every parse — the schema-drift
+  survival mechanism (see Conventions), not optional ceremony — and
+  **`aho-corasick`** for the brand-suffix lexicon (single-automaton pass over
+  each handle vs. N independent `str::contains` calls).
 
 ## Commands
 
@@ -88,7 +96,13 @@ docs/DESIGN.md  ROADMAP.md  TUNING.md
   safety net but a fragile one: only the names listed there
   (`/ig-exported-data/`, `/ig_data/`, `/export/`, `/exports/`, `*.zip`) are
   matched. An export dropped at any other name **will** be tracked. Test
-  fixtures must be sanitized synthetic data.
+  fixtures must be sanitized synthetic data. The same posture extends to
+  **committed docs**: personal followee handles paired with the user's
+  explicit `keep` / `drop` intent are the same disclosure as the gitignored
+  `config/labels.txt`. Use structural descriptors (`a label=drop account at
+keep_prob=0.302`) instead of raw handles when documenting tuning rounds.
+  Brand-business handles (public-facing pages like `tbilisicamerashop`) are
+  fine in committed docs because the brand name is already public.
 - **Schema drift is the main risk.** Instagram rotates export paths/keys
   silently. Parsers use `#[serde(default)]` + `Option<T>` and
   `serde_path_to_error` so a changed file degrades or fails _loudly with the
@@ -105,7 +119,11 @@ docs/DESIGN.md  ROADMAP.md  TUNING.md
   relax the assertion. Pair with the structural unit tests in
   `src/export.rs` (`#[cfg(test)] mod tests`) which pin nested fields so
   counts alone can't paper over a regression that returns defaulted
-  entries.
+  entries. The `ig_mgr()` test helper spawns the binary with
+  `cwd = std::env::temp_dir()` so the cwd-relative `config/*` loaders miss
+  any per-user files at the repo root — without this, a developer with
+  their own `config/labels.txt` or `config/keep_allowlist.txt` sees
+  fixture counts contaminate. Don't undo the cwd override.
 - `unsafe` is forbidden (`[lints.rust] unsafe_code = "forbid"`).
 
 ## Non-goals

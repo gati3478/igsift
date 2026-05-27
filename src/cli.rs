@@ -25,8 +25,9 @@ pub struct Cli {
     pub out: Option<PathBuf>,
 
     /// Scoring configuration (feature weights and decay constants). When
-    /// omitted, the path is resolved (dev tree → platform config dir → built-in
-    /// default) — see [`crate::config`].
+    /// omitted, the path is resolved (`./config/scoring.toml` in the cwd →
+    /// compiled-in default) — see [`crate::config`]. A platform config dir
+    /// is in the comments of `config.rs` but not yet wired.
     #[arg(short, long, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
