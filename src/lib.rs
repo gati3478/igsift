@@ -608,9 +608,10 @@ pub fn run(args: RunArgs) -> Result<()> {
     // the extracted dir): when input was a .zip, the audit should
     // land next to that zip, not buried inside the cache.
     let stem = resolve_output_stem(args.out.as_deref(), input);
-    let (csv_path, md_path) = output::write(&scored, &stem)?;
-    println!("wrote: {}", csv_path.display());
-    println!("wrote: {}", md_path.display());
+    let paths = output::write(&scored, &stem)?;
+    println!("wrote: {}", paths.csv.display());
+    println!("wrote: {}", paths.md.display());
+    println!("wrote: {}", paths.html.display());
 
     Ok(())
 }

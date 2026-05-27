@@ -1,17 +1,20 @@
-//! Output writers — the recommendation artifacts the run materializes.
+//! Output writers — the audit artifacts the run materializes.
 //!
-//! Two files per run, sharing a filename stem:
+//! Three files per run, sharing a filename stem:
 //!
-//! - **CSV** (primary) — one row per account, sortable / filterable /
-//!   diffable. Columns per [`docs/DESIGN.md`](../../docs/DESIGN.md)
-//!   "Output". Serialized from a `#[derive(Serialize)]` row struct via
-//!   the `csv` crate. The `*_90d` / `*_180d` columns are raw fixed-window
-//!   counts for human context — distinct from the decay-weighted values
-//!   that drive `keep_prob`.
-//! - **Markdown** (secondary) — a skim summary: bucket counts plus
-//!   top-N unfollow and top-N keep tables, each row carrying the
-//!   `dominant_feature` that drove the call. Built for "decide whether
-//!   to open the CSV at all".
+//! - **CSV** (data) — one row per account, sortable / filterable /
+//!   diffable in a spreadsheet. Columns per
+//!   [`docs/DESIGN.md`](../../docs/DESIGN.md) "Output". The `*_90d` /
+//!   `*_180d` columns are raw fixed-window counts for human context —
+//!   distinct from the decay-weighted values that drive `keep_prob`.
+//! - **Markdown** (skim) — a decision-oriented summary: bucket
+//!   counts plus per-account cards in `Unfollow` and `Review`, with
+//!   the dominant features and a one-line hint. Built for "decide
+//!   whether to open the CSV at all".
+//! - **HTML** (browse) — self-contained single-file report with
+//!   sortable, filterable per-bucket tables. Built for the "I want
+//!   to triage this in a browser" workflow; no server, no JS deps,
+//!   double-click to open.
 //!
 //! ## Ordering
 //!
@@ -24,12 +27,12 @@
 //! ## Filenames
 //!
 //! Default stem: `following-audit_<YYYY-MM-DD>` next to the export
-//! directory, with `.csv` and `.md` appended. `--out PATH` overrides;
-//! `Path::with_extension` handles either bare-stem (`/tmp/foo`) or
-//! extension-bearing (`/tmp/foo.csv`) inputs symmetrically — both yield
-//! `/tmp/foo.csv` + `/tmp/foo.md`.
+//! directory, with `.csv`, `.md`, and `.html` appended. `--out PATH`
+//! overrides; `Path::with_extension` handles either bare-stem
+//! (`/tmp/foo`) or extension-bearing (`/tmp/foo.csv`) inputs symmetrically.
 
 mod csv;
+mod html;
 mod markdown;
 
 use std::fs::File;
@@ -40,12 +43,21 @@ use anyhow::{Context, Result};
 
 use crate::scoring::ScoredAccount;
 
-/// Write both the CSV and Markdown artifacts to `<stem>.csv` and
-/// `<stem>.md`. Returns the two paths actually written for the caller
-/// to surface in the run summary.
-pub fn write(scored: &[ScoredAccount], stem: &Path) -> Result<(PathBuf, PathBuf)> {
+/// Paths the writer produced. Always three: CSV, Markdown, HTML.
+#[derive(Debug)]
+pub struct WrittenPaths {
+    pub csv: PathBuf,
+    pub md: PathBuf,
+    pub html: PathBuf,
+}
+
+/// Write the CSV, Markdown, and HTML artifacts at `<stem>.{csv,md,html}`.
+/// Returns the three paths actually written for the caller to surface in
+/// the run summary.
+pub fn write(scored: &[ScoredAccount], stem: &Path) -> Result<WrittenPaths> {
     let csv_path = stem.with_extension("csv");
     let md_path = stem.with_extension("md");
+    let html_path = stem.with_extension("html");
 
     let csv_file = File::create(&csv_path)
         .with_context(|| format!("creating CSV at {}", csv_path.display()))?;
@@ -57,5 +69,14 @@ pub fn write(scored: &[ScoredAccount], stem: &Path) -> Result<(PathBuf, PathBuf)
     markdown::write_to(scored, BufWriter::new(md_file))
         .with_context(|| format!("writing MD to {}", md_path.display()))?;
 
-    Ok((csv_path, md_path))
+    let html_file = File::create(&html_path)
+        .with_context(|| format!("creating HTML at {}", html_path.display()))?;
+    html::write_to(scored, BufWriter::new(html_file))
+        .with_context(|| format!("writing HTML to {}", html_path.display()))?;
+
+    Ok(WrittenPaths {
+        csv: csv_path,
+        md: md_path,
+        html: html_path,
+    })
 }

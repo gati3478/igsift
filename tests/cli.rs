@@ -373,9 +373,11 @@ fn writes_csv_and_markdown_at_out_path() {
     let stem = out_stem("writes_csv_and_md");
     let csv_path = stem.with_extension("csv");
     let md_path = stem.with_extension("md");
+    let html_path = stem.with_extension("html");
     // Pre-clean so a prior test run doesn't mask a failure to write.
     let _ = std::fs::remove_file(&csv_path);
     let _ = std::fs::remove_file(&md_path);
+    let _ = std::fs::remove_file(&html_path);
 
     ig_mgr()
         .arg(sample_export())
@@ -385,10 +387,21 @@ fn writes_csv_and_markdown_at_out_path() {
         .success()
         .stdout(contains("wrote:"))
         .stdout(contains(csv_path.to_string_lossy().as_ref()))
-        .stdout(contains(md_path.to_string_lossy().as_ref()));
+        .stdout(contains(md_path.to_string_lossy().as_ref()))
+        .stdout(contains(html_path.to_string_lossy().as_ref()));
 
     let csv = std::fs::read_to_string(&csv_path).expect("CSV should exist");
     let md = std::fs::read_to_string(&md_path).expect("Markdown should exist");
+    let html = std::fs::read_to_string(&html_path).expect("HTML should exist");
+
+    // HTML self-contained: doctype, three bucket sections, at least
+    // one canonical profile link, and the embedded script/style blocks.
+    assert!(html.starts_with("<!DOCTYPE html>"));
+    assert!(html.contains("Unfollow <span class=\"count\">"));
+    assert!(html.contains("Review <span class=\"count\">"));
+    assert!(html.contains("Keep <span class=\"count\">"));
+    assert!(html.contains("href=\"https://www.instagram.com/"));
+    assert!(html.contains("<style>") && html.contains("<script>"));
 
     // CSV header must match DESIGN.md verbatim — this is the diff contract.
     let header = csv.lines().next().expect("CSV has at least one line");

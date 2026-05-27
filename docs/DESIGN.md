@@ -362,12 +362,17 @@ Option<String>` onto `AccountFeatures` from those same pairs (single
 > source of truth, single pass) or extend `NameResolver` with a
 > `display_name_for(handle)` accessor.
 
-**Secondary: Markdown summary** alongside the CSV — top 20 unfollow candidates
-and top 20 keepers, with the dominant feature behind each call, for skim-review
-before opening the CSV.
+**Secondary: Markdown summary** alongside the CSV — grouped per-bucket
+cards (Unfollow + Review) with dominant features and decision hints, plus
+top/bottom Keep tables. Built for "decide whether to open the CSV at all".
 
-Filenames: `following-audit_YYYY-MM-DD.csv` + `.md`, written next to the export
-folder by default, overridable via `--out`.
+**Tertiary: HTML report** alongside the CSV+MD — single self-contained
+file (inline CSS+JS, no deps, no server). Sortable + filterable
+per-bucket tables for browser-based triage. Built for the "open in a
+browser, type to filter, click to sort" workflow.
+
+Filenames: `following-audit_YYYY-MM-DD.{csv,md,html}`, written next to
+the input by default, overridable via `--out`.
 
 ## Implementation notes (tech choices)
 
