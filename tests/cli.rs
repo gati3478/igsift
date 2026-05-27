@@ -124,5 +124,19 @@ fn fixture_counts_match_expected() {
         .stdout(contains("me name: Test User"))
         .stdout(contains("name resolver entries: 8"))
         .stdout(contains("name resolver collisions: 0"))
-        .stdout(contains("resolvable DM threads: 1"));
+        .stdout(contains("resolvable DM threads: 1"))
+        // Slice-7A handle-keyed aggregator: 3 followings → 3 aggregated
+        // accounts (no blocked/recently_unfollowed handle appears in
+        // following.json, so both filters are no-ops on this fixture).
+        // close_friends ∩ followings = {alice_synth} → 1. favorited ∩
+        // followings = {bob_synth, carol_synth} → 2. None of the activity
+        // targets in the fixture are in followings, so the with-likes /
+        // with-comments counts are 0 — the activity-summation path is
+        // pinned independently by the structural unit tests in
+        // `src/features/aggregate.rs::tests`.
+        .stdout(contains("aggregated accounts: 3"))
+        .stdout(contains("aggregated close friends: 1"))
+        .stdout(contains("aggregated favorited: 2"))
+        .stdout(contains("aggregated with likes_given > 0: 0"))
+        .stdout(contains("aggregated with comments_given > 0: 0"));
 }

@@ -89,17 +89,48 @@ behind each item.
           2026-05-11 export: handle `gati3478`, name `Gati Petriashvili`,
           281 unique names, 12 collisions, 217 (37%) of 1:1 DM threads
           resolve.
-- [ ] **Feature aggregation** — `features::aggregate(...)` produces
-      `Vec<AccountFeatures>` keyed by handle, filtered to followings. Boolean
-      flags (close_friend/favorited/blocked/restricted/etc.), activity
-      counts (likes_given/comments_given/story_interactions_out/etc.),
-      DM features (dm_messages_total/dm_recency_days/dm_balance/
-      dm_reactions_given/dm_reactions_received/inbound_dm_request) gated
-      on resolvable threads via [`features::name_resolution`], and
-      `follow_tenure_days` from `FollowingEntry.followed_at`. Decay-weighted
-      counts per `config/scoring.toml [decay]` plus raw 90d/180d windowed
-      counts for the CSV columns (DESIGN.md is explicit these are different
-      aggregations).
+    - [x] **Handle-keyed feature aggregator (slice 7A)** (2026-05-27) —
+          added `features::aggregate(inputs, now) -> Vec<AccountFeatures>`
+          and `AggregateInputs<'a>` (borrowed bundle so the function stays
+          callable without a 20-positional-arg signature). Output is keyed
+          by handle, filtered to followings, and hard-excludes `is_blocked`
+          / `recently_unfollowed` handles per DESIGN.md ("excludes from
+          input set"). Populates: boolean flags (close_friend / favorited /
+          blocked / restricted / hide_story_from / removed_suggestion /
+          recently_unfollowed) from the OUTER-level `Username` on the seven
+          `label_values` files (distinct from the nested-`Owner` walk in
+          `owner_username`); `follow_tenure_days` from
+          `FollowingEntry.followed_at` with `now` parameterized so tests
+          pin a stable reference point; raw activity counts —
+          `likes_given` (`liked_posts` via `owner_username` +
+          `liked_comments` via `ShapeAEntry.username`), `comments_given`
+          (`post_comments` + `reels_comments` + `hype` via
+          `CommentEntry.target_username`), `story_interactions_out` (the
+          seven shape-A `story_interactions/*` files), `stories_viewed`
+          and `saved_their_content` (both via `owner_username`). DM
+          features (`dm_messages_total`, `dm_recency_days`, `dm_balance`,
+          `dm_reactions_given`, `dm_reactions_received`,
+          `inbound_dm_request`) are defaulted to zero / `None` and
+          populated in slice 7B alongside decay weighting and the
+          90d/180d windowed counts. Validated against the 2026-05-11
+          export: `aggregated accounts: 643` (blocked ∩ following = ∅
+          and recently_unfollowed ∩ following = ∅ — IG auto-unfollows on
+          block, so both hard-exclude filters are no-ops on this export
+          but still pin the semantic), `aggregated close friends: 267`
+          (= |close_friends ∩ following|), `aggregated favorited: 48`
+          (= |favorited ∩ following|; one favorited handle is no longer
+          followed), `aggregated with likes_given > 0: 561`, `aggregated
+          with comments_given > 0: 139`. Intersections cross-checked with
+          `comm -12` against `jq`-extracted handle sets.
+- [ ] **Feature aggregation (slice 7B)** — extend the slice-7A aggregator
+      with DM-derived features gated on resolvable threads via
+      [`features::name_resolution`] (`dm_messages_total` / `dm_recency_days`
+      / `dm_balance` / `dm_reactions_given` / `dm_reactions_received` /
+      `inbound_dm_request`), me-identity-based direction classification,
+      group-chat and abandoned-thread exclusion. Apply exponential decay
+      per `config/scoring.toml [decay]` to the count features and emit
+      raw 90d/180d windowed counts for the CSV columns (DESIGN.md is
+      explicit these are different aggregations).
 - [ ] **First-pass scoring** with hand-set weights; eyeball top/bottom 50.
 - [ ] **Tune weights and decay constants** — consider a small labeled set of
       ~30 accounts I already know I want to keep/drop, fit weights to match.

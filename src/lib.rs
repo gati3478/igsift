@@ -51,13 +51,13 @@ pub fn init_tracing(verbose: u8) {
 
 /// Entry point for the analysis run.
 ///
-/// At this stage the pipeline parses every export source and prints
-/// per-source count lines that gate the parser-pass acceptance criteria,
-/// plus the `me` identity from `personal_information.json` and a name →
-/// handle resolver built from the seven `label_values` files (the bridge
-/// that lets DM display names attribute to followed handles in the
-/// feature aggregator). Aggregation, scoring, and output writers land in
-/// later ROADMAP steps.
+/// At this stage the pipeline parses every export source, prints per-source
+/// count lines that gate the parser-pass acceptance criteria, builds the
+/// `me` identity from `personal_information.json` and a name → handle
+/// resolver over the seven `label_values` files, then runs the slice-7A
+/// handle-keyed feature aggregator and emits a few smoke counts against
+/// the resulting `Vec<AccountFeatures>`. Scoring, DM-derived features
+/// (slice 7B), and output writers land in later ROADMAP steps.
 pub fn run(cli: Cli) -> Result<()> {
     use anyhow::ensure;
 
@@ -198,6 +198,42 @@ pub fn run(cli: Cli) -> Result<()> {
     println!("name resolver entries: {}", resolver.unique_name_count());
     println!("name resolver collisions: {}", resolver.collision_count());
     println!("resolvable DM threads: {resolvable_dm_threads}");
+
+    let inputs = features::aggregate::AggregateInputs {
+        followings: &following,
+        close_friends: &close_friends,
+        favorited: &favorited,
+        blocked: &blocked,
+        restricted: &restricted,
+        hide_story_from: &hide_story_from,
+        recently_unfollowed: &recently_unfollowed,
+        removed_suggestions: &removed_suggestions,
+        liked_posts: &liked_posts,
+        liked_comments: &liked_comments,
+        stories_viewed: &stories_viewed,
+        saved_posts: &saved_posts,
+        story_polls: &story_polls,
+        story_quizzes: &story_quizzes,
+        story_questions: &story_questions,
+        story_emoji_sliders: &story_emoji_sliders,
+        story_emoji_reactions: &story_emoji_reactions,
+        story_reaction_stickers: &story_reaction_stickers,
+        story_countdowns: &story_countdowns,
+        post_comments: &post_comments,
+        reels_comments: &reels_comments,
+        hype: &hype,
+    };
+    let aggregated = features::aggregate(&inputs, jiff::Timestamp::now());
+    let agg_close_friends = aggregated.iter().filter(|f| f.is_close_friend).count();
+    let agg_favorited = aggregated.iter().filter(|f| f.is_favorited).count();
+    let agg_with_likes = aggregated.iter().filter(|f| f.likes_given > 0).count();
+    let agg_with_comments = aggregated.iter().filter(|f| f.comments_given > 0).count();
+
+    println!("aggregated accounts: {}", aggregated.len());
+    println!("aggregated close friends: {agg_close_friends}");
+    println!("aggregated favorited: {agg_favorited}");
+    println!("aggregated with likes_given > 0: {agg_with_likes}");
+    println!("aggregated with comments_given > 0: {agg_with_comments}");
 
     Ok(())
 }

@@ -7,9 +7,12 @@
 //! [`docs/DESIGN.md`](../../docs/DESIGN.md) for the full feature spec and
 //! scoring composition.
 //!
-//! Status: aggregation pending. Infrastructure lands in slices ahead of the
-//! aggregator itself:
+//! Status:
 //!
+//! - [`aggregate`] / [`AccountFeatures`] — slice 7A: handle-keyed booleans,
+//!   `follow_tenure_days`, and raw activity counts (likes / comments /
+//!   story interactions / stories viewed / saves). DM features and decay
+//!   weighting defer to slice 7B.
 //! - [`name_resolution`] — bridges DM thread participant **display names**
 //!   to **handles** via the seven `label_values` files (`close_friends`,
 //!   `profiles_you've_favorited`, etc.) since `following.json` /
@@ -22,4 +25,7 @@
 //! likes/comments _others_ made on my posts — so inbound signals (DM
 //! `reactions[].actor`, `message_requests/`) stand in as proxies.
 
+pub mod aggregate;
 pub mod name_resolution;
+
+pub use aggregate::{AccountFeatures, aggregate};
