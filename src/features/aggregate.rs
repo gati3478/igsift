@@ -1062,8 +1062,8 @@ mod tests {
             dm_thread(
                 &["Alice Alias", "Me Real"],
                 vec![
-                    msg(Some("Alice Real"), Some(now_secs - 11 * 86_400), vec![]),
-                    msg(Some("Alice Real"), Some(now_secs - 10 * 86_400), vec![]),
+                    msg(Some("Alice Alias"), Some(now_secs - 11 * 86_400), vec![]),
+                    msg(Some("Alice Alias"), Some(now_secs - 10 * 86_400), vec![]),
                 ],
             ),
         ];
