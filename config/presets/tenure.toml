@@ -1,0 +1,45 @@
+# Tenure preset — weights longevity over interaction.
+#
+# Use this when you want to preserve long-standing follows even when
+# interaction has tailed off — "we knew each other in 2014, that still
+# means something". Tenure is roughly doubled vs balanced; engagement
+# signals are softened. Bucket cut-offs narrow so fewer accounts land
+# in Unfollow.
+
+[weights]
+# --- engagement (outbound — softened vs balanced) ---
+dm = 2.0
+likes = 0.6
+comments = 1.0
+story_out = 0.7
+stories_viewed = 0.2
+saved = 0.4
+reactions_given = 0.7
+
+# --- reciprocity (softened — but still meaningful) ---
+reactions_received = 1.5
+
+# --- tenure (roughly doubled vs balanced — main differentiator) ---
+tenure = 0.35
+
+# --- penalties (softened — a long-time follow shouldn't be unfollowed
+#     over a one-sided thread alone) ---
+dm_balance_penalty = 0.5
+reaction_balance_penalty = 0.3
+hide_story_penalty = 2.0
+removed_suggestion_penalty = 0.2
+
+# --- boolean boosts ---
+close_friend_boost = 5.0
+favorite_boost = 3.0
+inbound_request = 0.5
+
+[decay]
+tau_dm_days = 180
+tau_content_days = 365
+
+[scoring]
+threshold = 1.5
+scale = 1.2
+keep_min = 0.7
+unfollow_max = 0.3

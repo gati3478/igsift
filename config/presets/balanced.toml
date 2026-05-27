@@ -1,0 +1,52 @@
+# Balanced preset — sensible starting point for users without a labels.txt.
+#
+# Mirrors the values that have shipped as the compiled-in default. Picked
+# as "no signal type dominates": DM presence matters, engagement matters,
+# tenure matters, but no single one overwhelms the others. The bucket
+# cut-offs sit at the design's middle-of-the-road values.
+#
+# Use `--preset engagement` if you'd rather keep accounts you actively
+# interact with and drop the long-dormant tenure-only follows.
+# Use `--preset tenure` if you'd rather preserve long-standing follows
+# even when interaction has tailed off.
+#
+# Edit `config/scoring.toml` (cwd) if you want to override any preset
+# selection; the cwd file always wins over the embedded preset when no
+# `--preset` or `--config` flag is set.
+
+[weights]
+# --- engagement (outbound) ---
+dm = 3.0
+likes = 1.0
+comments = 1.5
+story_out = 1.0
+stories_viewed = 0.2
+saved = 0.5
+reactions_given = 1.0
+
+# --- reciprocity (inbound — DM reactions are the only export signal IG ships) ---
+reactions_received = 2.0
+
+# --- tenure ---
+tenure = 0.15
+
+# --- penalties (subtracted from score_raw) ---
+dm_balance_penalty = 1.0
+reaction_balance_penalty = 0.5
+hide_story_penalty = 2.0
+removed_suggestion_penalty = 0.3
+
+# --- boolean boosts ---
+close_friend_boost = 5.0
+favorite_boost = 3.0
+inbound_request = 0.5
+
+[decay]
+tau_dm_days = 180
+tau_content_days = 365
+
+[scoring]
+threshold = 1.5
+scale = 1.0
+keep_min = 0.7
+unfollow_max = 0.35

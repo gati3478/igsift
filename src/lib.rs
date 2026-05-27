@@ -429,7 +429,7 @@ pub fn run(args: RunArgs) -> Result<()> {
     }
 
     progress.phase("Loading scoring config + allowlist");
-    let scoring_config = config::read_scoring_config(args.config.as_deref())?;
+    let scoring_config = config::read_scoring_config(args.config.as_deref(), args.preset)?;
     let keep_allowlist = allowlist::load_default()?;
     let keep_allowlist_size = keep_allowlist.len();
     let classifier = features::Classifier::new(keep_allowlist);

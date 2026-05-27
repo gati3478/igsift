@@ -58,15 +58,52 @@ Options:
 
 - `--out <PATH>` — output stem; defaults to `following-audit_<DATE>.{csv,md}`
   next to the input.
+- `--preset <NAME>` — pick a shipped scoring shape (`balanced`,
+  `engagement`, `tenure`). Mutually exclusive with `--config`. See
+  Quickstart below.
 - `--config <PATH>` — scoring weights TOML; when omitted, resolved as
-  `./config/scoring.toml` in the cwd, then a compiled-in default. A
-  platform config dir (`~/.config/ig-mgr/`) is not yet wired — fresh
-  installs use the compiled-in default.
+  `./config/scoring.toml` in the cwd, then a compiled-in default
+  (= the `balanced` preset). A platform config dir
+  (`~/.config/ig-mgr/`) is not yet wired.
+- `--rebuild-cache` — force a fresh extract of an archive input.
 - `--trace <HANDLE>` — print the full per-term scoring breakdown for one
   followee handle. Errors if the handle isn't in the followings set after
   blocked / recently-unfollowed exclusions. Use during tuning to answer
   "why did this account rank where it did?".
 - `-v` / `-vv` — debug / trace log verbosity. `RUST_LOG` overrides when set.
+
+## Quickstart for first-time users
+
+You don't need to write any config files to get useful output. The
+binary ships three weight presets and picks `balanced` by default:
+
+```bash
+ig-mgr ./instagram-export-folder              # uses balanced preset
+ig-mgr ./instagram-export-folder --preset engagement
+ig-mgr ./instagram-export-folder --preset tenure
+```
+
+- **balanced** — sensible middle ground; no signal type dominates.
+- **engagement** — surfaces "who do I actually talk to / engage with?";
+  demotes dormant tenure-only follows.
+- **tenure** — preserves long-standing follows even when interaction
+  has tailed off; softens engagement signals.
+
+Iterate from here by:
+
+1. `ig-mgr init` to scaffold `config/keep_allowlist.txt` and
+   `config/labels.txt`.
+2. Append accounts you want to **never** unfollow to
+   `config/keep_allowlist.txt`.
+3. Hand-label 20–30 followees in `config/labels.txt` (format in the
+   template). The binary prints a confusion-matrix report against
+   your labels at the end of every run.
+4. Copy a preset to `config/scoring.toml` (e.g.
+   `cp config/presets/engagement.toml config/scoring.toml`) and edit
+   weights to chase higher label agreement. See
+   [`docs/TUNING.md`](docs/TUNING.md) for the journal of how the
+   committed `config/scoring.toml` was tuned against a 643-account
+   labeled set.
 
 ## Development
 

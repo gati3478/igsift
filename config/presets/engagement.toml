@@ -1,0 +1,44 @@
+# Engagement preset — weights interaction over tenure.
+#
+# Use this when you want the audit to surface "who do I actually talk
+# to / engage with?" and to demote long-dormant tenure-only follows
+# more aggressively. DM volume, comments, and inbound reactions are
+# weighted higher; tenure is halved relative to balanced; the bucket
+# cut-offs widen to push more accounts into Review and Unfollow.
+
+[weights]
+# --- engagement (outbound — pushed up vs balanced) ---
+dm = 5.0
+likes = 1.5
+comments = 2.5
+story_out = 1.5
+stories_viewed = 0.2
+saved = 0.7
+reactions_given = 1.5
+
+# --- reciprocity (pushed up — strong "they care about my content" signal) ---
+reactions_received = 3.0
+
+# --- tenure (halved vs balanced — engagement should out-weigh longevity) ---
+tenure = 0.08
+
+# --- penalties ---
+dm_balance_penalty = 1.5
+reaction_balance_penalty = 0.7
+hide_story_penalty = 2.0
+removed_suggestion_penalty = 0.5
+
+# --- boolean boosts ---
+close_friend_boost = 5.0
+favorite_boost = 3.0
+inbound_request = 0.5
+
+[decay]
+tau_dm_days = 180
+tau_content_days = 365
+
+[scoring]
+threshold = 1.0
+scale = 1.0
+keep_min = 0.7
+unfollow_max = 0.4

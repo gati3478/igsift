@@ -18,7 +18,22 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+
+/// Shipped scoring presets. See `config/presets/<name>.toml` for the
+/// weight bodies. `balanced` is the compiled-in default when no
+/// `--preset` or `--config` is given and no `./config/scoring.toml`
+/// exists in the cwd.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum Preset {
+    /// Sensible middle-ground — no signal dominates. Compiled-in default.
+    Balanced,
+    /// Engagement-heavy — DM/likes/comments weighted up, tenure halved.
+    Engagement,
+    /// Tenure-heavy — long-standing follows preserved, engagement
+    /// signals softened.
+    Tenure,
+}
 
 /// Score Instagram followings from a personal data export and rank who to
 /// unfollow vs. keep.
@@ -70,8 +85,15 @@ pub struct RunArgs {
     /// omitted, the path is resolved (`./config/scoring.toml` in the cwd →
     /// compiled-in default) — see [`crate::config`]. A platform config dir
     /// is in the comments of `config.rs` but not yet wired.
-    #[arg(short, long, value_name = "PATH")]
+    #[arg(short, long, value_name = "PATH", conflicts_with = "preset")]
     pub config: Option<PathBuf>,
+
+    /// Use a built-in scoring preset instead of resolving a file. Mutually
+    /// exclusive with `--config`. When neither is given, the file
+    /// resolution chain (`./config/scoring.toml` → compiled-in default)
+    /// is used.
+    #[arg(long, value_enum, value_name = "NAME")]
+    pub preset: Option<Preset>,
 
     /// Increase log verbosity (`-v` for debug, `-vv` for trace). `RUST_LOG`
     /// overrides this when set.
@@ -124,6 +146,27 @@ pub enum Command {
 
 /// Worked-example block appended to `--help` and `--help` (long). Kept
 /// short and copy-pasteable; the README has the longer narrative.
+impl Preset {
+    /// Embedded TOML body for this preset. Resolved at compile time so
+    /// a binary-only install has all three presets baked in.
+    pub fn body(self) -> &'static str {
+        match self {
+            Preset::Balanced => include_str!("../config/presets/balanced.toml"),
+            Preset::Engagement => include_str!("../config/presets/engagement.toml"),
+            Preset::Tenure => include_str!("../config/presets/tenure.toml"),
+        }
+    }
+
+    /// Lower-case name suitable for log messages and source labels.
+    pub fn name(self) -> &'static str {
+        match self {
+            Preset::Balanced => "balanced",
+            Preset::Engagement => "engagement",
+            Preset::Tenure => "tenure",
+        }
+    }
+}
+
 const EXAMPLES: &str = "\
 EXAMPLES:
   # Basic run — writes following-audit_<DATE>.{csv,md} next to the input
@@ -137,6 +180,10 @@ EXAMPLES:
 
   # Force a fresh extract, ignoring the cache
   ig-mgr ./ig-exported-data --rebuild-cache
+
+  # Try a different scoring shape without writing a config file
+  ig-mgr ./ig-exported-data --preset engagement
+  ig-mgr ./ig-exported-data --preset tenure
 
   # Custom output stem (writes /tmp/audit.csv + /tmp/audit.md)
   ig-mgr ./ig-exported-data --out /tmp/audit

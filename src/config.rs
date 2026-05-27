@@ -98,12 +98,24 @@ pub struct ScoringParams {
 /// Read and parse the scoring config, following the documented resolution
 /// chain in the module doc.
 ///
-/// `--config <PATH>` from the CLI is a hard error if the file is missing
-/// or malformed (user asked for this file specifically). A missing dev-tree
-/// default falls through to the compiled-in copy — that's the "ran the
-/// binary from outside the project tree" case, not a misconfiguration.
-pub fn read_scoring_config(cli_config: Option<&Path>) -> Result<ScoringConfig> {
-    let (cfg, source) = if let Some(path) = cli_config {
+/// Resolution order (first match wins):
+/// 1. `preset` (when caller passed a `--preset NAME`) — embedded bytes,
+///    cannot fail to find but can fail to parse if the shipped file is
+///    malformed (compile-time-checked via [`include_str!`]).
+/// 2. `cli_config` (when caller passed a `--config PATH`) — hard error
+///    on missing or malformed file.
+/// 3. `./config/scoring.toml` if present in cwd.
+/// 4. Compiled-in default (= the `balanced` preset bytes).
+pub fn read_scoring_config(
+    cli_config: Option<&Path>,
+    preset: Option<crate::cli::Preset>,
+) -> Result<ScoringConfig> {
+    let (cfg, source) = if let Some(p) = preset {
+        (
+            parse_str(p.body(), &format!("<preset {}>", p.name()))?,
+            format!("--preset {}", p.name()),
+        )
+    } else if let Some(path) = cli_config {
         (parse_file(path)?, format!("--config {}", path.display()))
     } else {
         let dev_tree = Path::new("config/scoring.toml");
@@ -111,8 +123,8 @@ pub fn read_scoring_config(cli_config: Option<&Path>) -> Result<ScoringConfig> {
             (parse_file(dev_tree)?, dev_tree.display().to_string())
         } else {
             (
-                parse_str(BUILTIN_DEFAULT, "<compiled-in default config/scoring.toml>")?,
-                "<compiled-in default>".to_owned(),
+                parse_str(BUILTIN_DEFAULT, "<compiled-in default (balanced preset)>")?,
+                "<compiled-in default (balanced preset)>".to_owned(),
             )
         }
     };
@@ -210,7 +222,12 @@ fn validate(cfg: &ScoringConfig) -> Result<()> {
     Ok(())
 }
 
-const BUILTIN_DEFAULT: &str = include_str!("../config/scoring.toml");
+/// Compiled-in fallback when no preset / config flag / cwd file resolves.
+/// Points at the balanced preset specifically (NOT the user-editable
+/// `config/scoring.toml`) so a binary-only install ships with the
+/// unbiased default rather than whatever calibration is currently
+/// committed to the repo for the project owner's labeled set.
+const BUILTIN_DEFAULT: &str = include_str!("../config/presets/balanced.toml");
 
 fn parse_file(path: &Path) -> Result<ScoringConfig> {
     let body = fs::read_to_string(path)
@@ -266,7 +283,7 @@ unfollow_max = 0.3
 
     #[test]
     fn builtin_default_parses() {
-        let cfg = read_scoring_config(None).expect("builtin default must parse");
+        let cfg = read_scoring_config(None, None).expect("builtin default must parse");
         assert!(cfg.decay.tau_dm_days > 0);
         assert!(cfg.decay.tau_content_days > 0);
         assert!(cfg.weights.dm.is_finite());
@@ -275,13 +292,30 @@ unfollow_max = 0.3
 
     #[test]
     fn cli_path_missing_is_hard_error() {
-        let err = read_scoring_config(Some(Path::new("/no/such/scoring.toml")))
+        let err = read_scoring_config(Some(Path::new("/no/such/scoring.toml")), None)
             .expect_err("missing --config path must be a hard error");
         let msg = format!("{err:#}");
         assert!(
             msg.contains("/no/such/scoring.toml"),
             "error should name the missing path: {msg}",
         );
+    }
+
+    #[test]
+    fn all_presets_parse_and_validate() {
+        // Every shipped preset must parse and clear validate() — a
+        // regression in any of the three preset TOML files would brick
+        // the binary's default config path or one of the user-facing
+        // `--preset` choices.
+        for p in [
+            crate::cli::Preset::Balanced,
+            crate::cli::Preset::Engagement,
+            crate::cli::Preset::Tenure,
+        ] {
+            let cfg = read_scoring_config(None, Some(p))
+                .unwrap_or_else(|e| panic!("preset {} must parse: {e:#}", p.name()));
+            assert!(cfg.scoring.keep_min > cfg.scoring.unfollow_max);
+        }
     }
 
     #[test]
