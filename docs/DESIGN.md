@@ -2,7 +2,10 @@
 
 The full design for the Instagram following-cleanup CLI. Status, build, and the
 short pitch live in the [README](../README.md); the task list in
-[ROADMAP.md](../ROADMAP.md). Nothing here is implemented yet.
+[ROADMAP.md](../ROADMAP.md). Parser layer is landing in slices — the relationship,
+DM, nested-`Owner` activity, and shape-A activity readers are in `src/export.rs`
+today; the rest of this document (feature aggregation, scoring, output) is still
+ahead.
 
 ## Inputs
 
@@ -96,10 +99,29 @@ explicitly so `src/export.rs` is designed for them:
     - **B** — bare array + flat: `[{title, media_list_data, string_list_data:[{href, value, timestamp}]}]`
     - **C** — bare array + `label_values` with optional nested `dict.dict` (used for `Owner`): `[{fbid, timestamp, label_values:[{label, value, …}], media:[]}]`
     - **D** — `string_map_data` dict: `{string_map_data: {<FieldName>: {value, timestamp, href}}}`
-- **Wrapper keys are inconsistent** — codify in a constant table:
-  `following.json → relationships_following`, `liked_comments.json → likes_comment_likes`,
-  `reels_comments.json → comments_reels_comments`, `hype.json → comments_story_comments`,
-  `story_interactions/polls.json → story_activities_polls`, and so on.
+- **Wrapper keys are inconsistent** — codified file-by-file as a private
+  struct in `src/export.rs`. The full known set (validated 2026-05-27):
+
+    | File                                                       | Wrapper key                                   |
+    | ---------------------------------------------------------- | --------------------------------------------- |
+    | `following.json`                                           | `relationships_following`                     |
+    | `likes/liked_comments.json`                                | `likes_comment_likes`                         |
+    | `comments/reels_comments.json`                             | `comments_reels_comments` †                   |
+    | `comments/hype.json`                                       | `comments_story_comments` †                   |
+    | `story_interactions/polls.json`                            | `story_activities_polls`                      |
+    | `story_interactions/quizzes.json`                          | `story_activities_quizzes`                    |
+    | `story_interactions/questions.json`                        | `story_activities_questions`                  |
+    | `story_interactions/emoji_sliders.json`                    | `story_activities_emoji_sliders`              |
+    | `story_interactions/emoji_story_reactions.json`            | `story_activities_emoji_quick_reactions` ‡    |
+    | `story_interactions/story_reaction_sticker_reactions.json` | `story_activities_reaction_sticker_reactions` |
+    | `story_interactions/countdowns.json`                       | `story_activities_countdowns`                 |
+
+    † Shape D entries wrapped in shape A — parsed in a separate slice.
+    ‡ File name and wrapper key are NOT symmetric. The file says
+    `emoji_story_reactions` but the wrapper says `emoji_quick_reactions`
+    — keep the constant explicit so this asymmetry does not surprise
+    future maintenance.
+
 - **`Owner` extraction** is three levels deep on shape **C**:
   `label_values[?.title == "Owner"].dict[0].dict[?.label == "Username"].value`.
 - **Timestamps are inconsistent**: most files use Unix **seconds** in

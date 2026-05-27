@@ -13,11 +13,11 @@
 //!            ──▶ output::*   (CSV + Markdown writers)
 //! ```
 //!
-//! Status: parsers landing in slices. Relationship-flag and DM readers
-//! complete; nested-`Owner` activity readers (likes, story likes, stories
-//! viewed, saved) now land alongside `owner_username` extraction. Feature
-//! aggregation, scoring, and output writers are still stubs — see
-//! `ROADMAP.md`.
+//! Status: parsers landing in slices. Relationship-flag, DM,
+//! nested-`Owner` activity, and shape-A activity readers all complete;
+//! shape-D comment files (`post_comments_*`, `reels_comments`, `hype`)
+//! still pending. Feature aggregation, scoring, and output writers remain
+//! stubs — see `ROADMAP.md`.
 
 pub mod cli;
 pub mod config;
@@ -51,10 +51,11 @@ pub fn init_tracing(verbose: u8) {
 
 /// Entry point for the analysis run.
 ///
-/// At this stage the pipeline parses relationships, DM threads, and the four
-/// nested-`Owner` activity files, then prints the per-source count lines that
-/// gate the parser-pass acceptance criteria. Feature aggregation, scoring,
-/// and output writers land in later ROADMAP steps.
+/// At this stage the pipeline parses relationships, DM threads, the four
+/// nested-`Owner` activity files, and the eight shape-A activity files,
+/// then prints the per-source count lines that gate the parser-pass
+/// acceptance criteria. Feature aggregation, scoring, and output writers
+/// land in later ROADMAP steps.
 pub fn run(cli: Cli) -> Result<()> {
     use anyhow::ensure;
 
@@ -82,6 +83,15 @@ pub fn run(cli: Cli) -> Result<()> {
     let story_likes = export::read_story_likes(&cli.export_dir)?;
     let stories_viewed = export::read_stories_viewed(&cli.export_dir)?;
     let saved_posts = export::read_saved_posts(&cli.export_dir)?;
+
+    let liked_comments = export::read_liked_comments(&cli.export_dir)?;
+    let story_polls = export::read_story_polls(&cli.export_dir)?;
+    let story_quizzes = export::read_story_quizzes(&cli.export_dir)?;
+    let story_questions = export::read_story_questions(&cli.export_dir)?;
+    let story_emoji_sliders = export::read_story_emoji_sliders(&cli.export_dir)?;
+    let story_emoji_reactions = export::read_story_emoji_reactions(&cli.export_dir)?;
+    let story_reaction_stickers = export::read_story_reaction_stickers(&cli.export_dir)?;
+    let story_countdowns = export::read_story_countdowns(&cli.export_dir)?;
 
     // `hide_story_from.json` is a single shape-C entry, not an array. With
     // every field carrying `#[serde(default)]`, an empty object `{}` parses
@@ -131,6 +141,20 @@ pub fn run(cli: Cli) -> Result<()> {
     println!("story likes count: {story_likes_count}");
     println!("stories viewed count: {stories_viewed_count}");
     println!("saved posts count: {saved_posts_count}");
+    println!("liked comments count: {}", liked_comments.len());
+    println!("story polls count: {}", story_polls.len());
+    println!("story quizzes count: {}", story_quizzes.len());
+    println!("story questions count: {}", story_questions.len());
+    println!("story emoji sliders count: {}", story_emoji_sliders.len());
+    println!(
+        "story emoji reactions count: {}",
+        story_emoji_reactions.len()
+    );
+    println!(
+        "story reaction stickers count: {}",
+        story_reaction_stickers.len()
+    );
+    println!("story countdowns count: {}", story_countdowns.len());
 
     Ok(())
 }

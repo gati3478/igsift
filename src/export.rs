@@ -11,12 +11,12 @@
 //! single-entry relationship-flag files (`close_friends`,
 //! `profiles_you've_favorited`, `blocked_profiles`, `restricted_profiles`,
 //! `hide_story_from`, `recently_unfollowed_profiles`, `removed_suggestions`),
-//! and the four shape-C-with-nested-`Owner` activity files (`liked_posts`,
+//! the four shape-C-with-nested-`Owner` activity files (`liked_posts`,
 //! `story_likes`, `stories_viewed`, `saved_posts`) plus the
-//! [`owner_username`] helper that walks the three-level `label_values → dict
-//! → dict → Username` shape. Comments (shape D), liked_comments (shape A
-//! activity), and the remaining `story_interactions/*` activity files are
-//! deferred per `ROADMAP.md`.
+//! [`owner_username`] helper, and the eight shape-A activity files
+//! (`liked_comments` and the seven `story_interactions/*` files) returning
+//! [`ShapeAEntry`]. Shape-D comment files (`post_comments_*`,
+//! `reels_comments`, `hype`) are deferred per `ROADMAP.md`.
 //!
 //! Robustness approach:
 //!
@@ -46,6 +46,17 @@ const LIKED_POSTS: &str = "your_instagram_activity/likes/liked_posts.json";
 const STORY_LIKES: &str = "your_instagram_activity/story_interactions/story_likes.json";
 const STORIES_VIEWED: &str = "your_instagram_activity/story_interactions/stories_viewed.json";
 const SAVED_POSTS: &str = "your_instagram_activity/saved/saved_posts.json";
+
+const LIKED_COMMENTS: &str = "your_instagram_activity/likes/liked_comments.json";
+const STORY_POLLS: &str = "your_instagram_activity/story_interactions/polls.json";
+const STORY_QUIZZES: &str = "your_instagram_activity/story_interactions/quizzes.json";
+const STORY_QUESTIONS: &str = "your_instagram_activity/story_interactions/questions.json";
+const STORY_EMOJI_SLIDERS: &str = "your_instagram_activity/story_interactions/emoji_sliders.json";
+const STORY_EMOJI_REACTIONS: &str =
+    "your_instagram_activity/story_interactions/emoji_story_reactions.json";
+const STORY_REACTION_STICKERS: &str =
+    "your_instagram_activity/story_interactions/story_reaction_sticker_reactions.json";
+const STORY_COUNTDOWNS: &str = "your_instagram_activity/story_interactions/countdowns.json";
 
 // ── Public output types ──────────────────────────────────────────────────────
 
@@ -148,6 +159,22 @@ pub struct ShapeCInnerEntry {
     pub value: Option<String>,
 }
 
+/// One outbound shape-**A** activity entry — a like I gave on a comment, a
+/// poll I voted on, a quiz I answered, an emoji slider I dragged, etc. The
+/// target account (whose content I engaged with) is `username`; the activity
+/// timestamp comes from `string_list_data[0].timestamp` on the raw entry.
+///
+/// Backs all eight shape-A activity files
+/// (`likes/liked_comments.json` and the seven
+/// `story_interactions/*.json`). The raw entry shape is identical across
+/// the eight files — only the JSON wrapper key differs (see the
+/// per-file private structs).
+#[derive(Debug, Clone)]
+pub struct ShapeAEntry {
+    pub username: String,
+    pub timestamp: Option<Timestamp>,
+}
+
 // ── Raw deserialization shapes ───────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -206,6 +233,69 @@ struct ReactionRaw {
 struct ParticipantRaw {
     #[serde(default)]
     name: String,
+}
+
+// ── Shape-A wrapper structs ──────────────────────────────────────────────────
+//
+// Each shape-A file is `{<wrapper_key>: [{title, string_list_data}, ...]}`.
+// The interior entry shape is identical across all eight (it's the same as
+// `following.json` — the wrapper-key naming is the only delta), so the
+// existing `RelationshipEntryRaw` deserializer is reused for the entry body.
+// One struct per file keeps the wrapper key as a compile-checked field name:
+// if Instagram renames the key on a future export, the parse fails loudly at
+// the offending JSON path via `serde_path_to_error` instead of silently
+// returning an empty Vec.
+
+#[derive(Debug, Deserialize)]
+struct LikedCommentsFileRaw {
+    #[serde(default)]
+    likes_comment_likes: Vec<RelationshipEntryRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoryPollsFileRaw {
+    #[serde(default)]
+    story_activities_polls: Vec<RelationshipEntryRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoryQuizzesFileRaw {
+    #[serde(default)]
+    story_activities_quizzes: Vec<RelationshipEntryRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoryQuestionsFileRaw {
+    #[serde(default)]
+    story_activities_questions: Vec<RelationshipEntryRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoryEmojiSlidersFileRaw {
+    #[serde(default)]
+    story_activities_emoji_sliders: Vec<RelationshipEntryRaw>,
+}
+
+// Note the IG inconsistency: the file is `emoji_story_reactions.json` but the
+// internal wrapper key is `story_activities_emoji_quick_reactions` — not the
+// symmetric "emoji_story_reactions" name. Codified explicitly so a future
+// reader does not assume a 1:1 file-name ↔ wrapper-key mapping.
+#[derive(Debug, Deserialize)]
+struct StoryEmojiReactionsFileRaw {
+    #[serde(default)]
+    story_activities_emoji_quick_reactions: Vec<RelationshipEntryRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoryReactionStickersFileRaw {
+    #[serde(default)]
+    story_activities_reaction_sticker_reactions: Vec<RelationshipEntryRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoryCountdownsFileRaw {
+    #[serde(default)]
+    story_activities_countdowns: Vec<RelationshipEntryRaw>,
 }
 
 // ── Public readers ───────────────────────────────────────────────────────────
@@ -362,6 +452,70 @@ pub fn read_saved_posts(export_dir: &Path) -> Result<Vec<ShapeCEntry>> {
     read_shape_c_at(export_dir, SAVED_POSTS)
 }
 
+/// Parse `your_instagram_activity/likes/liked_comments.json` — shape **A**,
+/// wrapper key `likes_comment_likes`. Each entry is a comment-like I gave;
+/// the target account is `title`.
+pub fn read_liked_comments(export_dir: &Path) -> Result<Vec<ShapeAEntry>> {
+    let raw: LikedCommentsFileRaw = parse_json(&export_dir.join(LIKED_COMMENTS))?;
+    Ok(shape_a_entries(raw.likes_comment_likes))
+}
+
+/// Parse `your_instagram_activity/story_interactions/polls.json` — shape
+/// **A**, wrapper key `story_activities_polls`. Each entry is a poll vote I
+/// cast on someone's story.
+pub fn read_story_polls(export_dir: &Path) -> Result<Vec<ShapeAEntry>> {
+    let raw: StoryPollsFileRaw = parse_json(&export_dir.join(STORY_POLLS))?;
+    Ok(shape_a_entries(raw.story_activities_polls))
+}
+
+/// Parse `your_instagram_activity/story_interactions/quizzes.json` — shape
+/// **A**, wrapper key `story_activities_quizzes`.
+pub fn read_story_quizzes(export_dir: &Path) -> Result<Vec<ShapeAEntry>> {
+    let raw: StoryQuizzesFileRaw = parse_json(&export_dir.join(STORY_QUIZZES))?;
+    Ok(shape_a_entries(raw.story_activities_quizzes))
+}
+
+/// Parse `your_instagram_activity/story_interactions/questions.json` — shape
+/// **A**, wrapper key `story_activities_questions`.
+pub fn read_story_questions(export_dir: &Path) -> Result<Vec<ShapeAEntry>> {
+    let raw: StoryQuestionsFileRaw = parse_json(&export_dir.join(STORY_QUESTIONS))?;
+    Ok(shape_a_entries(raw.story_activities_questions))
+}
+
+/// Parse `your_instagram_activity/story_interactions/emoji_sliders.json` —
+/// shape **A**, wrapper key `story_activities_emoji_sliders`.
+pub fn read_story_emoji_sliders(export_dir: &Path) -> Result<Vec<ShapeAEntry>> {
+    let raw: StoryEmojiSlidersFileRaw = parse_json(&export_dir.join(STORY_EMOJI_SLIDERS))?;
+    Ok(shape_a_entries(raw.story_activities_emoji_sliders))
+}
+
+/// Parse `your_instagram_activity/story_interactions/emoji_story_reactions.json`
+/// — shape **A**, wrapper key `story_activities_emoji_quick_reactions`
+/// (file name and wrapper key are NOT symmetric — see the wrapper struct
+/// comment).
+pub fn read_story_emoji_reactions(export_dir: &Path) -> Result<Vec<ShapeAEntry>> {
+    let raw: StoryEmojiReactionsFileRaw = parse_json(&export_dir.join(STORY_EMOJI_REACTIONS))?;
+    Ok(shape_a_entries(raw.story_activities_emoji_quick_reactions))
+}
+
+/// Parse
+/// `your_instagram_activity/story_interactions/story_reaction_sticker_reactions.json`
+/// — shape **A**, wrapper key
+/// `story_activities_reaction_sticker_reactions`.
+pub fn read_story_reaction_stickers(export_dir: &Path) -> Result<Vec<ShapeAEntry>> {
+    let raw: StoryReactionStickersFileRaw = parse_json(&export_dir.join(STORY_REACTION_STICKERS))?;
+    Ok(shape_a_entries(
+        raw.story_activities_reaction_sticker_reactions,
+    ))
+}
+
+/// Parse `your_instagram_activity/story_interactions/countdowns.json` —
+/// shape **A**, wrapper key `story_activities_countdowns`.
+pub fn read_story_countdowns(export_dir: &Path) -> Result<Vec<ShapeAEntry>> {
+    let raw: StoryCountdownsFileRaw = parse_json(&export_dir.join(STORY_COUNTDOWNS))?;
+    Ok(shape_a_entries(raw.story_activities_countdowns))
+}
+
 /// Extract the `Owner.Username` from a shape-C entry that carries a nested
 /// `Owner` section (the four activity files above). Walks
 /// `label_values → title == "Owner" → dict[0].dict → label == "Username" →
@@ -467,6 +621,30 @@ fn read_shape_c_array(export_dir: &Path, file_name: &str) -> Result<Vec<ShapeCEn
 /// story_interactions, saved). Same shape, different parent directory.
 fn read_shape_c_at(export_dir: &Path, rel_path: &str) -> Result<Vec<ShapeCEntry>> {
     parse_json(&export_dir.join(rel_path))
+}
+
+/// Convert the raw shape-A entry list (after wrapper-key extraction) into
+/// the public [`ShapeAEntry`] list. Drops entries with an empty `title` —
+/// an entry without an extractable target username is schema drift, not a
+/// usable activity signal. The matching posture from prior slices
+/// (`hide_story_from_count`, `owner_username`-derived counts) — surface
+/// dropped data as a missing count rather than silently passing through.
+fn shape_a_entries(raw: Vec<RelationshipEntryRaw>) -> Vec<ShapeAEntry> {
+    raw.into_iter()
+        .filter_map(|entry| {
+            if entry.title.is_empty() {
+                return None;
+            }
+            Some(ShapeAEntry {
+                username: entry.title,
+                timestamp: entry
+                    .string_list_data
+                    .first()
+                    .and_then(|item| item.timestamp)
+                    .and_then(seconds_to_timestamp),
+            })
+        })
+        .collect()
 }
 
 /// Read `message_1.json`, `message_2.json`, … sorted by numeric suffix.
@@ -592,5 +770,40 @@ mod tests {
         // promote that — it is the accessor for the nested-Owner shape only.
         let entries = read_close_friends(&fixture_root()).expect("fixture parse");
         assert!(owner_username(&entries[0]).is_none());
+    }
+
+    #[test]
+    fn liked_comments_extracts_username_and_timestamp() {
+        let entries = read_liked_comments(&fixture_root()).expect("fixture parse");
+        assert_eq!(entries.len(), 2, "fixture has two liked comments");
+
+        // Pin both `title → username` and `string_list_data[0].timestamp →
+        // timestamp` extraction. If the wrapper-key field gets defaulted
+        // (rename drift) the Vec drops to zero. If `RelationshipEntryRaw`
+        // changes shape, these field reads fail.
+        assert_eq!(entries[0].username, "first_target_synth");
+        assert!(entries[0].timestamp.is_some());
+        assert_eq!(entries[1].username, "second_target_synth");
+    }
+
+    #[test]
+    fn shape_a_entries_drops_empty_title() {
+        // Synthetic raw list: one valid entry, one with empty title (schema
+        // drift signal). Honest-count posture: the empty-title entry must be
+        // filtered out so `lib::run` count lines answer "how many real
+        // signals" rather than "how many objects deserialized".
+        let raw = vec![
+            RelationshipEntryRaw {
+                title: "ok_synth".to_owned(),
+                string_list_data: vec![],
+            },
+            RelationshipEntryRaw {
+                title: String::new(),
+                string_list_data: vec![],
+            },
+        ];
+        let out = shape_a_entries(raw);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].username, "ok_synth");
     }
 }
