@@ -129,6 +129,17 @@ mod tests {
     }
 
     #[test]
+    fn empty_display_name_does_not_promote_to_brand() {
+        // The resolver returns `Option<&str>` but the aggregator's call site
+        // doesn't pre-filter `Some("")`. Defends against an aho-corasick
+        // version where `is_match("")` ever returns `true` — today it
+        // doesn't, but pin it so a future bump can't silently flip every
+        // empty-display-name followee into Brand.
+        let c = empty();
+        assert_eq!(c.classify("alice", Some("")), AccountClass::Personal);
+    }
+
+    #[test]
     fn lexicon_hit_via_display_name_only() {
         // A brand can ship a personal-looking handle but a brand display
         // name — must still classify as Brand. This is the load-bearing
@@ -158,6 +169,25 @@ mod tests {
         assert_eq!(c.classify("incognito_jay", None), AccountClass::Personal);
         assert_eq!(c.classify("cooking_anna", None), AccountClass::Personal);
         assert_eq!(c.classify("companion_dog", None), AccountClass::Personal);
+    }
+
+    #[test]
+    fn known_substring_false_positives_are_pinned() {
+        // The current lexicon — `news`, `gallery`, `media` (and the rest)
+        // — uses pure substring match, so a handle that contains any of
+        // those letter-runs gets classified as Brand even when it isn't
+        // one. We accept this cost: a false-positive Brand demotes
+        // Unfollow → Review (manual triage), not silent suppression.
+        // The real-export `butt_news` case is the documented example
+        // in TUNING.md. These three are empirically-verified additional
+        // matches; pinning them documents the surface so a future
+        // lexicon edit can't silently change which false positives we
+        // accept. If you make one of these stop matching, update both
+        // the test AND TUNING.md.
+        let c = empty();
+        assert_eq!(c.classify("renewsletter", None), AccountClass::Brand);
+        assert_eq!(c.classify("gallerymate", None), AccountClass::Brand);
+        assert_eq!(c.classify("mediator_jake", None), AccountClass::Brand);
     }
 
     #[test]

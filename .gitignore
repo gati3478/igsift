@@ -18,6 +18,11 @@ recommendations_*.md
 # never committed. `config/labels.txt.example` is the checked-in template.
 /config/labels.txt
 
+# Personal keep-allowlist — handles the user wants protected from Unfollow.
+# Per-user data, never committed. `config/keep_allowlist.txt.example` is the
+# checked-in template; copy to `config/keep_allowlist.txt` to activate.
+/config/keep_allowlist.txt
+
 # insta: uncommitted pending snapshots (review then accept with `cargo insta`)
 *.snap.new
 *.pending-snap
