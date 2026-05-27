@@ -34,3 +34,4 @@ recommendations_*.md
 # Claude Code / session tooling (local, machine-specific)
 /.claude/
 /.remember/
+/tasks/
