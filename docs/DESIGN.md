@@ -213,15 +213,21 @@ Lives in [`src/features/account_class.rs`](../src/features/account_class.rs);
 threaded into the aggregator via `AggregateInputs`.
 
 - **Lexicon match.** Username AND display name are case-insensitively
-  substring-matched against `BRAND_LEXICON` — a curated 8-token list
+  substring-matched against `BRAND_LEXICON` — a curated 16-token list
   (`official`, `studio`, `magazine`, `records`, `gallery`, `news`, `media`,
-  `agency`) using **`aho-corasick`** (single automaton, one pass over each
-  input). Tokens shorter than 5 chars (`inc`, `co`) are deliberately omitted
-  because they false-positive on personal handles like `incognito_jay` and
-  `cooking_anna`, and false positives are costlier here than false negatives —
-  a missed brand stays Personal and remains eligible for the close_friend /
-  favorited / allowlist gates, whereas a falsely-flagged brand silently
-  suppresses a real Unfollow recommendation.
+  `agency`, `books`, `press`, `games`, `store`, `comics`, `zine`, `shop`,
+  `cafe`) using **`aho-corasick`** (single automaton, one pass over each
+  input). Floor is 4 chars; the rule is **empirical 0-false-positives
+  against the real export's followee list**, not a length cutoff per se.
+  3-char tokens like `bar` and `art` would be safe under a word-boundary
+  matcher (`klaras_bar` matches but `barbara` doesn't) but are deferred
+  until a labeled round demonstrates the recall need — the structural
+  matcher change isn't justified at current scale. False positives are
+  costlier here than false negatives — a missed brand stays Personal and
+  remains eligible for the close_friend / favorited / allowlist gates,
+  whereas a falsely-flagged brand silently suppresses a real Unfollow
+  recommendation. Per-token audit lives in
+  [`docs/TUNING.md`](TUNING.md) round 4.
 - **`AccountClass` variants.** `Personal` (default) and `Brand` (lexicon hit
   on either surface). `PublicFigure` is **deliberately omitted** from the
   variant set: the text-only heuristic can't reliably distinguish brand from

@@ -13,15 +13,21 @@
 //! independent `str::contains` calls — DESIGN.md "Account-class heuristic"
 //! prescribes the choice. Matching is ASCII-case-insensitive on both sides.
 //!
-//! Tokens shorter than 5 chars are deliberately omitted: `co` would
-//! false-positive on `cooking_anna`, `inc` on `incognito_jay`. False
-//! positives are costlier than false negatives here — a missed brand stays
-//! `Personal` and remains eligible for the close_friend / favorited /
-//! allowlist gates, whereas a falsely-flagged personal handle silently
-//! suppresses a real Unfollow recommendation. Lexicon entries are checked
-//! against both `username` and `display_name`: brands sometimes ship a
-//! personal-looking handle (`bobsmith`) but a brand display name
-//! (`Studio Ghibli`), and vice versa.
+//! Token length floor is 4 chars (relaxed from 5 in round 4 — see
+//! `docs/TUNING.md`). The active rule is **empirical**: a token is added
+//! only after a 0-false-positive grep against the real export's
+//! followee list. 3-char tokens like `bar` and `art` are deliberately
+//! deferred — they need word-boundary semantics on the matcher to be
+//! safe (`klaras_bar` matches but `barbara` doesn't), which is a
+//! structural matcher change not justified by the marginal recall gain
+//! at current scale. False positives are costlier than false negatives
+//! here — a missed brand stays `Personal` and remains eligible for the
+//! close_friend / favorited / allowlist gates, whereas a falsely-flagged
+//! personal handle silently suppresses a real Unfollow recommendation.
+//! Lexicon entries are checked against both `username` and
+//! `display_name`: brands sometimes ship a personal-looking handle
+//! (`bobsmith`) but a brand display name (`Studio Ghibli`), and vice
+//! versa.
 //!
 //! ## Allowlist
 //!
@@ -43,11 +49,19 @@ use aho_corasick::AhoCorasick;
 use crate::features::AccountClass;
 
 /// Curated lexicon for brand-suffix detection on `username` /
-/// `display_name`. Every entry is ≥ 5 chars to keep false-positive risk
-/// against personal handles low. Extend conservatively — false positives
-/// silently suppress real Unfollow recommendations.
+/// `display_name`. Every entry is ≥ 4 chars and has been verified
+/// 0-false-positive against the real export's followee list (see
+/// `docs/TUNING.md` round 4 for the per-token audit). Extend
+/// conservatively — false positives silently suppress real Unfollow
+/// recommendations.
 const BRAND_LEXICON: &[&str] = &[
+    // Initial 8 tokens (round-3 brand-gate slice).
     "official", "studio", "magazine", "records", "gallery", "news", "media", "agency",
+    // Round-4 expansion, 5+ chars (0 export-FPs).
+    "books", "press", "games", "store", "comics",
+    // Round-4 expansion, 4 chars (same 0-export-FP guard; the relaxed
+    // floor is justified per-token in docs/TUNING.md).
+    "zine", "shop", "cafe",
 ];
 
 /// Bundle of the brand-detection automaton + the user-maintained
@@ -161,14 +175,67 @@ mod tests {
 
     #[test]
     fn short_tokens_excluded_to_avoid_false_positives() {
-        // The lexicon deliberately drops < 5-char tokens. These handles
-        // would false-positive under a naive `inc` / `co` rule but must
-        // stay Personal here. If the lexicon grows to include such
-        // tokens later, this test will surface the regression risk.
+        // The lexicon's floor is 4 chars (relaxed from 5 in round 4 —
+        // see TUNING.md). 3-char tokens like `inc` / `co` / `bar` / `art`
+        // would false-positive on these personal handles, so they stay
+        // out until word-boundary semantics is on the matcher. If the
+        // lexicon ever grows to include such a token under plain
+        // substring matching, this test surfaces the regression.
         let c = empty();
         assert_eq!(c.classify("incognito_jay", None), AccountClass::Personal);
         assert_eq!(c.classify("cooking_anna", None), AccountClass::Personal);
         assert_eq!(c.classify("companion_dog", None), AccountClass::Personal);
+    }
+
+    #[test]
+    fn books_token_matches_real_handles() {
+        // Round-4 addition. Real-export brand hits: kona_books_,
+        // kjartbooks, bucksbooks, japaneseavantgardebooks.
+        let c = empty();
+        assert_eq!(c.classify("kona_books_", None), AccountClass::Brand);
+        assert_eq!(
+            c.classify("japaneseavantgardebooks", None),
+            AccountClass::Brand,
+        );
+    }
+
+    #[test]
+    fn press_token_matches_real_handles() {
+        // Round-4 addition. Covers both standalone-suffix
+        // (`blackdragonpress`) and dotted-prefix (`press.centri`) shapes.
+        let c = empty();
+        assert_eq!(c.classify("blackdragonpress", None), AccountClass::Brand);
+        assert_eq!(c.classify("press.centri", None), AccountClass::Brand);
+    }
+
+    #[test]
+    fn games_token_matches_real_handles() {
+        // Round-4 addition. Common video-game-publisher suffix.
+        let c = empty();
+        assert_eq!(c.classify("specialreservegames", None), AccountClass::Brand,);
+        assert_eq!(c.classify("limitedrungames", None), AccountClass::Brand);
+    }
+
+    #[test]
+    fn comics_and_store_tokens_match_real_handles() {
+        // Round-4 additions, single-hit tokens grouped to keep the test
+        // file flat. `floatingworldcomics` and `eagletokyostore` are
+        // each the only real-export hit for their token.
+        let c = empty();
+        assert_eq!(c.classify("floatingworldcomics", None), AccountClass::Brand);
+        assert_eq!(c.classify("eagletokyostore", None), AccountClass::Brand);
+    }
+
+    #[test]
+    fn four_char_tokens_zine_shop_cafe_match_real_handles() {
+        // Round-4 addition: the 4-char tokens. Pinning each because the
+        // 4-char floor itself is the load-bearing relaxation — a future
+        // maintainer who shortens this further needs to add word
+        // boundaries, not just bump the length.
+        let c = empty();
+        assert_eq!(c.classify("danarti_zine", None), AccountClass::Brand);
+        assert_eq!(c.classify("blackdogshoptbilisi", None), AccountClass::Brand);
+        assert_eq!(c.classify("estupendacafebar", None), AccountClass::Brand);
     }
 
     #[test]

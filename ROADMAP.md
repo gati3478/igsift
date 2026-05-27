@@ -229,6 +229,21 @@ behind each item.
       bucket split shifted 481 / 159 / 3 → 481 / 160 / 2 (one account
       `butt_news` moved from Unfollow to Review on the `"news"` substring —
       acceptable false positive, the allowlist is the user-side override).
+      **Round-4 lexicon expansion (2026-05-27):** added `books`, `press`,
+      `games`, `store`, `comics`, `zine`, `shop`, `cafe` (8 new tokens, 4-char
+      floor relaxed from 5). Empirical 0-FP audit per token against the
+      643-followee export. Brand count 19 → 44; bucket split unchanged
+      because all newly-classified brands sit above `unfollow_max` and so
+      the gate has no work to do at current weights — the value is
+      forward-looking robustness (future Unfollow widening can't
+      accidentally swallow these accounts). `design` deliberately held
+      out: ambiguous between brand and personal-designer portfolios,
+      `keep_allowlist.txt` is the right venue. `bar` / `art` deferred
+      until word-boundary matcher semantics is on the table. Same slice
+      also tightened test isolation in `tests/cli.rs` (spawned binary's
+      cwd is `temp_dir()` so per-user `config/labels.txt` /
+      `keep_allowlist.txt` at repo root no longer contaminate the
+      fixture-count test).
 - [x] **CSV + Markdown output writers** (2026-05-27) — `src/output/` with
       `csv` and `markdown` submodules. CSV columns pin
       [`docs/DESIGN.md`](docs/DESIGN.md) "Output" verbatim; rows emit

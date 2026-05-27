@@ -13,7 +13,17 @@ use assert_cmd::Command;
 use predicates::str::contains;
 
 fn ig_mgr() -> Command {
-    Command::cargo_bin("ig-mgr").expect("binary `ig-mgr` should build")
+    // Spawn with cwd = OS temp dir so the binary's cwd-relative config
+    // lookups (`config/scoring.toml`, `config/labels.txt`,
+    // `config/keep_allowlist.txt`) miss the per-user files at the repo
+    // root. Without this, a developer running `cargo test` after laying
+    // down their own `config/labels.txt` or `config/keep_allowlist.txt`
+    // sees the fixture-count test contaminate itself with real labels
+    // and a non-zero allowlist size. Each spawned command gets its own
+    // cwd, so parallel test execution is safe.
+    let mut cmd = Command::cargo_bin("ig-mgr").expect("binary `ig-mgr` should build");
+    cmd.current_dir(std::env::temp_dir());
+    cmd
 }
 
 fn sample_export() -> PathBuf {

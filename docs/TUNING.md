@@ -10,6 +10,93 @@ The methodology choice for this pass was the **hybrid** in DESIGN.md's
 with `config/labels.txt` (when laid down) serving as a held-out accuracy
 floor. The labels file is not committed — it's a per-user artifact.
 
+## 2026-05-27 — brand-lexicon expansion (round 4, structural)
+
+Not a TOML edit — a code change to `BRAND_LEXICON` in
+`src/features/account_class.rs` — but it shifts the brand-classification
+counts on the real export and the rationale belongs in the same journal
+as the weights rounds. Same shape as the round-3-precursor "brand gate
+(structural change, not a weights edit)" entry below.
+
+### Verdict
+
+Brand count `19 → 44` on 643 followings. Bucket split `481 / 155 / 7`
+**unchanged** — all 25 newly-classified brands already sit at
+`keep_prob > unfollow_max` (= 0.35) so the gate has no work to do at
+current weights. Confusion matrix vs `config/labels.txt` also unchanged
+(`agreement: 7/28, hard mismatches: none`) — the labeled brand-shaped
+accounts were already in `bucket=review` based on `keep_prob` alone, and
+brand-class promotion doesn't shift them out of Review (the gate floors
+Unfollow → Review, not Personal → Keep). **Value is forward-looking
+robustness**, not present-tense bucket improvement.
+
+### Lexicon (before / after)
+
+```
+before (round-3 brand-gate slice, 8 tokens):
+  official, studio, magazine, records, gallery, news, media, agency
+
+after (round-4 expansion, 16 tokens):
+  + books, press, games, store, comics  (5+ chars)
+  + zine, shop, cafe                    (4 chars; floor relaxed)
+```
+
+Floor relaxed from ≥ 5 chars to ≥ 4 chars. The active rule is now
+**empirical**: a token is added only after a 0-FP grep against the real
+export. 3-char tokens (`bar`, `art`) are still deferred — they need
+word-boundary matcher semantics (`klaras_bar` matches but `barbara`
+doesn't), which is a structural matcher change not justified by the
+marginal recall gain at current scale.
+
+### Per-token audit (real export, 643 followees)
+
+| Token  | Chars | Hits | FPs | Net new brand catches¹                               |
+| ------ | ----- | ---- | --- | ---------------------------------------------------- |
+| books  | 5     | 6    | 0   | 6                                                    |
+| press  | 5     | 7    | 0   | 7                                                    |
+| games  | 5     | 5    | 0   | 4 (1 overlaps `press`)                               |
+| store  | 5     | 1    | 0   | 1                                                    |
+| comics | 6     | 1    | 0   | 1                                                    |
+| zine   | 4     | 7    | 0   | 2 (5 already match `magazine`)                       |
+| shop   | 4     | 2    | 0   | 2                                                    |
+| cafe   | 4     | 1    | 0   | 1                                                    |
+| —      |       |      |     | **24 net new** (raw expansion catches 25, minus dup) |
+
+¹ Excludes accounts already caught by an existing lexicon token.
+
+### Considered and held out
+
+- `design` (6 chars, 4 hits, 0 FPs against the export). Held by Gati's
+  call: handles like `indiebydesign` could be personal-designer
+  portfolio accounts, not brands. The brand-gate flooring would be
+  reasonable for explicit design studios but wrong for personal
+  designers; `keep_allowlist.txt` is the right venue case-by-case.
+- `bar` (3 chars, 3 real hits, 5 FPs without word boundaries:
+  `bardic.cub`, `mimosa_barr`, `nbaratelli`, `waynebarlowe_thedarkness`,
+  `thebarewytchproject`). Safe only under word-boundary semantics.
+  Deferred until a labeled round shows the recall need.
+
+### Side effect — test isolation
+
+`tests/cli.rs::ig_mgr()` now sets the spawned binary's cwd to
+`std::env::temp_dir()` so the binary's cwd-relative config lookups
+(`config/scoring.toml`, `config/labels.txt`,
+`config/keep_allowlist.txt`) miss the per-user files at the repo root.
+Without this, `cargo test` after laying down a real `config/labels.txt`
+contaminates `fixture_counts_match_expected` with a non-zero
+allowlist size and 28 "labels not in scored set" warnings, even though
+nothing in the fixture itself changed.
+
+### Why we stopped
+
+- The matrix-improvement value of the lexicon expansion is zero at
+  current weights (newly-Brand accounts are already correctly bucketed
+  as Review). Further lexicon growth without a corresponding labeled
+  round shifting where the gate matters is unlikely to move the needle.
+- Word-boundary semantics is the next structural lever if shorter
+  tokens become necessary — but adding them now would be over-design
+  for the recall gain available at current scale.
+
 ## 2026-05-27 — labeled round (round 3, weights)
 
 First weights edit gated by `config/labels.txt`: 28 hand-labels (21 keep,
