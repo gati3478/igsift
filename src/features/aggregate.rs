@@ -122,7 +122,12 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
 
     for f in inputs.followings {
         let handle: &str = f.username.as_str();
-        if blocked.contains(handle) || recently_unfollowed.contains(handle) {
+        // Defends both halves of the empty-handle phantom-match path: an
+        // empty `title` in `following.json` (schema drift — `#[serde(default)]
+        // String` would deserialize to `""`) cannot anchor an output row,
+        // so neither flag-file entries nor activity entries with an empty
+        // `Username` / `Owner.Username` can credit it through `get_mut("")`.
+        if handle.is_empty() || blocked.contains(handle) || recently_unfollowed.contains(handle) {
             continue;
         }
         let features = AccountFeatures {
@@ -524,6 +529,34 @@ mod tests {
 
         let by = by_username(aggregate(&inputs, now));
         assert_eq!(by["alice"].follow_tenure_days, None);
+    }
+
+    #[test]
+    fn empty_handle_following_does_not_anchor_output_row() {
+        // Schema drift on `following.json`: an empty `title` deserializes to
+        // an empty `FollowingEntry.username` (the field carries
+        // `#[serde(default)] String`). That entry must NOT anchor an
+        // output row — otherwise every activity file with an empty
+        // `Owner.Username` and every flag file with an empty `Username`
+        // would credit the phantom empty-handle followee.
+        let followings = vec![following("", None), following("alice", None)];
+        let hide = empty_hide_entry();
+        let mut inputs = empty_inputs(&followings, &hide);
+        // Activity entries with empty `Owner.Username` and shape-A username:
+        // both would route to `get_mut("")` if the empty handle existed.
+        let liked_posts = vec![owner_entry("")];
+        let liked_comments = vec![shape_a("")];
+        inputs.liked_posts = &liked_posts;
+        inputs.liked_comments = &liked_comments;
+
+        let out = aggregate(&inputs, fixed_now());
+        let handles: HashSet<&str> = out.iter().map(|f| f.username.as_str()).collect();
+        assert_eq!(handles, HashSet::from(["alice"]));
+        let alice = out.iter().find(|f| f.username == "alice").unwrap();
+        assert_eq!(
+            alice.likes_given, 0,
+            "empty-Owner activity must not credit alice either"
+        );
     }
 
     #[test]
