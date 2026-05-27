@@ -12,7 +12,14 @@ use clap::Parser;
 /// Score Instagram followings from a personal data export and rank who to
 /// unfollow vs. keep.
 #[derive(Debug, Parser)]
-#[command(name = "ig-mgr", version, about, long_about = None)]
+#[command(
+    name = "ig-mgr",
+    version,
+    about,
+    long_about = None,
+    after_help = EXAMPLES,
+    after_long_help = EXAMPLES,
+)]
 pub struct Cli {
     /// Path to the unzipped Instagram "Download Your Information" export
     /// (the folder containing `connections/` and `your_instagram_activity/`).
@@ -44,3 +51,23 @@ pub struct Cli {
     #[arg(long, value_name = "HANDLE")]
     pub trace: Option<String>,
 }
+
+/// Worked-example block appended to `--help` and `--help` (long). Kept
+/// short and copy-pasteable; the README has the longer narrative.
+const EXAMPLES: &str = "\
+EXAMPLES:
+  # Basic run — writes following-audit_<DATE>.{csv,md} next to the export
+  ig-mgr ./ig-exported-data
+
+  # Custom output stem (writes /tmp/audit.csv + /tmp/audit.md)
+  ig-mgr ./ig-exported-data --out /tmp/audit
+
+  # Explain why one account landed where it did
+  ig-mgr ./ig-exported-data --trace some_handle
+
+  # Debug verbosity (or use RUST_LOG=ig_mgr=debug to override)
+  ig-mgr ./ig-exported-data -v
+
+The export directory must be the unzipped \"Download Your Information\"
+folder — the one containing connections/ and your_instagram_activity/.
+";
