@@ -10,7 +10,11 @@
 /ig-exported-data/
 *.zip
 
-# Generated recommendations
+# Generated audit artifacts
+following-audit_*.csv
+following-audit_*.md
+# Legacy stem from before the 2026-05 rename — kept so an old run sitting
+# in someone's working tree doesn't accidentally land in a commit.
 recommendations_*.csv
 recommendations_*.md
 

@@ -8,7 +8,7 @@ output manually inside Instagram.
 
 ```
 ┌──────────────────────────┐     ┌─────────────────┐     ┌────────────────────┐
-│ IG personal data export  │ ──▶ │  CLI: ig-mgr    │ ──▶ │ recommendations.*  │
+│ IG personal data export  │ ──▶ │  CLI: ig-mgr    │ ──▶ │ following-audit.*  │
 │ (unzipped export folder) │     │  score + rank   │     │ (CSV + MD summary) │
 └──────────────────────────┘     └─────────────────┘     └────────────────────┘
 ```
@@ -28,7 +28,7 @@ labeled-set confusion-matrix report (`config/labels.txt`) used for weight
 tuning. Four tuning rounds landed: threshold + tenure calibration,
 `unfollow_max` widening against the labeled set, brand-lexicon expansion.
 The binary prints per-source counts plus top-10 / bottom-10 candidates with
-their dominant feature, and writes `recommendations_<DATE>.csv` + `.md` next
+their dominant feature, and writes `following-audit_<DATE>.csv` + `.md` next
 to the export directory. Remaining: the operational "run, clean up, evaluate
 regret" feedback loop. See [`ROADMAP.md`](ROADMAP.md) for the task list,
 [`docs/DESIGN.md`](docs/DESIGN.md) for the full design, and
@@ -48,7 +48,7 @@ cargo run -- /path/to/export --out ~/cleanup --verbose
 
 Options:
 
-- `--out <PATH>` — output stem; defaults to `recommendations_<DATE>.{csv,md}`
+- `--out <PATH>` — output stem; defaults to `following-audit_<DATE>.{csv,md}`
   next to the export.
 - `--config <PATH>` — scoring weights TOML; when omitted, resolved as
   `./config/scoring.toml` in the cwd, then a compiled-in default. A

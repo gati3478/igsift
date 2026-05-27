@@ -361,7 +361,7 @@ Option<String>` onto `AccountFeatures` from those same pairs (single
 and top 20 keepers, with the dominant feature behind each call, for skim-review
 before opening the CSV.
 
-Filenames: `recommendations_YYYY-MM-DD.csv` + `.md`, written next to the export
+Filenames: `following-audit_YYYY-MM-DD.csv` + `.md`, written next to the export
 folder by default, overridable via `--out`.
 
 ## Implementation notes (tech choices)

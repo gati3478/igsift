@@ -23,7 +23,7 @@
 //!
 //! ## Filenames
 //!
-//! Default stem: `recommendations_<YYYY-MM-DD>` next to the export
+//! Default stem: `following-audit_<YYYY-MM-DD>` next to the export
 //! directory, with `.csv` and `.md` appended. `--out PATH` overrides;
 //! `Path::with_extension` handles either bare-stem (`/tmp/foo`) or
 //! extension-bearing (`/tmp/foo.csv`) inputs symmetrically — both yield

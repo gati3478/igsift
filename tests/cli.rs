@@ -294,7 +294,7 @@ fn writes_csv_and_markdown_at_out_path() {
     );
 
     // Markdown self-documents the run.
-    assert!(md.contains("# ig-mgr recommendations"));
+    assert!(md.contains("# ig-mgr following audit"));
     assert!(md.contains("Accounts scored: **4**"));
     assert!(md.contains("Keep: **3**"));
     assert!(md.contains("Review: **1**"));

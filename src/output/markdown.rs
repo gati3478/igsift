@@ -42,7 +42,7 @@ pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> 
             .then_with(|| a.features.username.cmp(&b.features.username))
     });
 
-    writeln!(writer, "# ig-mgr recommendations").context("md header")?;
+    writeln!(writer, "# ig-mgr following audit").context("md header")?;
     writeln!(writer).context("md")?;
     writeln!(writer, "## Summary").context("md")?;
     writeln!(writer).context("md")?;

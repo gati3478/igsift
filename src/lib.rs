@@ -377,14 +377,14 @@ pub fn run(cli: Cli) -> Result<()> {
 /// Resolve the filename stem the output writer should use. `--out` wins
 /// if given (with `with_extension` handling either bare-stem or trailing
 /// `.csv` / `.md` symmetrically). Otherwise the default is
-/// `recommendations_<YYYY-MM-DD>` placed next to the export directory —
+/// `following-audit_<YYYY-MM-DD>` placed next to the export directory —
 /// DESIGN.md's "Output" contract.
 fn resolve_output_stem(cli_out: Option<&std::path::Path>, export_dir: &std::path::Path) -> PathBuf {
     if let Some(p) = cli_out {
         return p.to_path_buf();
     }
     let date = jiff::Zoned::now().date();
-    let name = format!("recommendations_{date}");
+    let name = format!("following-audit_{date}");
     // `parent()` on an absolute path goes one directory up; on a relative
     // path it can be `Some("")` (which `File::create` rejects). Fall back
     // to `.` so the default behaviour places the artifact alongside the

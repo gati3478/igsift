@@ -431,7 +431,7 @@ slice. Unfollow stays narrow but trustworthy.
   next round of edits. Recommended ~30-label distribution: **5 from
   the top of `keep_prob` (calibration), 5 from the bottom (calibration),
   20 from the Review band 0.3–0.7 (discriminative)**. Pick handles from
-  `recommendations_<DATE>.md` — the Markdown summary already shows
+  `following-audit_<DATE>.md` — the Markdown summary already shows
   `display_name` and `dominant_feature` so you can label without
   re-opening Instagram. The template explains format and rationale.
 - Decay constants stay first-pass guesses (180d DM, 365d content);

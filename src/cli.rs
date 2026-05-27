@@ -18,8 +18,8 @@ pub struct Cli {
     /// (the folder containing `connections/` and `your_instagram_activity/`).
     pub export_dir: PathBuf,
 
-    /// Where to write the recommendations. The CSV and Markdown outputs share
-    /// this stem. Defaults to `recommendations_<DATE>.{csv,md}` next to the
+    /// Where to write the audit. The CSV and Markdown outputs share
+    /// this stem. Defaults to `following-audit_<DATE>.{csv,md}` next to the
     /// export directory.
     #[arg(short, long, value_name = "PATH")]
     pub out: Option<PathBuf>,
