@@ -22,12 +22,15 @@ use serde::{Serialize, Serializer};
 
 use crate::scoring::ScoredAccount;
 
-/// Serialized CSV row. Lifetime borrows from the underlying
-/// `ScoredAccount` so the writer doesn't clone strings per row.
+/// Serialized CSV row. The handle-keyed string fields borrow from the
+/// underlying `ScoredAccount` so the writer doesn't clone per row;
+/// `profile_url` is the one owned field — built once per row from the
+/// handle and reused by the Markdown writer if it ever shares this row.
 #[derive(Serialize)]
 struct CsvRow<'a> {
     username: &'a str,
     display_name: &'a str,
+    profile_url: String,
     bucket: &'static str,
     /// Three-decimal float matching the stdout summary so a user can
     /// cross-reference CSV rows with the printed top-10 / bottom-10
@@ -52,6 +55,13 @@ fn fmt_three_decimals<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&format!("{v:.3}"))
 }
 
+/// Build the canonical Instagram profile URL for a handle. Instagram
+/// handles are restricted to `[A-Za-z0-9._]`, so no URL encoding is
+/// needed. Shared with the Markdown writer.
+pub(super) fn profile_url(handle: &str) -> String {
+    format!("https://www.instagram.com/{handle}/")
+}
+
 /// Write all scored accounts as CSV to `writer`, ascending by
 /// `keep_prob`. See [module docs](self) for the ordering rationale.
 pub fn write_to(scored: &[ScoredAccount], writer: impl Write) -> Result<()> {
@@ -71,6 +81,7 @@ pub fn write_to(scored: &[ScoredAccount], writer: impl Write) -> Result<()> {
         let row = CsvRow {
             username: &s.features.username,
             display_name: s.features.display_name.as_deref().unwrap_or(""),
+            profile_url: profile_url(&s.features.username),
             bucket: s.bucket.as_str(),
             keep_prob: s.keep_prob,
             dm_msgs: s.features.dm_messages_total,
@@ -160,11 +171,21 @@ mod tests {
         let header = csv.lines().next().expect("at least one line");
         assert_eq!(
             header,
-            "username,display_name,bucket,keep_prob,dm_msgs,last_dm_days,\
+            "username,display_name,profile_url,bucket,keep_prob,dm_msgs,last_dm_days,\
              reactions_given_180d,reactions_received_180d,\
              likes_given_90d,comments_given_90d,follow_tenure_days,\
              account_class,notes",
             "CSV header must match DESIGN.md 'Output' section verbatim",
+        );
+    }
+
+    #[test]
+    fn profile_url_is_built_from_handle() {
+        let scored = vec![make_scored("alice_h", 0.5)];
+        let csv = render(&scored);
+        assert!(
+            csv.contains("https://www.instagram.com/alice_h/"),
+            "profile_url must be present and canonical: {csv}",
         );
     }
 
@@ -197,8 +218,9 @@ mod tests {
         // last_dm_days and follow_tenure_days columns must be empty for
         // a default-constructed account.
         let fields: Vec<&str> = row.split(',').collect();
-        // last_dm_days is column index 5; follow_tenure_days is index 10.
-        assert_eq!(fields[5], "", "last_dm_days must be empty for None");
-        assert_eq!(fields[10], "", "follow_tenure_days must be empty for None",);
+        // After profile_url at index 2 shifts everything by one:
+        // last_dm_days is column 6, follow_tenure_days is column 11.
+        assert_eq!(fields[6], "", "last_dm_days must be empty for None");
+        assert_eq!(fields[11], "", "follow_tenure_days must be empty for None",);
     }
 }

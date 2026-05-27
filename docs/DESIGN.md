@@ -334,8 +334,11 @@ still care about their content?") is different and out of scope for v1.
 **Primary: CSV** — sortable, filterable, easy to diff between runs.
 
 ```
-username,display_name,bucket,keep_prob,dm_msgs,last_dm_days,reactions_given_180d,reactions_received_180d,likes_given_90d,comments_given_90d,follow_tenure_days,account_class,notes
+username,display_name,profile_url,bucket,keep_prob,dm_msgs,last_dm_days,reactions_given_180d,reactions_received_180d,likes_given_90d,comments_given_90d,follow_tenure_days,account_class,notes
 ```
+
+`profile_url` is `https://www.instagram.com/<username>/` — handles are
+ASCII-restricted by Instagram, so no URL encoding is needed.
 
 > **Two aggregations — don't conflate them.** `keep_prob` is computed from
 > exponential-decay-weighted signals (continuous τ). The `*_90d` / `*_180d`

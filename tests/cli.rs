@@ -271,7 +271,7 @@ fn writes_csv_and_markdown_at_out_path() {
     let header = csv.lines().next().expect("CSV has at least one line");
     assert_eq!(
         header,
-        "username,display_name,bucket,keep_prob,dm_msgs,last_dm_days,\
+        "username,display_name,profile_url,bucket,keep_prob,dm_msgs,last_dm_days,\
          reactions_given_180d,reactions_received_180d,\
          likes_given_90d,comments_given_90d,follow_tenure_days,\
          account_class,notes",

@@ -19,6 +19,7 @@ use std::io::Write;
 
 use anyhow::{Context, Result};
 
+use super::csv::profile_url;
 use crate::scoring::{Bucket, ScoredAccount};
 
 const TOP_N: usize = 20;
@@ -79,12 +80,13 @@ where
         any = true;
         writeln!(
             writer,
-            "| `{}` | {} | {:.3} | {} | `{}` |",
-            s.features.username,
-            s.features.display_name.as_deref().unwrap_or(""),
-            s.keep_prob,
-            s.bucket.as_str(),
-            s.dominant_feature,
+            "| [`{handle}`]({url}) | {display} | {prob:.3} | {bucket} | `{dom}` |",
+            handle = s.features.username,
+            url = profile_url(&s.features.username),
+            display = s.features.display_name.as_deref().unwrap_or(""),
+            prob = s.keep_prob,
+            bucket = s.bucket.as_str(),
+            dom = s.dominant_feature,
         )
         .context("md table row")?;
     }
