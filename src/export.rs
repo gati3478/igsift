@@ -739,6 +739,7 @@ fn me_identity_from_raw(raw: PersonalInfoFileRaw) -> Result<MeIdentity> {
                 "personal_information.json: `profile_user[0].string_map_data[\"Name\"].value` missing or empty"
             )
         })?;
+    let name = crate::text::fix_mojibake(&name).into_owned();
     Ok(MeIdentity { handle, name })
 }
 
@@ -803,11 +804,17 @@ fn read_thread_dir(base: &Path) -> Result<Vec<DmThread>> {
             let raw: ThreadFileRaw = parse_json(path)?;
             if title.is_none() {
                 title = raw.title;
-                participants = raw.participants.into_iter().map(|p| p.name).collect();
+                participants = raw
+                    .participants
+                    .into_iter()
+                    .map(|p| crate::text::fix_mojibake(&p.name).into_owned())
+                    .collect();
             }
             messages.extend(raw.messages.into_iter().map(|m| {
                 DmMessage {
-                    sender: m.sender_name,
+                    sender: m
+                        .sender_name
+                        .map(|s| crate::text::fix_mojibake(&s).into_owned()),
                     timestamp: m.timestamp_ms.and_then(milliseconds_to_timestamp),
                     content: m.content,
                     reactions: m
@@ -1149,6 +1156,23 @@ mod tests {
                 "error message must name `Name`: {err}",
             );
         }
+    }
+
+    #[test]
+    fn me_identity_repairs_mojibake_on_name() {
+        // IG's exporter ships display names as UTF-8 bytes mis-read as
+        // Latin-1 codepoints (see `src/text.rs`). 'ü' UTF-8 = c3 bc →
+        // mojibake reads as Ã (U+00C3) + ¼ (U+00BC). The mojibake form
+        // is constructed byte-exactly here so the test is invariant to
+        // whatever encoding the source file is saved as.
+        let mojibake: String = [b'H', 0xc3, 0xbc, b's', b'e', b'y', b'i', b'n']
+            .iter()
+            .map(|&b| b as char)
+            .collect();
+        let me = me_identity_from_raw(raw_profile(Some("me_handle"), Some(&mojibake)))
+            .expect("repair must not error");
+        assert_eq!(me.name, "Hüseyin", "mojibake must be repaired on Me.name");
+        assert_eq!(me.handle, "me_handle", "handle is ASCII — no transform");
     }
 
     #[test]

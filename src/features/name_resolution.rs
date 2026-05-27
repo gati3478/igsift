@@ -79,11 +79,18 @@ impl NameResolver {
                 let Some((name, handle)) = label_pair(entry) else {
                     continue;
                 };
+                // Fix IG's UTF-8-as-Latin-1 mojibake on the display-name
+                // side. The DM-side capture points (participants,
+                // sender_name) apply the same fix at parse time, so
+                // joins downstream still match. Handles (and their
+                // Latin-1-safe Instagram-rule character set) need no
+                // repair.
+                let name = crate::text::fix_mojibake(name);
                 let names = handle_to_names.entry(handle.to_owned()).or_default();
-                if !names.iter().any(|n| n == name) {
-                    names.push(name.to_owned());
+                if !names.iter().any(|n| n.as_str() == name.as_ref()) {
+                    names.push(name.clone().into_owned());
                 }
-                let handles = name_to_handles.entry(name.to_owned()).or_default();
+                let handles = name_to_handles.entry(name.into_owned()).or_default();
                 if !handles.iter().any(|h| h == handle) {
                     handles.push(handle.to_owned());
                 }
