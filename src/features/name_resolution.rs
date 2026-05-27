@@ -272,6 +272,45 @@ mod tests {
     }
 
     #[test]
+    fn mojibake_repair_joins_dm_side_to_label_side() {
+        // The whole point of the mojibake fix is that the
+        // display-name side (label_values Name → NameResolver
+        // build) and the DM side (sender_name / participants in
+        // export.rs) BOTH get repaired so the join still matches.
+        // This test exercises the join end-to-end: a mojibake'd
+        // Name in label_values resolves to the handle when looked
+        // up by the *repaired* form (which is what DM thread
+        // parsing will yield after applying fix_mojibake at
+        // parse time). Drop the fix from either side and the
+        // assertion below fails.
+        //
+        // Mojibake form of "Hüseyin" (UTF-8 c3 bc misread as two
+        // Latin-1 chars Ã ¼). Built byte-exact so the test is
+        // invariant to source-file encoding.
+        let mojibake: String = [b'H', 0xc3, 0xbc, b's', b'e', b'y', b'i', b'n']
+            .iter()
+            .map(|&b| b as char)
+            .collect();
+        let entries = vec![entry(&[
+            ("Name", mojibake.as_str()),
+            ("Username", "hgurell"),
+        ])];
+        let r = NameResolver::build(&[&entries]);
+
+        // The repaired form ("Hüseyin") is what export.rs will
+        // produce for participants[].name and sender_name — so
+        // looking up under that form must succeed.
+        assert_eq!(r.resolve("Hüseyin"), Some("hgurell"));
+        // The mojibake'd form must NOT resolve — otherwise the
+        // fix isn't actually applied on the label side and we'd
+        // get false-positive joins from un-repaired raw bytes.
+        assert_eq!(r.resolve(&mojibake), None);
+        // Reverse direction (handle → repaired display name) for
+        // the CSV/MD/HTML output: must surface the clean form.
+        assert_eq!(r.display_name_for("hgurell"), Some("Hüseyin"));
+    }
+
+    #[test]
     fn duplicate_pair_across_sources_does_not_collide() {
         // Same (name, handle) pair appearing in two files (e.g., a close
         // friend who is also favorited) must not produce a collision.

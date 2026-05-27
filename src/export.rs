@@ -847,7 +847,15 @@ fn read_thread_dir(base: &Path) -> Result<Vec<DmThread>> {
         for path in &parts {
             let raw: ThreadFileRaw = parse_json(path)?;
             if title.is_none() {
-                title = raw.title;
+                // Title is an IG-rendered display string (often the
+                // group name, or the partner's display name for
+                // 1:1s) — same UTF-8-as-Latin-1 mojibake as the
+                // participants / sender_name fields, so fixed at
+                // parse time to keep every DmThread surface
+                // consistent.
+                title = raw
+                    .title
+                    .map(|t| crate::text::fix_mojibake(&t).into_owned());
                 participants = raw
                     .participants
                     .into_iter()
@@ -860,7 +868,12 @@ fn read_thread_dir(base: &Path) -> Result<Vec<DmThread>> {
                         .sender_name
                         .map(|s| crate::text::fix_mojibake(&s).into_owned()),
                     timestamp: m.timestamp_ms.and_then(milliseconds_to_timestamp),
-                    content: m.content,
+                    // Message body is user-typed and can carry
+                    // non-ASCII naturally; same exporter bug
+                    // afflicts it, fix consistently with the rest.
+                    content: m
+                        .content
+                        .map(|c| crate::text::fix_mojibake(&c).into_owned()),
                     reactions: m
                         .reactions
                         .into_iter()
