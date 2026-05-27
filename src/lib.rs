@@ -13,11 +13,11 @@
 //!            ──▶ output::*   (CSV + Markdown writers)
 //! ```
 //!
-//! Status: parser layer complete (relationship-flag, DM, nested-`Owner`
-//! activity, shape-A activity, shape-D comment files), plus the slice-6
-//! resolver infrastructure ([`features::name_resolution`] + the `me`
-//! identity from `personal_information.json`). Feature aggregation,
-//! scoring, and output writers remain stubs — see `ROADMAP.md`.
+//! Status: parser layer complete, feature aggregation complete
+//! ([`features::aggregate`] — handle-keyed features, DM-derived features,
+//! decay-weighted versions of every count, and the four DESIGN.md CSV
+//! windowed counts). Scoring and output writers remain stubs — see
+//! `ROADMAP.md`.
 
 pub mod cli;
 pub mod config;
@@ -51,13 +51,13 @@ pub fn init_tracing(verbose: u8) {
 
 /// Entry point for the analysis run.
 ///
-/// At this stage the pipeline parses every export source, prints per-source
-/// count lines that gate the parser-pass acceptance criteria, builds the
-/// `me` identity from `personal_information.json` and a name → handle
-/// resolver over the seven `label_values` files, then runs the slice-7A
-/// handle-keyed feature aggregator and emits a few smoke counts against
-/// the resulting `Vec<AccountFeatures>`. Scoring, DM-derived features
-/// (slice 7B), and output writers land in later ROADMAP steps.
+/// At this stage the pipeline parses every export source, loads the
+/// scoring config, builds the `me` identity and the `display_name → handle`
+/// resolver, then runs the feature aggregator and emits a row of smoke
+/// counts (per-source totals plus aggregator-level totals for handle-keyed
+/// flags, DM signals, decay-weighted sums, and 90d/180d windowed counts).
+/// Scoring composition and the CSV / Markdown output writers land in
+/// later ROADMAP steps.
 pub fn run(cli: Cli) -> Result<()> {
     use anyhow::ensure;
 
@@ -199,6 +199,8 @@ pub fn run(cli: Cli) -> Result<()> {
     println!("name resolver collisions: {}", resolver.collision_count());
     println!("resolvable DM threads: {resolvable_dm_threads}");
 
+    let scoring_config = config::read_scoring_config(cli.config.as_deref())?;
+
     let inputs = features::aggregate::AggregateInputs {
         followings: &following,
         close_friends: &close_friends,
@@ -226,6 +228,7 @@ pub fn run(cli: Cli) -> Result<()> {
         message_request_threads: &message_request_threads,
         me: &me,
         resolver: &resolver,
+        decay: &scoring_config.decay,
     };
     let aggregated = features::aggregate(&inputs, jiff::Timestamp::now());
     let agg_close_friends = aggregated.iter().filter(|f| f.is_close_friend).count();
@@ -252,6 +255,35 @@ pub fn run(cli: Cli) -> Result<()> {
     println!("DM reactions given total: {agg_dm_reactions_given}");
     println!("DM reactions received total: {agg_dm_reactions_received}");
     println!("inbound DM requests: {agg_inbound_dm_requests}");
+
+    let decayed_dm_messages: f64 = aggregated.iter().map(|f| f.dm_messages_total_decayed).sum();
+    let decayed_reactions_received: f64 = aggregated
+        .iter()
+        .map(|f| f.dm_reactions_received_decayed)
+        .sum();
+    let likes_90d_total: u64 = aggregated
+        .iter()
+        .map(|f| u64::from(f.likes_given_90d))
+        .sum();
+    let comments_90d_total: u64 = aggregated
+        .iter()
+        .map(|f| u64::from(f.comments_given_90d))
+        .sum();
+    let reactions_given_180d_total: u64 = aggregated
+        .iter()
+        .map(|f| u64::from(f.dm_reactions_given_180d))
+        .sum();
+    let reactions_received_180d_total: u64 = aggregated
+        .iter()
+        .map(|f| u64::from(f.dm_reactions_received_180d))
+        .sum();
+
+    println!("decayed DM messages sum: {decayed_dm_messages:.2}");
+    println!("decayed reactions received sum: {decayed_reactions_received:.2}");
+    println!("90d likes total: {likes_90d_total}");
+    println!("90d comments total: {comments_90d_total}");
+    println!("180d reactions given total: {reactions_given_180d_total}");
+    println!("180d reactions received total: {reactions_received_180d_total}");
 
     Ok(())
 }

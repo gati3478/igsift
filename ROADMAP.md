@@ -147,15 +147,31 @@ behind each item.
       received > given, consistent with DESIGN's "DM reactions are the
       single most valuable bidirectional signal" framing), `inbound
       DM requests: 1`.
-- [ ] **Decay + windowed counts + config (slice 7B-2)** — load
-      `[decay]` from `config/scoring.toml` (and the rest of the TOML
-      structure for future slices), add decay-weighted `*_decayed: f64`
-      fields for each count feature via `exp(-Δt / τ)`, and emit the
-      four raw `*_90d` / `*_180d` windowed counts (`likes_given_90d`,
-      `comments_given_90d`, `dm_reactions_given_180d`,
-      `dm_reactions_received_180d`) for the CSV columns. DESIGN.md is
-      explicit these are *different aggregations* than the
-      decay-weighted score inputs.
+- [x] **Decay + windowed counts + config (slice 7B-2)** (2026-05-27) —
+      replaced the `src/config.rs` scaffold with `ScoringConfig` +
+      `DecayConfig` (`tau_dm_days`, `tau_content_days`) loaded from
+      `config/scoring.toml`. Path resolution: `--config <PATH>` → cwd
+      `./config/scoring.toml` → compiled-in default via `include_str!`
+      so a fresh install runs zero-config. `weights` and `scoring`
+      sections are tolerated (serde ignore-unknown) and surface in the
+      scoring slice. Aggregator gained eight `*_decayed: f64` fields
+      (one per count feature) where each entry contributes
+      `exp(-Δt_days / τ_days)` to the sum — `tau_content_days` for
+      activity, `tau_dm_days` for DM signals. Missing or future
+      timestamps contribute `0.0` (honest-counting parity with the raw
+      counts). Plus the four DESIGN.md CSV-header windowed counts —
+      `likes_given_90d`, `comments_given_90d`,
+      `dm_reactions_given_180d`, `dm_reactions_received_180d` —
+      computed under a half-open `secs / 86_400 < window_days`
+      predicate. Reactions inherit their parent message's timestamp
+      for both decay and the 180d window (the export doesn't ship
+      per-reaction timestamps; reactions are approximately
+      contemporaneous with the message). Validated against the
+      2026-05-11 export: `decayed DM messages sum: 24235.25` (raw
+      706,095 — heavy decay since most of the 706k messages are old),
+      `decayed reactions received sum: 3485.06` (raw 39,724), `90d
+      likes total: 1489`, `90d comments total: 8`, `180d reactions
+      given total: 3361`, `180d reactions received total: 3022`.
 - [ ] **First-pass scoring** with hand-set weights; eyeball top/bottom 50.
 - [ ] **Tune weights and decay constants** — consider a small labeled set of
       ~30 accounts I already know I want to keep/drop, fit weights to match.

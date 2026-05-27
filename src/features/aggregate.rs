@@ -30,11 +30,22 @@
 //! returns `None` (unknown display name OR colliding name) do not credit
 //! any followee — misattribution is worse than missing attribution.
 //!
-//! Slice 7B-2 will load `[decay]` from `config/scoring.toml`, layer
-//! exponential-decay-weighted versions onto the count features, and emit
-//! the four raw `*_90d` / `*_180d` windowed counts that the CSV columns
-//! consume. DESIGN.md is explicit that decay-weighted score inputs and
-//! windowed human-readable counts are *different aggregations*.
+//! Slice 7B-2 added (from `[decay]` in `config/scoring.toml`):
+//! - `*_decayed: f64` versions of every count feature, where each entry
+//!   contributes `exp(-Δt_days / τ_days)` to the running sum
+//!   (`tau_content_days` for activity, `tau_dm_days` for DM signals).
+//!   Entries with no timestamp, or with a future timestamp (clock skew),
+//!   contribute `0.0` — same honest-counting posture as the raw counts.
+//! - four `*_90d` / `*_180d` raw windowed counts matching DESIGN.md's CSV
+//!   header (`likes_given_90d`, `comments_given_90d`,
+//!   `dm_reactions_given_180d`, `dm_reactions_received_180d`). The
+//!   window is half-open: `secs / 86_400 < days`. DESIGN.md is explicit
+//!   these are *different aggregations* from the decay-weighted score
+//!   inputs — the CSV emits both because they answer different questions.
+//!
+//! Reactions don't carry their own timestamps in the export, so the parent
+//! message's timestamp drives both decay and the 180d window for the two
+//! reaction counters.
 //!
 //! Honest-counting posture inherited from the parsers: an activity entry
 //! whose target handle is not in the followings set is silently dropped at
@@ -45,6 +56,7 @@ use std::collections::{HashMap, HashSet};
 
 use jiff::Timestamp;
 
+use crate::config::DecayConfig;
 use crate::export::{
     CommentEntry, DmThread, FollowingEntry, MeIdentity, ShapeAEntry, ShapeCEntry, owner_username,
 };
@@ -79,6 +91,20 @@ pub struct AccountFeatures {
     pub dm_reactions_given: u32,
     pub dm_reactions_received: u32,
     pub inbound_dm_request: bool,
+
+    pub likes_given_decayed: f64,
+    pub comments_given_decayed: f64,
+    pub story_interactions_out_decayed: f64,
+    pub stories_viewed_decayed: f64,
+    pub saved_their_content_decayed: f64,
+    pub dm_messages_total_decayed: f64,
+    pub dm_reactions_given_decayed: f64,
+    pub dm_reactions_received_decayed: f64,
+
+    pub likes_given_90d: u32,
+    pub comments_given_90d: u32,
+    pub dm_reactions_given_180d: u32,
+    pub dm_reactions_received_180d: u32,
 }
 
 /// Borrowed bundle of every parser output the aggregator consumes.
@@ -120,6 +146,8 @@ pub struct AggregateInputs<'a> {
     pub message_request_threads: &'a [DmThread],
     pub me: &'a MeIdentity,
     pub resolver: &'a NameResolver,
+
+    pub decay: &'a DecayConfig,
 }
 
 /// Build one [`AccountFeatures`] row per followee, keyed by handle.
@@ -173,20 +201,44 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
             dm_reactions_given: 0,
             dm_reactions_received: 0,
             inbound_dm_request: false,
+            likes_given_decayed: 0.0,
+            comments_given_decayed: 0.0,
+            story_interactions_out_decayed: 0.0,
+            stories_viewed_decayed: 0.0,
+            saved_their_content_decayed: 0.0,
+            dm_messages_total_decayed: 0.0,
+            dm_reactions_given_decayed: 0.0,
+            dm_reactions_received_decayed: 0.0,
+            likes_given_90d: 0,
+            comments_given_90d: 0,
+            dm_reactions_given_180d: 0,
+            dm_reactions_received_180d: 0,
         };
         by_handle.insert(handle, features);
     }
+
+    let tau_content = inputs.decay.tau_content_days;
+    let tau_dm = inputs.decay.tau_dm_days;
 
     for entry in inputs.liked_posts {
         if let Some(target) = owner_username(entry)
             && let Some(features) = by_handle.get_mut(target)
         {
+            let ts = shape_c_timestamp(entry);
             features.likes_given += 1;
+            features.likes_given_decayed += decay_weight(ts, now, tau_content);
+            if within_window(ts, now, 90) {
+                features.likes_given_90d += 1;
+            }
         }
     }
     for entry in inputs.liked_comments {
         if let Some(features) = by_handle.get_mut(entry.username.as_str()) {
             features.likes_given += 1;
+            features.likes_given_decayed += decay_weight(entry.timestamp, now, tau_content);
+            if within_window(entry.timestamp, now, 90) {
+                features.likes_given_90d += 1;
+            }
         }
     }
 
@@ -198,6 +250,10 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
     {
         if let Some(features) = by_handle.get_mut(entry.target_username.as_str()) {
             features.comments_given += 1;
+            features.comments_given_decayed += decay_weight(entry.timestamp, now, tau_content);
+            if within_window(entry.timestamp, now, 90) {
+                features.comments_given_90d += 1;
+            }
         }
     }
 
@@ -213,6 +269,8 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
     {
         if let Some(features) = by_handle.get_mut(entry.username.as_str()) {
             features.story_interactions_out += 1;
+            features.story_interactions_out_decayed +=
+                decay_weight(entry.timestamp, now, tau_content);
         }
     }
 
@@ -221,6 +279,8 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
             && let Some(features) = by_handle.get_mut(target)
         {
             features.stories_viewed += 1;
+            features.stories_viewed_decayed +=
+                decay_weight(shape_c_timestamp(entry), now, tau_content);
         }
     }
 
@@ -229,10 +289,12 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
             && let Some(features) = by_handle.get_mut(target)
         {
             features.saved_their_content += 1;
+            features.saved_their_content_decayed +=
+                decay_weight(shape_c_timestamp(entry), now, tau_content);
         }
     }
 
-    apply_dm_features(&mut by_handle, inputs, now);
+    apply_dm_features(&mut by_handle, inputs, now, tau_dm);
 
     by_handle.into_values().collect()
 }
@@ -254,6 +316,7 @@ fn apply_dm_features<'a>(
     by_handle: &mut HashMap<&'a str, AccountFeatures>,
     inputs: &AggregateInputs<'a>,
     now: Timestamp,
+    tau_dm: u32,
 ) {
     for thread in inputs.message_request_threads {
         if let Some(handle) = attributable_handle(thread, &inputs.me.name, inputs.resolver)
@@ -272,7 +335,7 @@ fn apply_dm_features<'a>(
             continue;
         };
         let acc = accum.entry(handle).or_default();
-        walk_inbox_thread(thread, features, acc, &inputs.me.name);
+        walk_inbox_thread(thread, features, acc, &inputs.me.name, now, tau_dm);
     }
 
     for (handle, acc) in &accum {
@@ -326,9 +389,12 @@ fn walk_inbox_thread(
     features: &mut AccountFeatures,
     acc: &mut DmAccum,
     me_name: &str,
+    now: Timestamp,
+    tau_dm: u32,
 ) {
     for msg in &thread.messages {
         features.dm_messages_total += 1;
+        features.dm_messages_total_decayed += decay_weight(msg.timestamp, now, tau_dm);
 
         match msg.sender.as_deref() {
             Some(s) if s == me_name => acc.outbound += 1,
@@ -343,10 +409,28 @@ fn walk_inbox_thread(
             });
         }
 
+        // Reactions don't carry their own timestamps in the export — the
+        // parent message's timestamp drives both the decay weight and the
+        // 180d window predicate. A reaction is approximately contemporaneous
+        // with the message it's on.
+        let decayed = decay_weight(msg.timestamp, now, tau_dm);
+        let in_180d = within_window(msg.timestamp, now, 180);
         for r in &msg.reactions {
             match r.actor.as_deref() {
-                Some(s) if s == me_name => features.dm_reactions_given += 1,
-                Some(_) => features.dm_reactions_received += 1,
+                Some(s) if s == me_name => {
+                    features.dm_reactions_given += 1;
+                    features.dm_reactions_given_decayed += decayed;
+                    if in_180d {
+                        features.dm_reactions_given_180d += 1;
+                    }
+                }
+                Some(_) => {
+                    features.dm_reactions_received += 1;
+                    features.dm_reactions_received_decayed += decayed;
+                    if in_180d {
+                        features.dm_reactions_received_180d += 1;
+                    }
+                }
                 None => {}
             }
         }
@@ -386,6 +470,47 @@ fn days_since(earlier: Timestamp, now: Timestamp) -> Option<u32> {
         return None;
     }
     u32::try_from(secs / 86_400).ok()
+}
+
+/// Exponential decay weight `exp(-Δt_days / τ_days)` ∈ (0, 1].
+///
+/// Missing timestamps and future timestamps both yield `0.0` — same posture
+/// as `days_since`'s `None` return: an entry without a usable timestamp
+/// contributes no weight to the decayed sum rather than full weight.
+fn decay_weight(timestamp: Option<Timestamp>, now: Timestamp, tau_days: u32) -> f64 {
+    let Some(ts) = timestamp else {
+        return 0.0;
+    };
+    let secs = now.duration_since(ts).as_secs();
+    if secs < 0 {
+        return 0.0;
+    }
+    let dt_days = secs as f64 / 86_400.0;
+    (-dt_days / f64::from(tau_days)).exp()
+}
+
+/// Half-open day window: `true` iff `0 ≤ Δt_days < window_days`.
+///
+/// Missing or future timestamps return `false`. Matches the DESIGN.md CSV
+/// columns `*_90d` / `*_180d`: "in the last N days, exclusive at the
+/// boundary".
+fn within_window(timestamp: Option<Timestamp>, now: Timestamp, window_days: u32) -> bool {
+    let Some(ts) = timestamp else {
+        return false;
+    };
+    let secs = now.duration_since(ts).as_secs();
+    if secs < 0 {
+        return false;
+    }
+    secs / 86_400 < i64::from(window_days)
+}
+
+/// Shape-C entries carry the raw Unix-seconds `timestamp: Option<i64>` at
+/// the parser boundary; shape-A and shape-D have already lifted to
+/// `Option<Timestamp>`. This helper lifts shape-C so the decay/window
+/// helpers see a uniform input type.
+fn shape_c_timestamp(entry: &ShapeCEntry) -> Option<Timestamp> {
+    entry.timestamp.and_then(|s| Timestamp::from_second(s).ok())
 }
 
 #[cfg(test)]
@@ -465,6 +590,7 @@ mod tests {
         hide_story_from: &'a ShapeCEntry,
         me: &'a MeIdentity,
         resolver: &'a NameResolver,
+        decay: &'a DecayConfig,
     ) -> AggregateInputs<'a> {
         AggregateInputs {
             followings,
@@ -493,6 +619,14 @@ mod tests {
             message_request_threads: &[],
             me,
             resolver,
+            decay,
+        }
+    }
+
+    fn synth_decay() -> DecayConfig {
+        DecayConfig {
+            tau_dm_days: 180,
+            tau_content_days: 365,
         }
     }
 
@@ -581,7 +715,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = NameResolver::default();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         // close_friends includes a handle (`stranger`) that's NOT a following:
         // the aggregator must drop it from the output, not promote it.
         let close_friends = vec![flag("alice"), flag("stranger")];
@@ -603,7 +738,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = NameResolver::default();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let blocked = vec![flag("carol")];
         let recently_unfollowed = vec![flag("dave")];
         inputs.blocked = &blocked;
@@ -628,7 +764,8 @@ mod tests {
         let hide = flag("alice");
         let me = synth_me();
         let resolver = NameResolver::default();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let close_friends = vec![flag("alice")];
         let favorited = vec![flag("bob"), flag("carol")];
         let restricted = vec![flag("bob")];
@@ -663,7 +800,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = NameResolver::default();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
 
         // alice gets 2 liked_posts + 1 liked_comment → likes_given = 3.
         let liked_posts = vec![
@@ -733,7 +871,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = NameResolver::default();
-        let inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
 
         let by = by_username(aggregate(&inputs, now));
         assert_eq!(by["alice"].follow_tenure_days, Some(30));
@@ -751,7 +890,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = NameResolver::default();
-        let inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
 
         let by = by_username(aggregate(&inputs, now));
         assert_eq!(by["alice"].follow_tenure_days, None);
@@ -769,7 +909,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = NameResolver::default();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         // Activity entries with empty `Owner.Username` and shape-A username:
         // both would route to `get_mut("")` if the empty handle existed.
         let liked_posts = vec![owner_entry("")];
@@ -797,7 +938,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = NameResolver::default();
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let close_friends = vec![ShapeCEntry {
             fbid: None,
             timestamp: None,
@@ -822,7 +964,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         // Three participants including me — `attributable_handle` must
         // refuse to single out Alice as the partner.
         let threads = vec![dm_thread(
@@ -843,7 +986,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         // Only me in participants — `attributable_handle` returns None
         // (no `first` other-participant to resolve).
         let threads = vec![dm_thread(
@@ -864,7 +1008,8 @@ mod tests {
         // Resolver has Alice mapped, but the thread uses a display name
         // (`Stranger`) that the resolver has never seen.
         let resolver = resolver_from(&[("Alice Real", "alice")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let threads = vec![dm_thread(
             &["Stranger", "Me Real"],
             vec![msg(Some("Stranger"), Some(1_700_000_000), vec![])],
@@ -885,7 +1030,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Mike", "alice"), ("Mike", "alice2")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let threads = vec![dm_thread(
             &["Mike", "Me Real"],
             vec![msg(Some("Mike"), Some(1_700_000_000), vec![])],
@@ -903,7 +1049,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Stranger", "stranger")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let threads = vec![dm_thread(
             &["Stranger", "Me Real"],
             vec![msg(Some("Stranger"), Some(1_700_000_000), vec![])],
@@ -925,7 +1072,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let threads = vec![dm_thread(
             &["Alice Real", "Me Real"],
             vec![
@@ -953,7 +1101,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let threads = vec![dm_thread(
             &["Alice Real", "Me Real"],
             vec![msg(None, Some(1_700_000_000), vec![])],
@@ -971,7 +1120,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let threads = vec![dm_thread(
             &["Alice Real", "Me Real"],
             vec![msg(
@@ -1000,7 +1150,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         // Out-of-order timestamps: the recency value must be derived
         // from the maximum, not the last entry encountered.
         let now_secs = 1_800_000_000_i64;
@@ -1025,7 +1176,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let future_secs = 1_800_000_000_i64 + 86_400;
         let threads = vec![dm_thread(
             &["Alice Real", "Me Real"],
@@ -1049,7 +1201,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice"), ("Alice Alias", "alice")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         let now_secs = 1_800_000_000_i64;
         let threads = vec![
             dm_thread(
@@ -1083,7 +1236,8 @@ mod tests {
         let hide = empty_hide_entry();
         let me = synth_me();
         let resolver = resolver_from(&[("Alice Real", "alice"), ("Bob Real", "bob")]);
-        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
         // Alice has only an inbox thread → inbound_dm_request stays
         // false. Bob has only a message_requests thread → flips.
         let inbox = vec![dm_thread(
@@ -1104,5 +1258,146 @@ mod tests {
         // reactions — that path sources from `inbox_threads` only.
         assert_eq!(by["bob"].dm_messages_total, 0);
         assert_eq!(by["bob"].dm_reactions_received, 0);
+    }
+
+    // ── slice 7B-2: decay weighting + windowed counts ────────────────────
+
+    fn approx(a: f64, b: f64) {
+        assert!((a - b).abs() < 1e-9, "expected ~{b}, got {a}");
+    }
+
+    #[test]
+    fn decay_weight_at_zero_age_is_one() {
+        let now = fixed_now();
+        approx(decay_weight(Some(now), now, 365), 1.0);
+    }
+
+    #[test]
+    fn decay_weight_at_tau_age_is_one_over_e() {
+        let now = fixed_now();
+        let tau = 365u32;
+        // Exactly τ days back — the inflection point of `exp(-Δt/τ)`.
+        let earlier = Timestamp::from_second(1_800_000_000 - i64::from(tau) * 86_400).unwrap();
+        approx(decay_weight(Some(earlier), now, tau), (-1.0_f64).exp());
+    }
+
+    #[test]
+    fn decay_weight_at_two_tau_is_one_over_e_squared() {
+        let now = fixed_now();
+        let tau = 180u32;
+        let earlier = Timestamp::from_second(1_800_000_000 - 2 * i64::from(tau) * 86_400).unwrap();
+        approx(decay_weight(Some(earlier), now, tau), (-2.0_f64).exp());
+    }
+
+    #[test]
+    fn decay_weight_missing_or_future_timestamp_is_zero() {
+        let now = fixed_now();
+        approx(decay_weight(None, now, 365), 0.0);
+        let future = Timestamp::from_second(1_800_000_000 + 86_400).unwrap();
+        approx(decay_weight(Some(future), now, 365), 0.0);
+    }
+
+    #[test]
+    fn within_window_boundary_is_half_open() {
+        let now = fixed_now();
+        // 0 days back → in
+        assert!(within_window(Some(now), now, 90));
+        // 89.99 days back → in
+        let almost_90 = Timestamp::from_second(1_800_000_000 - 90 * 86_400 + 1).unwrap();
+        assert!(within_window(Some(almost_90), now, 90));
+        // Exactly 90 days back → out (half-open at the upper bound)
+        let exactly_90 = Timestamp::from_second(1_800_000_000 - 90 * 86_400).unwrap();
+        assert!(!within_window(Some(exactly_90), now, 90));
+    }
+
+    #[test]
+    fn within_window_missing_or_future_timestamp_is_false() {
+        let now = fixed_now();
+        assert!(!within_window(None, now, 90));
+        let future = Timestamp::from_second(1_800_000_000 + 1).unwrap();
+        assert!(!within_window(Some(future), now, 90));
+    }
+
+    #[test]
+    fn activity_decay_and_window_compose_end_to_end() {
+        // Three liked_comments toward alice, at 0d / 90d / 365d back.
+        // tau_content_days = 365, so decayed contributions are
+        // exp(0) + exp(-90/365) + exp(-1) = 1.0 + 0.7821... + 0.3679...
+        // The 90d window is half-open: only the 0d entry counts as in.
+        let now_secs = 1_800_000_000_i64;
+        let zero_days_ts = Timestamp::from_second(now_secs).unwrap();
+        let ninety_days_ts = Timestamp::from_second(now_secs - 90 * 86_400).unwrap();
+        let one_year_ts = Timestamp::from_second(now_secs - 365 * 86_400).unwrap();
+
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let liked = vec![
+            ShapeAEntry {
+                username: "alice".to_owned(),
+                timestamp: Some(zero_days_ts),
+            },
+            ShapeAEntry {
+                username: "alice".to_owned(),
+                timestamp: Some(ninety_days_ts),
+            },
+            ShapeAEntry {
+                username: "alice".to_owned(),
+                timestamp: Some(one_year_ts),
+            },
+        ];
+        inputs.liked_comments = &liked;
+
+        let by = by_username(aggregate(&inputs, fixed_now()));
+        let alice = &by["alice"];
+        assert_eq!(alice.likes_given, 3);
+        let expected = 1.0 + (-90.0_f64 / 365.0).exp() + (-1.0_f64).exp();
+        approx(alice.likes_given_decayed, expected);
+        // 0d in, 90d out (half-open), 365d out → exactly 1 in the window.
+        assert_eq!(alice.likes_given_90d, 1);
+    }
+
+    #[test]
+    fn dm_decay_and_window_compose_end_to_end() {
+        // tau_dm_days = 180. One message at 0d (in 180d window), one at
+        // 180d (exactly at boundary — out of half-open window). Both
+        // carry a received reaction.
+        let now_secs = 1_800_000_000_i64;
+        let zero_days = now_secs;
+        let one_eighty = now_secs - 180 * 86_400;
+
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice")]);
+        let decay = synth_decay();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &decay);
+        let threads = vec![dm_thread(
+            &["Alice Real", "Me Real"],
+            vec![
+                msg(
+                    Some("Me Real"),
+                    Some(zero_days),
+                    vec![react(Some("Alice Real"))],
+                ),
+                msg(
+                    Some("Me Real"),
+                    Some(one_eighty),
+                    vec![react(Some("Alice Real"))],
+                ),
+            ],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let alice = &by_username(aggregate(&inputs, fixed_now()))["alice"];
+        assert_eq!(alice.dm_messages_total, 2);
+        approx(alice.dm_messages_total_decayed, 1.0 + (-1.0_f64).exp());
+        assert_eq!(alice.dm_reactions_received, 2);
+        approx(alice.dm_reactions_received_decayed, 1.0 + (-1.0_f64).exp());
+        // 180d window: 0d in, 180d out (half-open) → 1
+        assert_eq!(alice.dm_reactions_received_180d, 1);
     }
 }
