@@ -222,7 +222,7 @@ fn write_row(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
     writeln!(writer, "<tr>").context("html")?;
     writeln!(
         writer,
-        "<td class=\"handle\"><a href=\"{url}\" target=\"_blank\" rel=\"noopener\">@{}</a></td>",
+        "<td class=\"handle\"><a href=\"{url}\" target=\"_blank\" rel=\"noopener noreferrer\">@{}</a></td>",
         escape(handle)
     )
     .context("html")?;
@@ -512,8 +512,10 @@ mod tests {
             "expected canonical profile link: {html}",
         );
         assert!(
-            html.contains("rel=\"noopener\""),
-            "external links must carry rel=noopener",
+            html.contains("rel=\"noopener noreferrer\""),
+            "external links must carry rel=noopener AND noreferrer \
+             (noreferrer also strips the file:// path from the Referer \
+             header, which Safari historically leaked)",
         );
     }
 

@@ -114,7 +114,11 @@ pub fn check(input: &Path, rebuild_cache: bool) -> Result<()> {
 
     // Accept dirs and archives transparently; resolve returns the
     // extracted root or the input as-is if it's already extracted.
-    let export_dir = &archive::resolve(input, rebuild_cache, true)?;
+    // Progress is gated on stderr being a TTY (indicatif's stderr
+    // draw target self-hides off-TTY, so `2>log` stays clean of
+    // spinner escape codes for both directory and archive inputs).
+    let progress_enabled = std::io::IsTerminal::is_terminal(&std::io::stderr());
+    let export_dir = &archive::resolve(input, rebuild_cache, progress_enabled)?;
 
     ensure!(
         export_dir.is_dir(),
