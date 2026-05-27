@@ -40,8 +40,8 @@ use std::collections::HashMap;
 
 use crate::export::ShapeCEntry;
 
-/// Lookup from display name to a unique handle, built from
-/// `label_values` entries that carry both a `Name` and a `Username`.
+/// Bidirectional join between display name and Instagram handle, built
+/// from `label_values` entries that carry both a `Name` and a `Username`.
 ///
 /// See module docs for coverage and collision semantics.
 #[derive(Debug, Default)]
@@ -52,6 +52,17 @@ pub struct NameResolver {
     ///
     /// [`resolve`]: NameResolver::resolve
     name_to_handles: HashMap<String, Vec<String>>,
+    /// Inverse direction for the CSV writer (`display_name` column). The
+    /// collision policy mirrors the forward direction: a handle that
+    /// appears with multiple distinct display names across the seven
+    /// sources is treated as ambiguous — [`display_name_for`] returns
+    /// `None` and the CSV emits an empty string rather than guessing
+    /// one spelling. Handles are unique on Instagram, so collisions here
+    /// are rare (a handle whose owner edited their display name between
+    /// when two different `label_values` files were generated).
+    ///
+    /// [`display_name_for`]: NameResolver::display_name_for
+    handle_to_names: HashMap<String, Vec<String>>,
 }
 
 impl NameResolver {
@@ -62,18 +73,26 @@ impl NameResolver {
     /// both a `Name` and a `Username` are skipped — they don't bridge.
     pub fn build(sources: &[&[ShapeCEntry]]) -> Self {
         let mut name_to_handles: HashMap<String, Vec<String>> = HashMap::new();
+        let mut handle_to_names: HashMap<String, Vec<String>> = HashMap::new();
         for source in sources {
             for entry in *source {
                 let Some((name, handle)) = label_pair(entry) else {
                     continue;
                 };
-                let bucket = name_to_handles.entry(name.to_owned()).or_default();
-                if !bucket.iter().any(|h| h == handle) {
-                    bucket.push(handle.to_owned());
+                let names = handle_to_names.entry(handle.to_owned()).or_default();
+                if !names.iter().any(|n| n == name) {
+                    names.push(name.to_owned());
+                }
+                let handles = name_to_handles.entry(name.to_owned()).or_default();
+                if !handles.iter().any(|h| h == handle) {
+                    handles.push(handle.to_owned());
                 }
             }
         }
-        Self { name_to_handles }
+        Self {
+            name_to_handles,
+            handle_to_names,
+        }
     }
 
     /// Resolve a display name to a single handle.
@@ -86,6 +105,23 @@ impl NameResolver {
         let handles = self.name_to_handles.get(name)?;
         if handles.len() == 1 {
             Some(handles[0].as_str())
+        } else {
+            None
+        }
+    }
+
+    /// Inverse of [`resolve`]: handle → display name for the CSV writer.
+    ///
+    /// `None` when the handle is unknown OR when the same handle appears
+    /// with multiple distinct names across the source files (rare —
+    /// requires the user to have edited their display name between
+    /// snapshots). Same "no guessing" posture as the forward direction.
+    ///
+    /// [`resolve`]: NameResolver::resolve
+    pub fn display_name_for(&self, handle: &str) -> Option<&str> {
+        let names = self.handle_to_names.get(handle)?;
+        if names.len() == 1 {
+            Some(names[0].as_str())
         } else {
             None
         }
@@ -237,5 +273,37 @@ mod tests {
         let r = NameResolver::build(&[&close_friends, &favorited]);
         assert_eq!(r.resolve("Alice"), Some("alice_h"));
         assert_eq!(r.collision_count(), 0);
+    }
+
+    #[test]
+    fn display_name_for_returns_unique_name() {
+        let entries = vec![
+            entry(&[("Name", "Alice Synth"), ("Username", "alice_h")]),
+            entry(&[("Name", "Bob Synth"), ("Username", "bob_h")]),
+        ];
+        let r = NameResolver::build(&[&entries]);
+        assert_eq!(r.display_name_for("alice_h"), Some("Alice Synth"));
+        assert_eq!(r.display_name_for("bob_h"), Some("Bob Synth"));
+        assert_eq!(r.display_name_for("unknown_h"), None);
+    }
+
+    #[test]
+    fn display_name_for_returns_none_when_handle_has_multiple_names() {
+        // A handle whose owner edited their display name between snapshot
+        // files surfaces in two sources with different `Name` values.
+        // Same "no guessing" posture as the forward direction: collision
+        // returns None rather than picking one spelling arbitrarily.
+        let close_friends = vec![entry(&[("Name", "Old Name"), ("Username", "alice_h")])];
+        let favorited = vec![entry(&[("Name", "New Name"), ("Username", "alice_h")])];
+        let r = NameResolver::build(&[&close_friends, &favorited]);
+        assert_eq!(
+            r.display_name_for("alice_h"),
+            None,
+            "handle with two distinct names must surface as None",
+        );
+        // The forward direction still resolves both names (each maps
+        // uniquely back to the same handle).
+        assert_eq!(r.resolve("Old Name"), Some("alice_h"));
+        assert_eq!(r.resolve("New Name"), Some("alice_h"));
     }
 }

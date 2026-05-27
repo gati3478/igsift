@@ -288,6 +288,8 @@ mod tests {
     fn baseline_account(handle: &str) -> AccountFeatures {
         AccountFeatures {
             username: handle.to_owned(),
+            display_name: None,
+            account_class: crate::features::AccountClass::default(),
             follow_tenure_days: None,
             is_close_friend: false,
             is_favorited: false,

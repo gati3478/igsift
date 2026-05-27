@@ -62,6 +62,29 @@ use crate::export::{
 };
 use crate::features::name_resolution::NameResolver;
 
+/// Account class — currently a placeholder until the brand / public-figure
+/// heuristic lands. DESIGN.md gates the `Unfollow` bucket on
+/// `account_class == Personal`, so we materialize the field now (defaulting
+/// to `Personal`) and the future heuristic upgrades non-personal accounts
+/// in place rather than introducing a new field. Surfaced in the CSV
+/// `account_class` column for human triage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AccountClass {
+    #[default]
+    Personal,
+    // Brand and PublicFigure variants land with the account-class slice.
+    // Adding them here without the detection logic would be a lie about
+    // what the aggregator knows.
+}
+
+impl AccountClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AccountClass::Personal => "personal",
+        }
+    }
+}
+
 /// One row of per-account features. Slice 7A populates the handle-keyed
 /// fields; DM-derived fields are defaulted to zero / `None` and filled in
 /// slice 7B. See [`docs/DESIGN.md`](../../../docs/DESIGN.md) ("Per-account
@@ -69,6 +92,12 @@ use crate::features::name_resolution::NameResolver;
 #[derive(Debug, Clone)]
 pub struct AccountFeatures {
     pub username: String,
+    /// Display name resolved via [`NameResolver::display_name_for`]. `None`
+    /// when the handle doesn't appear in any `label_values` file or when
+    /// it appears with multiple distinct names (collision policy mirrors
+    /// the forward direction). CSV emits empty string for `None`.
+    pub display_name: Option<String>,
+    pub account_class: AccountClass,
     pub follow_tenure_days: Option<u32>,
 
     pub is_close_friend: bool,
@@ -189,6 +218,11 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
         }
         let features = AccountFeatures {
             username: f.username.clone(),
+            display_name: inputs
+                .resolver
+                .display_name_for(handle)
+                .map(|s| s.to_owned()),
+            account_class: AccountClass::default(),
             follow_tenure_days: f.followed_at.and_then(|ts| days_since(ts, now)),
             is_close_friend: close_friend.contains(handle),
             is_favorited: favorited.contains(handle),

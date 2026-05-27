@@ -28,4 +28,4 @@
 pub mod aggregate;
 pub mod name_resolution;
 
-pub use aggregate::{AccountFeatures, aggregate};
+pub use aggregate::{AccountClass, AccountFeatures, aggregate};

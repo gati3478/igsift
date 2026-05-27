@@ -3,8 +3,9 @@
 //! Smoke tests cover the CLI surface; the fixture-driven case asserts the
 //! parser-pass acceptance criteria — exact follower/following/thread/message
 //! counts against a hand-built sanitized export at
-//! `tests/fixtures/sample_export/`. Snapshot tests on emitted CSV/Markdown
-//! will land alongside the output writers (ROADMAP).
+//! `tests/fixtures/sample_export/`. The CSV / Markdown writer slice adds
+//! one further end-to-end test that asserts the two artifacts exist at
+//! the `--out` path and that the CSV header matches DESIGN.md verbatim.
 
 use std::path::PathBuf;
 
@@ -17,6 +18,14 @@ fn ig_mgr() -> Command {
 
 fn sample_export() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample_export")
+}
+
+/// Per-test stem under `env::temp_dir()`. Tests pass this as `--out` so
+/// the writer's default-path logic doesn't drop artifacts next to the
+/// fixture directory (gitignored but still noise). Each test name maps
+/// to a unique path so tests can run in parallel without colliding.
+fn out_stem(test_name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("ig-mgr-test-{test_name}"))
 }
 
 #[test]
@@ -60,6 +69,8 @@ fn trace_unknown_handle_fails_loudly() {
     // immediately rather than seeing an empty trace and wondering why.
     ig_mgr()
         .arg(sample_export())
+        .arg("--out")
+        .arg(out_stem("trace_unknown"))
         .arg("--trace")
         .arg("no_such_handle_xyz")
         .assert()
@@ -77,6 +88,8 @@ fn trace_known_handle_prints_contributions() {
     // the boost from the trace.
     ig_mgr()
         .arg(sample_export())
+        .arg("--out")
+        .arg(out_stem("trace_known"))
         .arg("--trace")
         .arg("alice_synth")
         .assert()
@@ -124,6 +137,8 @@ fn fixture_counts_match_expected() {
     // — diagnose, don't relax the assertion.
     ig_mgr()
         .arg(sample_export())
+        .arg("--out")
+        .arg(out_stem("fixture_counts"))
         .assert()
         .success()
         .stdout(contains("following count: 3"))
@@ -195,4 +210,58 @@ fn fixture_counts_match_expected() {
         .stdout(contains("bucket keep: 3"))
         .stdout(contains("bucket review: 0"))
         .stdout(contains("bucket unfollow: 0"));
+}
+
+#[test]
+fn writes_csv_and_markdown_at_out_path() {
+    // End-to-end pin for the output writer slice. Runs the binary against
+    // the sample fixture (3 followings, all in Keep), asserts both files
+    // land at the `--out` stem with the right extensions, and checks the
+    // load-bearing surface in each: the CSV header (the inter-run diff
+    // contract per DESIGN.md "Output") and the Markdown summary line.
+    let stem = out_stem("writes_csv_and_md");
+    let csv_path = stem.with_extension("csv");
+    let md_path = stem.with_extension("md");
+    // Pre-clean so a prior test run doesn't mask a failure to write.
+    let _ = std::fs::remove_file(&csv_path);
+    let _ = std::fs::remove_file(&md_path);
+
+    ig_mgr()
+        .arg(sample_export())
+        .arg("--out")
+        .arg(&stem)
+        .assert()
+        .success()
+        .stdout(contains("wrote:"))
+        .stdout(contains(csv_path.to_string_lossy().as_ref()))
+        .stdout(contains(md_path.to_string_lossy().as_ref()));
+
+    let csv = std::fs::read_to_string(&csv_path).expect("CSV should exist");
+    let md = std::fs::read_to_string(&md_path).expect("Markdown should exist");
+
+    // CSV header must match DESIGN.md verbatim — this is the diff contract.
+    let header = csv.lines().next().expect("CSV has at least one line");
+    assert_eq!(
+        header,
+        "username,display_name,bucket,keep_prob,dm_msgs,last_dm_days,\
+         reactions_given_180d,reactions_received_180d,\
+         likes_given_90d,comments_given_90d,follow_tenure_days,\
+         account_class,notes",
+    );
+    // 1 header + 3 rows (fixture has 3 followings).
+    assert_eq!(csv.lines().count(), 4, "expected 4 lines, got:\n{csv}");
+
+    // Markdown self-documents the run.
+    assert!(md.contains("# ig-mgr recommendations"));
+    assert!(md.contains("Accounts scored: **3**"));
+    assert!(md.contains("Keep: **3**"));
+    // `carol_synth` has a `display_name` populated via the NameResolver
+    // reverse map (she appears in `favorited` with Name "Carol Synth").
+    // The Markdown writer surfaces that — pinning it here means a
+    // regression in the reverse-map join fails this test, not just the
+    // unit test in `name_resolution.rs`.
+    assert!(
+        md.contains("Carol Synth"),
+        "expected resolved display_name in Markdown body, got:\n{md}",
+    );
 }

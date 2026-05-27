@@ -28,6 +28,8 @@ pub mod labels;
 pub mod output;
 pub mod scoring;
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 
 use crate::cli::Cli;
@@ -345,7 +347,35 @@ pub fn run(cli: Cli) -> Result<()> {
         print_trace(handle, &scored, &scoring_config.weights)?;
     }
 
+    let stem = resolve_output_stem(cli.out.as_deref(), &cli.export_dir);
+    let (csv_path, md_path) = output::write(&scored, &stem)?;
+    println!("wrote: {}", csv_path.display());
+    println!("wrote: {}", md_path.display());
+
     Ok(())
+}
+
+/// Resolve the filename stem the output writer should use. `--out` wins
+/// if given (with `with_extension` handling either bare-stem or trailing
+/// `.csv` / `.md` symmetrically). Otherwise the default is
+/// `recommendations_<YYYY-MM-DD>` placed next to the export directory —
+/// DESIGN.md's "Output" contract.
+fn resolve_output_stem(cli_out: Option<&std::path::Path>, export_dir: &std::path::Path) -> PathBuf {
+    if let Some(p) = cli_out {
+        return p.to_path_buf();
+    }
+    let date = jiff::Zoned::now().date();
+    let name = format!("recommendations_{date}");
+    // `parent()` on an absolute path goes one directory up; on a relative
+    // path it can be `Some("")` (which `File::create` rejects). Fall back
+    // to `.` so the default behaviour places the artifact alongside the
+    // export folder when run from elsewhere, OR in the cwd when no
+    // sibling directory is meaningful.
+    let parent = export_dir.parent().filter(|p| !p.as_os_str().is_empty());
+    match parent {
+        Some(p) => p.join(name),
+        None => PathBuf::from(name),
+    }
 }
 
 /// 10-bucket histogram over `keep_prob`. Buckets are half-open
