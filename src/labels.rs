@@ -7,10 +7,10 @@
 //! "which accounts specifically am I getting wrong?" — both inputs for the
 //! next weight edit.
 //!
-//! Format: `config/labels.txt`, one entry per line:
+//! Format: `config/labels.txt`, one entry per line — a handle, whitespace,
+//! then `keep` or `drop`:
 //!
 //! ```text
-//! # ASCII handle, then `keep` or `drop`
 //! alice_synth   keep
 //! brand_xyz     drop
 //! ```
@@ -46,7 +46,7 @@ pub enum Label {
 }
 
 impl Label {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Label::Keep => "keep",
             Label::Drop => "drop",
@@ -95,9 +95,10 @@ fn parse(body: &str, source: &str) -> Result<LabelSet> {
     let mut by_handle: HashMap<String, Label> = HashMap::new();
     for (idx, raw) in body.lines().enumerate() {
         let line_no = idx + 1;
-        // Strip end-of-line comments before tokenizing. A `#` mid-line is
-        // a comment start — handles are ASCII identifiers and don't
-        // contain `#`, so this is unambiguous.
+        // Strip end-of-line comments before tokenizing. `#` is a comment
+        // delimiter, so by construction no handle contains it — the split
+        // is unambiguous regardless of script (Instagram handles are
+        // ASCII in practice, but the parser doesn't lean on that).
         let line = raw.split('#').next().unwrap_or("").trim();
         if line.is_empty() {
             continue;
@@ -223,6 +224,12 @@ pub fn report(labels: &LabelSet, scored: &[ScoredAccount]) {
         "agreement: {agreed}/{scored_total} ({agreement_pct:.1}%)  \
          [label=keep ∩ bucket=keep + label=drop ∩ bucket=unfollow]"
     );
+
+    // Sort printed lists by handle so round-over-round diffs only show
+    // real changes. `LabelSet::iter` reflects `HashMap` iteration order,
+    // which is randomized per-process via `RandomState`.
+    missing.sort_unstable();
+    hard_mismatches.sort_unstable_by_key(|(handle, _, _)| *handle);
 
     if !missing.is_empty() {
         println!(
