@@ -114,8 +114,24 @@ fn extract_or_reuse(
     fs::create_dir_all(cache)
         .with_context(|| format!("creating cache directory {}", cache.display()))?;
     extract_zips_with_progress(zips, cache, progress_enabled)?;
-    fs::write(cache.join(CACHE_MARKER), "ok").context("writing cache marker")?;
+    fs::write(cache.join(CACHE_MARKER), marker_body(zips)?).context("writing cache marker")?;
     Ok(extracted_root(cache))
+}
+
+/// Serialized cache fingerprint: `{count}\n{total_compressed_bytes}\n`.
+///
+/// Stored in `.complete` and re-derived from the current zip set on
+/// every resolve. Mtime alone is insufficient — `cp -p`, `rsync
+/// --times`, and remounted NFS volumes all preserve mtimes through
+/// content replacement, leaving the cache "fresh" with stale
+/// extracted data. Also catches deleted parts (count drops) and
+/// added parts (count rises) without any mtime change.
+fn marker_body(zips: &[PathBuf]) -> Result<String> {
+    let mut total: u64 = 0;
+    for z in zips {
+        total = total.saturating_add(fs::metadata(z)?.len());
+    }
+    Ok(format!("{}\n{total}\n", zips.len()))
 }
 
 fn cache_is_fresh(cache: &Path, zips: &[PathBuf]) -> Result<bool> {
@@ -123,12 +139,11 @@ fn cache_is_fresh(cache: &Path, zips: &[PathBuf]) -> Result<bool> {
     if !marker.is_file() {
         return Ok(false);
     }
-    let marker_mtime = fs::metadata(&marker)?.modified()?;
-    for z in zips {
-        let z_mtime = fs::metadata(z)?.modified()?;
-        if z_mtime > marker_mtime {
-            return Ok(false);
-        }
+    // Content fingerprint takes precedence over mtime — a same-mtime
+    // replacement still changes size, which we detect.
+    let recorded = fs::read_to_string(&marker).context("reading cache marker")?;
+    if recorded != marker_body(zips)? {
+        return Ok(false);
     }
     Ok(true)
 }
@@ -344,6 +359,51 @@ mod tests {
             ".ig-mgr-extracted-{}",
             zip_path.file_stem().unwrap().to_string_lossy()
         )));
+        let _ = fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn cache_invalidates_when_zip_size_changes_without_mtime_change() {
+        // Simulates `cp -p` / `rsync --times` content replacement —
+        // same mtime, different size. mtime-only invalidation would
+        // miss this; content fingerprint catches it.
+        let zip_path = synth_zip("cache-resize", false);
+        let first = resolve(&zip_path, true, false).expect("first resolve");
+        let sentinel = first.join(".sentinel");
+        fs::write(&sentinel, "x").expect("sentinel");
+
+        // Rebuild the zip into the SAME path so the mtime resets to
+        // "now" (close to the marker's). Then synth_zip is called a
+        // second time to a different path and the bytes are copied
+        // over, preserving content-change-with-fresh-mtime. The
+        // marker's recorded size differs from the new zip's size →
+        // invalidation fires.
+        let bigger_zip = synth_zip("cache-resize-bigger", true);
+        fs::copy(&bigger_zip, &zip_path).expect("overwrite");
+        let _ = fs::remove_file(&bigger_zip);
+
+        let _ = resolve(&zip_path, false, false).expect("resolve after size change");
+        assert!(
+            !sentinel.is_file(),
+            "cache must be invalidated when source zip size changes",
+        );
+
+        let parent = zip_path.parent().unwrap();
+        let stem = zip_path.file_stem().unwrap().to_string_lossy();
+        let _ = fs::remove_dir_all(parent.join(format!(".ig-mgr-extracted-{stem}")));
+        let _ = fs::remove_file(&zip_path);
+        let _ =
+            fs::remove_dir_all(parent.join(format!(".ig-mgr-extracted-{}", "cache-resize-bigger")));
+    }
+
+    #[test]
+    fn marker_body_is_count_plus_total_bytes() {
+        // Pin the on-disk format so a future serialization change is
+        // explicit (and not a silent cache-incompatibility bump).
+        let zip_path = synth_zip("marker-format", false);
+        let body = marker_body(std::slice::from_ref(&zip_path)).expect("marker");
+        let expected_size = fs::metadata(&zip_path).unwrap().len();
+        assert_eq!(body, format!("1\n{expected_size}\n"));
         let _ = fs::remove_file(&zip_path);
     }
 }
