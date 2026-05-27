@@ -34,4 +34,12 @@ pub struct Cli {
     /// overrides this when set.
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    /// Print the full per-term scoring breakdown for one handle. The handle
+    /// must be in the followings set (after blocked/recently-unfollowed
+    /// exclusions); otherwise the run errors. Intended for weight tuning —
+    /// answers "why did this account rank where it did?" without grepping
+    /// scoring code.
+    #[arg(long, value_name = "HANDLE")]
+    pub trace: Option<String>,
 }

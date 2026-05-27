@@ -53,6 +53,39 @@ fn nonexistent_export_dir_fails_gracefully() {
 }
 
 #[test]
+fn trace_unknown_handle_fails_loudly() {
+    // A `--trace <handle>` that doesn't match any aggregated account is
+    // almost certainly a typo at the command line. The run errors with
+    // the offending handle named in the message so the user can fix it
+    // immediately rather than seeing an empty trace and wondering why.
+    ig_mgr()
+        .arg(sample_export())
+        .arg("--trace")
+        .arg("no_such_handle_xyz")
+        .assert()
+        .failure()
+        .stderr(contains("no_such_handle_xyz"));
+}
+
+#[test]
+fn trace_known_handle_prints_contributions() {
+    // `alice_synth` is in the fixture's following.json AND has the
+    // close_friend flag, so the trace must surface a non-zero
+    // `close_friend_boost` contribution. Pinning the label keeps the
+    // term-contributions array order independent of how rustc lays out
+    // the literal — a future term reordering shouldn't silently drop
+    // the boost from the trace.
+    ig_mgr()
+        .arg(sample_export())
+        .arg("--trace")
+        .arg("alice_synth")
+        .assert()
+        .success()
+        .stdout(contains("trace for \"alice_synth\""))
+        .stdout(contains("close_friend_boost"));
+}
+
+#[test]
 fn fixture_counts_match_expected() {
     // Sanitized fixture: 3 followings, 2 followers, 3 inbox threads, 9 total
     // inbox messages (alice_thread = 2 msgs, bob_thread = 5 across two parts,

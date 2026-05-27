@@ -24,6 +24,7 @@ pub mod cli;
 pub mod config;
 pub mod export;
 pub mod features;
+pub mod labels;
 pub mod output;
 pub mod scoring;
 
@@ -301,6 +302,8 @@ pub fn run(cli: Cli) -> Result<()> {
     println!("bucket review: {review_count}");
     println!("bucket unfollow: {unfollow_count}");
 
+    print_keep_prob_histogram(&scored);
+
     // Top/bottom 10 as the human-readable sanity surface. Borrows into
     // `scored` rather than cloning — the full ranking stays a Vec<ScoredAccount>
     // for the CSV writer to consume in a later slice.
@@ -331,5 +334,83 @@ pub fn run(cli: Cli) -> Result<()> {
         );
     }
 
+    // Labels report (optional). `config/labels.txt` is opt-in — a tuning
+    // session that hasn't committed labels yet sees no report and no error.
+    match labels::load_default()? {
+        Some(label_set) => labels::report(&label_set, &scored),
+        None => println!("labels: config/labels.txt not found (accuracy report skipped)"),
+    }
+
+    if let Some(handle) = cli.trace.as_deref() {
+        print_trace(handle, &scored, &scoring_config.weights)?;
+    }
+
+    Ok(())
+}
+
+/// 10-bucket histogram over `keep_prob`. Buckets are half-open
+/// `[i*0.1, (i+1)*0.1)` except the last is `[0.9, 1.0]` so a
+/// `keep_prob == 1.0` lands in the rightmost bucket rather than
+/// falling off the end (no extra branching at the use sites).
+fn print_keep_prob_histogram(scored: &[scoring::ScoredAccount]) {
+    let mut counts = [0u32; 10];
+    for s in scored {
+        let idx = ((s.keep_prob * 10.0).floor() as usize).min(9);
+        counts[idx] += 1;
+    }
+    let max_count = counts.iter().copied().max().unwrap_or(0);
+    // Each '█' represents ~max/40 accounts; scale=0 sentinel means "no
+    // data" and suppresses the bar entirely. `checked_div` cleanly
+    // collapses both the empty-data case and the per-bucket divide.
+    let bar_scale = max_count.div_ceil(40);
+    println!("keep_prob histogram:");
+    for (i, c) in counts.iter().enumerate() {
+        let lo = i as f64 / 10.0;
+        let hi = (i + 1) as f64 / 10.0;
+        let right = if i == 9 { ']' } else { ')' };
+        let bar = c
+            .checked_div(bar_scale)
+            .map(|n| "█".repeat(n as usize))
+            .unwrap_or_default();
+        println!("  [{lo:.1}, {hi:.1}{right}: {c:>4} {bar}");
+    }
+}
+
+/// Print every term's signed contribution for one handle, sorted by
+/// `|contribution|` so the dominant terms surface first. The handle must
+/// be in the scored set; otherwise an error names it so a typo at the
+/// command line fails loudly rather than producing an empty trace.
+fn print_trace(
+    handle: &str,
+    scored: &[scoring::ScoredAccount],
+    weights: &config::WeightsConfig,
+) -> anyhow::Result<()> {
+    let acct = scored
+        .iter()
+        .find(|s| s.features.username == handle)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "--trace handle {handle:?} not found in scored followings \
+                 (blocked / recently_unfollowed handles are excluded)"
+            )
+        })?;
+    let mut contribs = scoring::term_contributions(&acct.features, weights);
+    contribs.sort_by(|a, b| {
+        b.1.abs()
+            .partial_cmp(&a.1.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    println!(
+        "trace for {handle:?}: score_raw={:.3}  keep_prob={:.3}  bucket={}",
+        acct.score_raw,
+        acct.keep_prob,
+        acct.bucket.as_str(),
+    );
+    for (label, value) in &contribs {
+        if *value == 0.0 {
+            continue;
+        }
+        println!("  {label:<28} {value:+.4}");
+    }
     Ok(())
 }

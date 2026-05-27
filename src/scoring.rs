@@ -105,28 +105,27 @@ fn score_one(f: &AccountFeatures, w: &WeightsConfig, p: &ScoringParams) -> Score
     }
 }
 
-/// Apply the per-weight composition formula and return both the raw
-/// score and the label of the largest-magnitude contribution.
-///
-/// The labels match the field names in [`WeightsConfig`] (and therefore
-/// the keys in `config/scoring.toml`) so a "dominant_feature: dm" call-out
-/// in the Markdown summary maps unambiguously back to the term that drove
-/// it.
-fn compose_score(f: &AccountFeatures, w: &WeightsConfig) -> (f64, &'static str) {
-    let dm = w.dm * f.dm_messages_total_decayed;
-    let likes = w.likes * f.likes_given_decayed;
-    let comments = w.comments * f.comments_given_decayed;
-    let story_out = w.story_out * f.story_interactions_out_decayed;
-    let stories_viewed = w.stories_viewed * f.stories_viewed_decayed;
-    let saved = w.saved * f.saved_their_content_decayed;
-    let reactions_given = w.reactions_given * f.dm_reactions_given_decayed;
-    let reactions_received = w.reactions_received * f.dm_reactions_received_decayed;
+/// Number of terms in the scoring composition. Pinned via this constant so
+/// `term_contributions` returns a fixed-size array and any future term
+/// addition fails to compile until both the const and the array literal
+/// move together.
+pub const NUM_TERMS: usize = 16;
 
+/// Per-term signed contributions to `score_raw`. Penalties surface negative
+/// so consumers (the dominant-feature pick, the `--trace` flag) can rank
+/// terms by signed magnitude without re-deriving the sign of each term.
+///
+/// Labels match the field names in [`WeightsConfig`] (and therefore the keys
+/// in `config/scoring.toml`) so a `dominant_feature: dm` call-out or a
+/// trace row maps unambiguously back to the term that drove it.
+pub fn term_contributions(
+    f: &AccountFeatures,
+    w: &WeightsConfig,
+) -> [(&'static str, f64); NUM_TERMS] {
     let tenure = match f.follow_tenure_days {
         Some(d) => w.tenure * (f64::from(d) + 1.0).ln(),
         None => 0.0,
     };
-
     let close_friend = if f.is_close_friend {
         w.close_friend_boost
     } else {
@@ -142,9 +141,6 @@ fn compose_score(f: &AccountFeatures, w: &WeightsConfig) -> (f64, &'static str) 
     } else {
         0.0
     };
-
-    let dm_bp = dm_balance_penalty(f);
-    let rxn_bp = reaction_balance_penalty(f);
     let hide_story = if f.is_hide_story_from {
         w.hide_story_penalty
     } else {
@@ -155,39 +151,27 @@ fn compose_score(f: &AccountFeatures, w: &WeightsConfig) -> (f64, &'static str) 
     } else {
         0.0
     };
-    let dm_balance_term = w.dm_balance_penalty * dm_bp;
-    let reaction_balance_term = w.reaction_balance_penalty * rxn_bp;
+    let dm_balance_term = w.dm_balance_penalty * dm_balance_penalty(f);
+    let reaction_balance_term = w.reaction_balance_penalty * reaction_balance_penalty(f);
 
-    let score_raw = dm
-        + likes
-        + comments
-        + story_out
-        + stories_viewed
-        + saved
-        + reactions_given
-        + reactions_received
-        + tenure
-        + close_friend
-        + favorite
-        + inbound_request
-        - dm_balance_term
-        - reaction_balance_term
-        - hide_story
-        - removed_suggestion;
-
-    // Dominant feature: largest absolute contribution. Penalties are
-    // signed negative here so a hide-story account whose penalty
-    // dominates surfaces as "hide_story_penalty" rather than getting
-    // hidden behind a small positive engagement term.
-    let contribs: [(&'static str, f64); 16] = [
-        ("dm", dm),
-        ("likes", likes),
-        ("comments", comments),
-        ("story_out", story_out),
-        ("stories_viewed", stories_viewed),
-        ("saved", saved),
-        ("reactions_given", reactions_given),
-        ("reactions_received", reactions_received),
+    [
+        ("dm", w.dm * f.dm_messages_total_decayed),
+        ("likes", w.likes * f.likes_given_decayed),
+        ("comments", w.comments * f.comments_given_decayed),
+        ("story_out", w.story_out * f.story_interactions_out_decayed),
+        (
+            "stories_viewed",
+            w.stories_viewed * f.stories_viewed_decayed,
+        ),
+        ("saved", w.saved * f.saved_their_content_decayed),
+        (
+            "reactions_given",
+            w.reactions_given * f.dm_reactions_given_decayed,
+        ),
+        (
+            "reactions_received",
+            w.reactions_received * f.dm_reactions_received_decayed,
+        ),
         ("tenure", tenure),
         ("close_friend_boost", close_friend),
         ("favorite_boost", favorite),
@@ -196,8 +180,19 @@ fn compose_score(f: &AccountFeatures, w: &WeightsConfig) -> (f64, &'static str) 
         ("reaction_balance_penalty", -reaction_balance_term),
         ("hide_story_penalty", -hide_story),
         ("removed_suggestion_penalty", -removed_suggestion),
-    ];
+    ]
+}
 
+/// Apply the per-weight composition formula and return both the raw
+/// score and the label of the largest-magnitude contribution.
+fn compose_score(f: &AccountFeatures, w: &WeightsConfig) -> (f64, &'static str) {
+    let contribs = term_contributions(f, w);
+    let score_raw: f64 = contribs.iter().map(|(_, v)| v).sum();
+
+    // Dominant feature: largest absolute contribution. Penalties are
+    // signed negative in `term_contributions` so a hide-story account
+    // whose penalty dominates surfaces as "hide_story_penalty" rather
+    // than getting hidden behind a small positive engagement term.
     let dominant = contribs
         .iter()
         .max_by(|(_, a), (_, b)| {
