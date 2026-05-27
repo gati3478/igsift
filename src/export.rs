@@ -238,13 +238,19 @@ struct ParticipantRaw {
 // ── Shape-A wrapper structs ──────────────────────────────────────────────────
 //
 // Each shape-A file is `{<wrapper_key>: [{title, string_list_data}, ...]}`.
-// The interior entry shape is identical across all eight (it's the same as
-// `following.json` — the wrapper-key naming is the only delta), so the
-// existing `RelationshipEntryRaw` deserializer is reused for the entry body.
-// One struct per file keeps the wrapper key as a compile-checked field name:
-// if Instagram renames the key on a future export, the parse fails loudly at
-// the offending JSON path via `serde_path_to_error` instead of silently
-// returning an empty Vec.
+// The interior entry shape is identical across all eight (same as
+// `following.json` — only the wrapper-key naming differs), so the existing
+// `RelationshipEntryRaw` deserializer is reused for the entry body.
+//
+// Rename drift on a wrapper key produces a **silent empty Vec**, not a
+// parse failure: `#[serde(default)]` plus serde's default ignore-unknown-
+// fields posture means a renamed key is dropped and the named field falls
+// back to `Vec::new()`. This matches the project's tolerant schema-drift
+// posture (CLAUDE.md). The drift is caught downstream — the fixture-count
+// assertion in `tests/cli.rs` drops to 0 and the failing assertion names
+// the specific file. The struct-per-file pattern earns its lines by making
+// the wrapper-key spelling a single source of truth in code (not just
+// `docs/DESIGN.md`) and by attributing a count drop to a specific file.
 
 #[derive(Debug, Deserialize)]
 struct LikedCommentsFileRaw {
