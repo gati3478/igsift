@@ -2,10 +2,10 @@
 
 The full design for the Instagram following-cleanup CLI. Status, build, and the
 short pitch live in the [README](../README.md); the task list in
-[ROADMAP.md](../ROADMAP.md). Parser layer is landing in slices — the relationship,
-DM, nested-`Owner` activity, and shape-A activity readers are in `src/export.rs`
-today; the rest of this document (feature aggregation, scoring, output) is still
-ahead.
+[ROADMAP.md](../ROADMAP.md). Parser layer, feature aggregation, and first-pass
+scoring are landed today; the CSV/Markdown output writers and the brand /
+public-figure account-class heuristic that hardens the `unfollow`
+recommendation are the remaining ROADMAP items.
 
 ## Inputs
 
@@ -176,29 +176,29 @@ one decision per account.
 
 ### Per-account features
 
-| Feature                  | Source                                              | Direction / handling             | Weight (initial)                        |
-| ------------------------ | --------------------------------------------------- | -------------------------------- | --------------------------------------- |
-| `dm_messages_total`      | inbox `<thread>` messages                           | outbound + inbound, log-scaled   | high                                    |
-| `dm_recency_days`        | last `timestamp_ms` in thread                       | exponential decay (τ ≈ 180d)     | high                                    |
-| `dm_balance`             | outbound / (outbound + inbound) message count       | penalize one-sided threads       | medium                                  |
-| `dm_reactions_given`     | `reactions[?actor == me]`                           | log-scaled, recency-weighted     | medium                                  |
-| `dm_reactions_received`  | `reactions[?actor != me]` — **inbound** reciprocity | log-scaled, recency-weighted     | medium-high                             |
-| `dm_reaction_balance`    | given / (given + received)                          | penalize one-sided reactions     | low-medium                              |
-| `inbound_dm_request`     | thread present in `message_requests/`               | boolean                          | low keep-bias                           |
-| `likes_given`            | `liked_posts` + `liked_comments`                    | log-scaled, recency-weighted     | medium                                  |
-| `comments_given`         | `post_comments_*` + `reels_comments` + `hype`       | log-scaled, recency-weighted     | medium                                  |
-| `story_interactions_out` | all `story_interactions/*` aggregated               | log-scaled, recency-weighted     | medium                                  |
-| `stories_viewed`         | `stories_viewed.json`                               | log-scaled, recency-weighted     | low                                     |
-| `saved_their_content`    | `saved_posts.json`                                  | log-scaled                       | low                                     |
-| `follow_tenure_days`     | `following.json` per-account `timestamp`            | `log(days_since_follow + 1)`     | low                                     |
-| `is_close_friend`        | `close_friends.json`                                | boolean                          | hard boost                              |
-| `is_favorited`           | `profiles_you've_favorited.json`                    | boolean                          | hard boost (separate from close_friend) |
-| `is_blocked`             | `blocked_profiles.json`                             | boolean                          | **excludes from input set**             |
-| `is_restricted`          | `restricted_profiles.json`                          | boolean                          | floor bucket to `review`                |
-| `is_hide_story_from`     | `hide_story_from.json`                              | boolean                          | weak negative                           |
-| `is_removed_suggestion`  | `removed_suggestions.json`                          | boolean                          | very weak negative                      |
-| `recently_unfollowed`    | `recently_unfollowed_profiles.json`                 | boolean                          | **excludes from input set**             |
-| `account_class`          | username/name heuristic (below)                     | public_figure / brand / personal | gates the `unfollow` recommendation     |
+| Feature                  | Source                                              | Direction / handling                                          | Weight (initial)                        |
+| ------------------------ | --------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------- |
+| `dm_messages_total`      | inbox `<thread>` messages                           | outbound + inbound, log-scaled                                | high                                    |
+| `dm_recency_days`        | last `timestamp_ms` in thread                       | recency enters via decayed counts; field surfaces in CSV only | (no separate weight)                    |
+| `dm_balance`             | outbound / (outbound + inbound) message count       | penalize one-sided threads                                    | medium                                  |
+| `dm_reactions_given`     | `reactions[?actor == me]`                           | log-scaled, recency-weighted                                  | medium                                  |
+| `dm_reactions_received`  | `reactions[?actor != me]` — **inbound** reciprocity | log-scaled, recency-weighted                                  | medium-high                             |
+| `dm_reaction_balance`    | given / (given + received)                          | penalize one-sided reactions                                  | low-medium                              |
+| `inbound_dm_request`     | thread present in `message_requests/`               | boolean                                                       | low keep-bias                           |
+| `likes_given`            | `liked_posts` + `liked_comments`                    | log-scaled, recency-weighted                                  | medium                                  |
+| `comments_given`         | `post_comments_*` + `reels_comments` + `hype`       | log-scaled, recency-weighted                                  | medium                                  |
+| `story_interactions_out` | all `story_interactions/*` aggregated               | log-scaled, recency-weighted                                  | medium                                  |
+| `stories_viewed`         | `stories_viewed.json`                               | log-scaled, recency-weighted                                  | low                                     |
+| `saved_their_content`    | `saved_posts.json`                                  | log-scaled                                                    | low                                     |
+| `follow_tenure_days`     | `following.json` per-account `timestamp`            | `log(days_since_follow + 1)`                                  | low                                     |
+| `is_close_friend`        | `close_friends.json`                                | boolean                                                       | hard boost                              |
+| `is_favorited`           | `profiles_you've_favorited.json`                    | boolean                                                       | hard boost (separate from close_friend) |
+| `is_blocked`             | `blocked_profiles.json`                             | boolean                                                       | **excludes from input set**             |
+| `is_restricted`          | `restricted_profiles.json`                          | boolean                                                       | floor bucket to `review`                |
+| `is_hide_story_from`     | `hide_story_from.json`                              | boolean                                                       | weak negative                           |
+| `is_removed_suggestion`  | `removed_suggestions.json`                          | boolean                                                       | very weak negative                      |
+| `recently_unfollowed`    | `recently_unfollowed_profiles.json`                 | boolean                                                       | **excludes from input set**             |
+| `account_class`          | username/name heuristic (below)                     | public_figure / brand / personal                              | gates the `unfollow` recommendation     |
 
 **Decay.** Every interaction count is recency-weighted with exponential decay
 so a 2019 like is worth far less than a 2026 like. τ is configurable; start
@@ -239,8 +239,43 @@ keep_prob      = sigmoid((score_raw - threshold) / scale)
 
 Every key in [`config/scoring.toml`](../config/scoring.toml) `[weights]` appears
 exactly once above. Recency enters through the exponential decay applied to
-each count (`[decay]` τ constants), not as an additive term. Weights and
-constants live in TOML so they can be tuned without a rebuild.
+each count (`[decay]` τ constants), not as an additive term — `dm_recency_days`
+is materialized on `AccountFeatures` for the CSV (`last_dm_days`) but never
+fed into `score_raw`. Weights and constants live in TOML so they can be
+tuned without a rebuild.
+
+#### Balance-penalty form (volume-gated, asymmetric)
+
+`dm_balance_penalty` and `reaction_balance_penalty` are not stored on
+`AccountFeatures` — they're derived in `src/scoring.rs` from the raw
+`dm_balance` ratio (and from the raw `dm_reactions_given` /
+`dm_reactions_received` counts for the reaction variant) so the volume-
+gating policy lives next to the weight rather than baked into the
+aggregator:
+
+```
+volume_gate(count, k)  = (count >= k)         # k = 5 today, tunable later
+balance_penalty(ratio) = max(0, ratio - 0.5) * 2   ∈ [0, 1]
+```
+
+Asymmetric on purpose: `balance = 1.0` (fully one-sided me) returns `1.0`,
+the full penalty; `balance = 0.0` (fully one-sided them) returns `0.0`.
+One-sided-them is reciprocity in the inbound direction, not over-extension
+— `reactions_received` scores it through its own weight. The volume gate
+prevents 1-message threads with `balance = 1.0` from dominating: a fresh
+thread isn't a relationship signal yet.
+
+#### Dominant feature label (Markdown summary)
+
+The Markdown summary's "dominant feature" column is the term with the
+largest **signed** contribution to `score_raw`: positive engagement terms
+compete in their natural sign, while penalty terms enter the comparison
+as **negative** of their `weight * value` product. This surfaces
+"hide_story_penalty" or "dm_balance_penalty" by name when a penalty
+dominates, rather than burying the negative driver under a smaller
+positive term. Labels match the corresponding `WeightsConfig` field
+(and `[weights]` TOML key) verbatim so a call-out traces back to one
+line of code and one line of config.
 
 ### Buckets
 
@@ -269,6 +304,16 @@ username,display_name,bucket,keep_prob,dm_msgs,last_dm_days,reactions_given_180d
 > sanity context for skim-review — they are _not_ the values that feed scoring.
 > `features.rs` computes both: the decay-weighted score inputs and these
 > plain windowed counts.
+
+> **`display_name` is the inverse of the `NameResolver` join.** The seven
+> `label_values` files ship `(Name, Username)` pairs — `NameResolver`
+> already uses them to map display name → handle for DM attribution; the
+> CSV writer needs the reverse direction (handle → display name), with
+> the same collision policy: collisions emit empty string, never a
+> guess. The CSV slice should either materialize `display_name:
+Option<String>` onto `AccountFeatures` from those same pairs (single
+> source of truth, single pass) or extend `NameResolver` with a
+> `display_name_for(handle)` accessor.
 
 **Secondary: Markdown summary** alongside the CSV — top 20 unfollow candidates
 and top 20 keepers, with the dominant feature behind each call, for skim-review
