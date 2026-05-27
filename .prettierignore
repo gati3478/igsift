@@ -1,0 +1,6 @@
+# ROADMAP.md uses nested checklists and inline `snake_case` identifiers
+# (e.g., `emoji_sliders`, `_not_`) inside paragraph text. Prettier's
+# markdown formatter collapses the nested list structure into the
+# parent line and misreads underscores as emphasis markers, corrupting
+# both. Hand-format only.
+ROADMAP.md
