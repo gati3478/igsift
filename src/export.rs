@@ -707,6 +707,13 @@ pub fn read_hype(export_dir: &Path) -> Result<Vec<CommentEntry>> {
 /// `serde_path_to_error`) instead of producing garbage attributions.
 pub fn read_me_identity(export_dir: &Path) -> Result<MeIdentity> {
     let raw: PersonalInfoFileRaw = parse_json(&export_dir.join(PERSONAL_INFO))?;
+    me_identity_from_raw(raw)
+}
+
+/// Field-extraction logic for [`read_me_identity`], split out so the three
+/// hard-error paths (empty `profile_user`, missing `Username`, missing
+/// `Name`) can be unit-tested without staging a broken JSON file on disk.
+fn me_identity_from_raw(raw: PersonalInfoFileRaw) -> Result<MeIdentity> {
     let profile = raw.profile_user.into_iter().next().ok_or_else(|| {
         anyhow::anyhow!(
             "personal_information.json: `profile_user` is empty — cannot determine `me` identity"
@@ -1085,6 +1092,63 @@ mod tests {
         // walk currently succeeds against the synthetic fixture.
         assert_eq!(me.handle, "me_synth");
         assert_eq!(me.name, "Test User");
+    }
+
+    fn raw_profile(username: Option<&str>, name: Option<&str>) -> PersonalInfoFileRaw {
+        PersonalInfoFileRaw {
+            profile_user: vec![ProfileUserRaw {
+                string_map_data: ProfileUserStringMap {
+                    username: ShapeDValue {
+                        value: username.map(str::to_owned),
+                        timestamp: None,
+                    },
+                    name: ShapeDValue {
+                        value: name.map(str::to_owned),
+                        timestamp: None,
+                    },
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn me_identity_errors_on_empty_profile_user() {
+        // If IG ever ships personal_information.json with an empty
+        // profile_user array (account in a strange state, export bug),
+        // the run must fail loud — DM-direction classification has no
+        // anchor without a `me` identity.
+        let raw = PersonalInfoFileRaw {
+            profile_user: Vec::new(),
+        };
+        let err = me_identity_from_raw(raw).expect_err("must hard-error");
+        assert!(
+            err.to_string().contains("`profile_user` is empty"),
+            "error message must name the field: {err}",
+        );
+    }
+
+    #[test]
+    fn me_identity_errors_on_missing_or_empty_username() {
+        for username in [None, Some("")] {
+            let err = me_identity_from_raw(raw_profile(username, Some("Test User")))
+                .expect_err("missing/empty Username must hard-error");
+            assert!(
+                err.to_string().contains("Username"),
+                "error message must name `Username`: {err}",
+            );
+        }
+    }
+
+    #[test]
+    fn me_identity_errors_on_missing_or_empty_name() {
+        for name in [None, Some("")] {
+            let err = me_identity_from_raw(raw_profile(Some("me_handle"), name))
+                .expect_err("missing/empty Name must hard-error");
+            assert!(
+                err.to_string().contains("Name"),
+                "error message must name `Name`: {err}",
+            );
+        }
     }
 
     #[test]

@@ -13,11 +13,11 @@
 //!            ──▶ output::*   (CSV + Markdown writers)
 //! ```
 //!
-//! Status: parsers landing in slices. Relationship-flag, DM,
-//! nested-`Owner` activity, and shape-A activity readers all complete;
-//! shape-D comment files (`post_comments_*`, `reels_comments`, `hype`)
-//! still pending. Feature aggregation, scoring, and output writers remain
-//! stubs — see `ROADMAP.md`.
+//! Status: parser layer complete (relationship-flag, DM, nested-`Owner`
+//! activity, shape-A activity, shape-D comment files), plus the slice-6
+//! resolver infrastructure ([`features::name_resolution`] + the `me`
+//! identity from `personal_information.json`). Feature aggregation,
+//! scoring, and output writers remain stubs — see `ROADMAP.md`.
 
 pub mod cli;
 pub mod config;

@@ -54,26 +54,32 @@ fn nonexistent_export_dir_fails_gracefully() {
 
 #[test]
 fn fixture_counts_match_expected() {
-    // Sanitized fixture: 3 followings, 2 followers, 2 inbox threads, 7 total
-    // inbox messages (one thread is multi-part: 3 in message_1 + 2 in
-    // message_2), the seven relationship-flag files and one message request
-    // thread from the second slice, the four nested-`Owner` activity files
-    // from the third slice — 2 liked posts (distinct owners), 1 story like,
-    // 1 stories viewed, 1 saved post — the eight shape-A activity files
-    // from the fourth slice — 2 liked comments, 1 of each of the seven
-    // story_interactions files — the three shape-D comment files from
-    // the fifth slice — 2 post comments (distinct targets), 1 reel
+    // Sanitized fixture: 3 followings, 2 followers, 3 inbox threads, 9 total
+    // inbox messages (alice_thread = 2 msgs, bob_thread = 5 across two parts,
+    // carol_thread = 2 msgs), the seven relationship-flag files and one
+    // message request thread from the second slice, the four nested-`Owner`
+    // activity files from the third slice — 2 liked posts (distinct owners),
+    // 1 story like, 1 stories viewed, 1 saved post — the eight shape-A
+    // activity files from the fourth slice — 2 liked comments, 1 of each of
+    // the seven story_interactions files — the three shape-D comment files
+    // from the fifth slice — 2 post comments (distinct targets), 1 reel
     // comment, 1 hype (story comment) — and the slice-6 resolver
     // infrastructure: `me` identity from `personal_information.json`
     // (`me_synth` / `Test User`) plus a NameResolver over the eight
     // (Name, Username) pairs in the seven `label_values` fixtures (no
-    // collisions on the synthetic data). `resolvable DM threads: 0`
-    // because the existing inbox threads spell participants with the
-    // handle (e.g. `alice_synth`), not the display name (`Alice Synth`)
-    // — the resolution path is structurally exercised by the unit tests
-    // in `src/features/name_resolution.rs`; this 0 is the intended
-    // baseline that catches regressions where the resolver suddenly
-    // starts matching the handle spelling.
+    // collisions on the synthetic data).
+    //
+    // `resolvable DM threads: 1` covers `carol_thread`, whose other
+    // participant `Carol Synth` (display name) appears in `favorited` →
+    // `carol_synth`. `alice_thread` and `bob_thread` spell their other
+    // participants with the handle (`alice_synth` / `bob_synth`), which
+    // the resolver correctly refuses to match — exercising both the
+    // positive resolution path (catches a regression where the resolver
+    // stops matching display-name spellings) and the negative path
+    // (catches a regression where it suddenly starts matching the
+    // handle spelling). The lib::run wiring — `participants` filter,
+    // `others.len() == 1` predicate, `me.name` exclusion — is exactly
+    // what this `1` count pins.
     //
     // The activity counts come from honest extraction (`owner_username`
     // for nested-Owner, empty-title filter for shape A, empty
@@ -89,8 +95,8 @@ fn fixture_counts_match_expected() {
         .success()
         .stdout(contains("following count: 3"))
         .stdout(contains("followers count: 2"))
-        .stdout(contains("DM thread count: 2"))
-        .stdout(contains("total DM messages: 7"))
+        .stdout(contains("DM thread count: 3"))
+        .stdout(contains("total DM messages: 9"))
         .stdout(contains("close friends count: 1"))
         .stdout(contains("favorited count: 2"))
         .stdout(contains("blocked count: 1"))
@@ -118,5 +124,5 @@ fn fixture_counts_match_expected() {
         .stdout(contains("me name: Test User"))
         .stdout(contains("name resolver entries: 8"))
         .stdout(contains("name resolver collisions: 0"))
-        .stdout(contains("resolvable DM threads: 0"));
+        .stdout(contains("resolvable DM threads: 1"));
 }
