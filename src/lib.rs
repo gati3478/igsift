@@ -73,6 +73,7 @@ pub fn run(cli: Cli) -> Result<()> {
         "export directory does not exist or is not a directory: {}",
         cli.export_dir.display()
     );
+    export::validate_shape(&cli.export_dir)?;
 
     let following = export::read_following(&cli.export_dir)?;
     let followers = export::read_followers(&cli.export_dir)?;

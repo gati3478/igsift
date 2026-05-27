@@ -42,6 +42,8 @@ use jiff::Timestamp;
 use serde::Deserialize;
 
 const FOLLOW_DIR: &str = "connections/followers_and_following";
+const FOLLOWING_FILE: &str = "connections/followers_and_following/following.json";
+const ACTIVITY_DIR: &str = "your_instagram_activity";
 const INBOX_DIR: &str = "your_instagram_activity/messages/inbox";
 const MESSAGE_REQUESTS_DIR: &str = "your_instagram_activity/messages/message_requests";
 const LIKED_POSTS: &str = "your_instagram_activity/likes/liked_posts.json";
@@ -430,6 +432,48 @@ struct ProfileUserStringMap {
 // ── Public readers ───────────────────────────────────────────────────────────
 
 /// Parse `connections/followers_and_following/following.json` (shape A).
+/// Verify `export_dir` looks like an unzipped Instagram "Download Your
+/// Information" folder before the parser layer runs.
+///
+/// Pointing the binary at the wrong folder is the most common
+/// non-schema-drift failure mode: the export's parent directory, a
+/// freshly-created empty folder, or the still-zipped archive root. The
+/// per-file parsers would each fail in turn with a different error,
+/// burning startup time on each. This shallow check surfaces a single
+/// readable error naming every expected top-level marker that is
+/// missing.
+///
+/// What it checks: the three load-bearing top-level paths
+/// (`connections/followers_and_following/following.json` — the
+/// followings list; `personal_information/personal_information/personal_information.json`
+/// — the `me` identity; `your_instagram_activity/` — the activity tree
+/// root). Activity sub-files are not checked individually — IG drops
+/// optional files (no countdowns last quarter? no `countdowns.json`),
+/// and each parser already tolerates a missing file by returning an
+/// empty Vec.
+pub fn validate_shape(export_dir: &Path) -> Result<()> {
+    let mut missing: Vec<&str> = Vec::new();
+    for path in [FOLLOWING_FILE, PERSONAL_INFO] {
+        if !export_dir.join(path).is_file() {
+            missing.push(path);
+        }
+    }
+    if !export_dir.join(ACTIVITY_DIR).is_dir() {
+        missing.push(ACTIVITY_DIR);
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{} does not look like an unzipped Instagram \"Download Your Information\" export — \
+         missing expected paths:\n  {}\nIf the path points at a parent directory or a still-zipped \
+         archive root, descend into the unzipped folder containing `connections/` and \
+         `your_instagram_activity/`.",
+        export_dir.display(),
+        missing.join("\n  ")
+    )
+}
+
 ///
 /// Shape A wraps a single array under the `relationships_following` key.
 /// The username lives in `title`; the follow timestamp is the (only)
@@ -1087,6 +1131,34 @@ mod tests {
         assert_eq!(entries[0].target_username, "first_post_target_synth");
         assert!(entries[0].timestamp.is_some());
         assert_eq!(entries[1].target_username, "second_post_target_synth");
+    }
+
+    #[test]
+    fn validate_shape_accepts_fixture() {
+        validate_shape(&fixture_root()).expect("fixture must validate as a real export");
+    }
+
+    #[test]
+    fn validate_shape_lists_every_missing_path() {
+        // Empty tempdir — nothing IG-shaped exists. The error must
+        // name all three top-level markers so the user sees the full
+        // diagnosis in one message, not three sequential parser
+        // failures.
+        let empty = std::env::temp_dir().join(format!(
+            "ig-mgr-validate-empty-{}-{}",
+            std::process::id(),
+            jiff::Timestamp::now().as_nanosecond(),
+        ));
+        std::fs::create_dir_all(&empty).expect("mktemp");
+        let err = validate_shape(&empty).expect_err("empty dir must fail validation");
+        let msg = err.to_string();
+        std::fs::remove_dir(&empty).ok();
+        assert!(
+            msg.contains(FOLLOWING_FILE),
+            "missing FOLLOWING_FILE: {msg}"
+        );
+        assert!(msg.contains(PERSONAL_INFO), "missing PERSONAL_INFO: {msg}");
+        assert!(msg.contains(ACTIVITY_DIR), "missing ACTIVITY_DIR: {msg}");
     }
 
     #[test]
