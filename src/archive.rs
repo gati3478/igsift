@@ -397,6 +397,90 @@ mod tests {
     }
 
     #[test]
+    fn multipart_zips_merge_into_one_extracted_tree() {
+        // The headline feature: IG ships large exports as multipart
+        // zips that overlap on path prefixes (same thread folder
+        // across parts) but contain disjoint files inside. The
+        // resolver concatenates them into one cache dir with
+        // last-write-wins safe per the chunking memory. This test
+        // builds two synthetic parts with overlapping folders +
+        // disjoint files, runs resolve(), and asserts the union is
+        // present.
+
+        let dir = std::env::temp_dir().join(format!(
+            "ig-mgr-multipart-{}-{}",
+            std::process::id(),
+            jiff::Timestamp::now().as_nanosecond(),
+        ));
+        fs::create_dir_all(&dir).expect("mktemp");
+
+        // Part 1: half the fixture
+        let part1 = dir.join("export-part-1.zip");
+        write_partial_zip(&part1, &["connections", "personal_information"]);
+        // Part 2: the other half (your_instagram_activity — required
+        // by validate_shape as the third marker)
+        let part2 = dir.join("export-part-2.zip");
+        write_partial_zip(&part2, &["your_instagram_activity"]);
+
+        let resolved = resolve(&dir, true, false).expect("resolve multipart");
+
+        // Auto-descent + cache merge: both halves must be present
+        // under one root.
+        assert!(
+            resolved.join(EXTRACTED_MARKER).is_file(),
+            "part 1 contribution missing: {}",
+            resolved.display(),
+        );
+        assert!(
+            resolved.join("your_instagram_activity").is_dir(),
+            "part 2 contribution missing: {}",
+            resolved.display(),
+        );
+        assert!(
+            resolved
+                .join("personal_information/personal_information/personal_information.json")
+                .is_file(),
+            "part 1 personal_information contribution missing",
+        );
+
+        // Re-run with a new part added — count changes, cache must
+        // invalidate.
+        let part3 = dir.join("export-part-3.zip");
+        write_partial_zip(&part3, &["connections"]);
+        let sentinel = resolved.join(".sentinel");
+        fs::write(&sentinel, "x").expect("sentinel");
+        let _ = resolve(&dir, false, false).expect("resolve with new part");
+        assert!(
+            !sentinel.is_file(),
+            "adding a new zip part must invalidate the cache",
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Write a zip containing only the named top-level dirs from the
+    /// fixture. Used to synthesize multipart parts where each carries
+    /// a disjoint subtree of the export.
+    fn write_partial_zip(zip_path: &Path, top_dirs: &[&str]) {
+        use std::io::Write as _;
+        let file = fs::File::create(zip_path).expect("create part zip");
+        let mut writer = zip::ZipWriter::new(file);
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        let root = fixture_root();
+        for top in top_dirs {
+            let dir = root.join(top);
+            if dir.is_dir() {
+                write_dir_to_zip(&mut writer, &root, &dir, "", opts);
+            }
+        }
+        // Ensure tests don't depend on Drop ordering of writer.
+        writer.finish().expect("finalize part zip");
+        // Silence unused-import warning under test.
+        let _ = std::io::stderr().flush();
+    }
+
+    #[test]
     fn marker_body_is_count_plus_total_bytes() {
         // Pin the on-disk format so a future serialization change is
         // explicit (and not a silent cache-incompatibility bump).

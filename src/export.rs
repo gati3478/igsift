@@ -1175,6 +1175,40 @@ mod tests {
     }
 
     #[test]
+    fn validate_shape_partial_presence_names_only_the_missing() {
+        // Dir contains the connections marker but neither PERSONAL_INFO
+        // nor ACTIVITY_DIR. The error must NOT name FOLLOWING_FILE
+        // (present) and MUST name both missing markers. A short-circuit
+        // regression that bailed at the first missing path would still
+        // pass `validate_shape_lists_every_missing_path` but fail here.
+        let dir = std::env::temp_dir().join(format!(
+            "ig-mgr-validate-partial-{}-{}",
+            std::process::id(),
+            jiff::Timestamp::now().as_nanosecond(),
+        ));
+        let following = dir.join(FOLLOWING_FILE);
+        std::fs::create_dir_all(following.parent().unwrap()).expect("mktemp");
+        std::fs::write(&following, "[]").expect("touch following");
+
+        let err = validate_shape(&dir).expect_err("partial dir must fail");
+        let msg = err.to_string();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(
+            !msg.contains(FOLLOWING_FILE),
+            "present file must NOT be named in error: {msg}"
+        );
+        assert!(
+            msg.contains(PERSONAL_INFO),
+            "missing PERSONAL_INFO must be named: {msg}"
+        );
+        assert!(
+            msg.contains(ACTIVITY_DIR),
+            "missing ACTIVITY_DIR must be named: {msg}"
+        );
+    }
+
+    #[test]
     fn me_identity_extracts_handle_and_name() {
         let me = read_me_identity(&fixture_root()).expect("fixture parse");
         // If "Username" or "Name" gets renamed in IG's export the

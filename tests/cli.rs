@@ -191,6 +191,141 @@ fn init_subcommand_writes_template_files() {
 }
 
 #[test]
+fn init_force_overwrites_existing_content() {
+    // The --force branch had no coverage — a boolean inversion would
+    // make plain `init` clobber a user's hand-edited config and
+    // `--force` skip. Pin the actual content change: pre-write
+    // distinct bytes, run `init --force`, assert the file matches
+    // the embedded template body (the standard keep_allowlist marker
+    // line is sufficient).
+    let cwd = std::env::temp_dir().join(format!("ig-mgr-init-force-{}", std::process::id()));
+    std::fs::create_dir_all(cwd.join("config")).expect("mktemp config dir");
+    let allowlist = cwd.join("config/keep_allowlist.txt");
+    std::fs::write(&allowlist, "MY_CUSTOM_HAND_EDITED_HANDLE\n").expect("seed user content");
+
+    let mut cmd = Command::cargo_bin("ig-mgr").expect("binary");
+    cmd.current_dir(&cwd)
+        .arg("init")
+        .arg("--force")
+        .assert()
+        .success()
+        .stdout(contains("wrote: config/keep_allowlist.txt"));
+
+    let body = std::fs::read_to_string(&allowlist).expect("read");
+    assert!(
+        !body.contains("MY_CUSTOM_HAND_EDITED_HANDLE"),
+        "--force must replace existing content, but it survived: {body}",
+    );
+    assert!(
+        body.contains("keep_allowlist"),
+        "post-force content must be the embedded template: {body}",
+    );
+
+    std::fs::remove_dir_all(&cwd).ok();
+}
+
+#[test]
+fn check_surfaces_per_source_failure_without_masking_others() {
+    // The whole point of `check`: one corrupt source fails its
+    // line but the rest still report ✓, and the run exits non-zero.
+    // Inject `{}` as following.json (validate_shape passes — the
+    // file exists — but read_following's deserializer fails on the
+    // missing `relationships_following` key) in a temp copy of the
+    // fixture; assert ✗ for following.json + at least one ✓ for an
+    // unrelated source + non-zero exit + named failure count.
+    let cwd = std::env::temp_dir().join(format!("ig-mgr-check-fail-{}", std::process::id()));
+    // Mirror the fixture into the temp dir so we can corrupt one
+    // file without touching the committed test data.
+    fn copy_dir(src: &std::path::Path, dst: &std::path::Path) {
+        std::fs::create_dir_all(dst).expect("mkdir");
+        for entry in std::fs::read_dir(src).expect("read") {
+            let entry = entry.expect("entry");
+            let p = entry.path();
+            let target = dst.join(p.file_name().expect("name"));
+            if p.is_dir() {
+                copy_dir(&p, &target);
+            } else {
+                std::fs::copy(&p, &target).expect("copy");
+            }
+        }
+    }
+    copy_dir(&sample_export(), &cwd);
+    // Overwrite following.json with a type-mismatch body. `{}`
+    // alone would parse — relationships_following carries
+    // #[serde(default)] so the missing key just yields Vec::new().
+    // A wrong-typed value at the expected key is a real parse
+    // failure with a path-named error.
+    std::fs::write(
+        cwd.join("connections/followers_and_following/following.json"),
+        r#"{"relationships_following": "not an array"}"#,
+    )
+    .expect("inject broken following.json");
+
+    let mut cmd = Command::cargo_bin("ig-mgr").expect("binary");
+    cmd.current_dir(std::env::temp_dir())
+        .arg("check")
+        .arg(&cwd)
+        .assert()
+        .failure()
+        .stdout(contains("✗ following.json"))
+        .stdout(contains("✓ followers.json"))
+        .stderr(contains("source(s) failed"));
+
+    std::fs::remove_dir_all(&cwd).ok();
+}
+
+#[test]
+fn preset_engagement_produces_different_buckets_than_tenure() {
+    // `--preset NAME` only had a parse test — a typo wiring
+    // `Engagement => include_str!(".../tenure.toml")` would slip
+    // past every existing assertion. Run the binary against the
+    // fixture twice with different presets and assert at least one
+    // account's bucket OR keep_prob diverges. Fixture is small but
+    // its four followings span enough feature shapes.
+    let eng_stem = out_stem("preset-eng");
+    let ten_stem = out_stem("preset-ten");
+
+    ig_mgr()
+        .arg(sample_export())
+        .arg("--out")
+        .arg(&eng_stem)
+        .arg("--preset")
+        .arg("engagement")
+        .assert()
+        .success();
+    ig_mgr()
+        .arg(sample_export())
+        .arg("--out")
+        .arg(&ten_stem)
+        .arg("--preset")
+        .arg("tenure")
+        .assert()
+        .success();
+
+    let eng_csv = std::fs::read_to_string(eng_stem.with_extension("csv")).expect("eng");
+    let ten_csv = std::fs::read_to_string(ten_stem.with_extension("csv")).expect("ten");
+
+    // Strip the headers — they're identical by contract.
+    let eng_data: Vec<&str> = eng_csv.lines().skip(1).collect();
+    let ten_data: Vec<&str> = ten_csv.lines().skip(1).collect();
+    assert_eq!(
+        eng_data.len(),
+        ten_data.len(),
+        "row count must match — same fixture",
+    );
+
+    let diverged = eng_data.iter().zip(ten_data.iter()).any(|(a, b)| a != b);
+    assert!(
+        diverged,
+        "engagement and tenure presets must produce at least one row-level \
+         difference on the fixture; identical output suggests both wires \
+         loaded the same preset bytes.\nEng:\n{}\nTen:\n{}",
+        eng_data.join("\n"),
+        ten_data.join("\n"),
+    );
+}
+
+#[test]
 fn trace_unknown_handle_fails_loudly() {
     // A `--trace <handle>` that doesn't match any aggregated account is
     // almost certainly a typo at the command line. The run errors with
