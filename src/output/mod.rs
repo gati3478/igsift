@@ -41,7 +41,57 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::scoring::ScoredAccount;
+use crate::features::{AccountClass, AccountFeatures};
+use crate::scoring::{Bucket, ScoredAccount};
+
+/// One-line characterization of an account's "shape" — what kind of
+/// follow it is and why it landed in the bucket. Lives at the output
+/// module level so the Markdown and HTML writers share the same
+/// labels (drift would silently surface different reasons for the
+/// same account across artifacts).
+///
+/// Order matters: explicit user signals (allowlist, close friend,
+/// favorited) trump inferred behaviour (DM activity, recent likes),
+/// which in turn trump structural fallbacks (one-sided, brand,
+/// dormant). A regression that reorders these would still pass
+/// any single-arm test — the table-driven test in this module
+/// pins the precedence chain end to end.
+pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str {
+    if f.is_keep_allowlisted {
+        return "explicit allowlist";
+    }
+    if f.is_close_friend {
+        return "marked close friend";
+    }
+    if f.is_favorited {
+        return "favorited";
+    }
+    if f.is_restricted {
+        return "restricted — kept in Review by floor";
+    }
+    if f.is_hide_story_from {
+        return "story hidden — negative signal";
+    }
+    if f.dm_messages_total_decayed > 0.0 {
+        return "active DM partner";
+    }
+    if f.likes_given_90d > 0 || f.comments_given_90d > 0 {
+        return "engaged with their content in last 90 days";
+    }
+    if f.dm_messages_total > 0 {
+        return "DM history exists but no recent messages";
+    }
+    if !f.is_mutual {
+        return "one-sided — you follow, no reciprocation";
+    }
+    if matches!(f.account_class, AccountClass::Brand) {
+        return "brand follow — review intent";
+    }
+    match bucket {
+        Bucket::Unfollow => "dormant — no interaction signal in any window",
+        _ => "tenure-only — no engagement signal",
+    }
+}
 
 /// Paths the writer produced. Always three: CSV, Markdown, HTML.
 #[derive(Debug)]
@@ -79,4 +129,172 @@ pub fn write(scored: &[ScoredAccount], stem: &Path) -> Result<WrittenPaths> {
         md: md_path,
         html: html_path,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn baseline() -> AccountFeatures {
+        AccountFeatures {
+            username: "u".to_owned(),
+            display_name: None,
+            account_class: AccountClass::Personal,
+            follow_tenure_days: Some(365),
+            is_close_friend: false,
+            is_favorited: false,
+            is_blocked: false,
+            is_restricted: false,
+            is_hide_story_from: false,
+            is_removed_suggestion: false,
+            recently_unfollowed: false,
+            is_mutual: true,
+            is_keep_allowlisted: false,
+            likes_given: 0,
+            comments_given: 0,
+            story_interactions_out: 0,
+            stories_viewed: 0,
+            saved_their_content: 0,
+            dm_messages_total: 0,
+            dm_recency_days: None,
+            dm_balance: None,
+            dm_reactions_given: 0,
+            dm_reactions_received: 0,
+            inbound_dm_request: false,
+            likes_given_decayed: 0.0,
+            comments_given_decayed: 0.0,
+            story_interactions_out_decayed: 0.0,
+            stories_viewed_decayed: 0.0,
+            saved_their_content_decayed: 0.0,
+            dm_messages_total_decayed: 0.0,
+            dm_reactions_given_decayed: 0.0,
+            dm_reactions_received_decayed: 0.0,
+            likes_given_90d: 0,
+            comments_given_90d: 0,
+            dm_reactions_given_180d: 0,
+            dm_reactions_received_180d: 0,
+        }
+    }
+
+    /// Each row builds a feature shape where TWO branches could fire
+    /// and asserts the precedence rule chose the higher-priority one.
+    /// A regression that reorders the chain trips at least one row.
+    #[test]
+    fn decision_hint_precedence_chain() {
+        struct Case {
+            label: &'static str,
+            expected: &'static str,
+            mutate: fn(&mut AccountFeatures),
+            bucket: Bucket,
+        }
+        let cases = &[
+            Case {
+                label: "allowlist beats close_friend",
+                expected: "explicit allowlist",
+                mutate: |f| {
+                    f.is_keep_allowlisted = true;
+                    f.is_close_friend = true;
+                },
+                bucket: Bucket::Keep,
+            },
+            Case {
+                label: "close_friend beats favorited",
+                expected: "marked close friend",
+                mutate: |f| {
+                    f.is_close_friend = true;
+                    f.is_favorited = true;
+                },
+                bucket: Bucket::Keep,
+            },
+            Case {
+                label: "favorited beats restricted",
+                expected: "favorited",
+                mutate: |f| {
+                    f.is_favorited = true;
+                    f.is_restricted = true;
+                },
+                bucket: Bucket::Review,
+            },
+            Case {
+                label: "restricted beats hide_story",
+                expected: "restricted — kept in Review by floor",
+                mutate: |f| {
+                    f.is_restricted = true;
+                    f.is_hide_story_from = true;
+                },
+                bucket: Bucket::Review,
+            },
+            Case {
+                label: "hide_story beats active DM",
+                expected: "story hidden — negative signal",
+                mutate: |f| {
+                    f.is_hide_story_from = true;
+                    f.dm_messages_total_decayed = 5.0;
+                },
+                bucket: Bucket::Review,
+            },
+            Case {
+                label: "active DM beats recent likes",
+                expected: "active DM partner",
+                mutate: |f| {
+                    f.dm_messages_total_decayed = 5.0;
+                    f.likes_given_90d = 10;
+                },
+                bucket: Bucket::Keep,
+            },
+            Case {
+                label: "recent likes beats old DM history",
+                expected: "engaged with their content in last 90 days",
+                mutate: |f| {
+                    f.likes_given_90d = 1;
+                    f.dm_messages_total = 50;
+                },
+                bucket: Bucket::Keep,
+            },
+            Case {
+                label: "old DM history beats one-sided fallback",
+                expected: "DM history exists but no recent messages",
+                mutate: |f| {
+                    f.dm_messages_total = 1;
+                    f.is_mutual = false;
+                },
+                bucket: Bucket::Review,
+            },
+            Case {
+                label: "one-sided beats brand-fallback",
+                expected: "one-sided — you follow, no reciprocation",
+                mutate: |f| {
+                    f.is_mutual = false;
+                    f.account_class = AccountClass::Brand;
+                },
+                bucket: Bucket::Keep,
+            },
+            Case {
+                label: "brand beats bucket-tail",
+                expected: "brand follow — review intent",
+                mutate: |f| {
+                    f.account_class = AccountClass::Brand;
+                },
+                bucket: Bucket::Keep,
+            },
+            Case {
+                label: "Unfollow tail",
+                expected: "dormant — no interaction signal in any window",
+                mutate: |_| {},
+                bucket: Bucket::Unfollow,
+            },
+            Case {
+                label: "non-Unfollow tail",
+                expected: "tenure-only — no engagement signal",
+                mutate: |_| {},
+                bucket: Bucket::Keep,
+            },
+        ];
+        for c in cases {
+            let mut f = baseline();
+            (c.mutate)(&mut f);
+            let got = decision_hint(&f, c.bucket);
+            assert_eq!(got, c.expected, "{}: got {got:?}", c.label);
+        }
+    }
 }

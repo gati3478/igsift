@@ -24,7 +24,8 @@ use std::io::Write;
 use anyhow::{Context, Result};
 
 use super::csv::profile_url;
-use crate::features::{AccountClass, AccountFeatures};
+use super::decision_hint;
+use crate::features::AccountFeatures;
 use crate::scoring::{Bucket, ScoredAccount};
 
 /// Number of high-rationale cards rendered at the top of the Review
@@ -249,44 +250,6 @@ fn contributions_inline(s: &ScoredAccount) -> String {
     }
 }
 
-/// One-line shape characterization. First match wins — order matters.
-fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str {
-    if f.is_keep_allowlisted {
-        return "explicit allowlist";
-    }
-    if f.is_close_friend {
-        return "marked close friend";
-    }
-    if f.is_favorited {
-        return "favorited";
-    }
-    if f.is_restricted {
-        return "restricted — kept in Review by floor";
-    }
-    if f.is_hide_story_from {
-        return "story hidden — negative signal";
-    }
-    if f.dm_messages_total_decayed > 0.0 {
-        return "active DM partner";
-    }
-    if f.likes_given_90d > 0 || f.comments_given_90d > 0 {
-        return "engaged with their content in last 90 days";
-    }
-    if f.dm_messages_total > 0 {
-        return "DM history exists but no recent messages";
-    }
-    if !f.is_mutual {
-        return "one-sided — you follow, no reciprocation";
-    }
-    if matches!(f.account_class, AccountClass::Brand) {
-        return "brand follow — review intent";
-    }
-    match bucket {
-        Bucket::Unfollow => "dormant — no interaction signal in any window",
-        _ => "tenure-only — no engagement signal",
-    }
-}
-
 /// `|keep_prob - 0.5|` — smaller is harder to decide. Used as the
 /// Review section's sort key so the most ambiguous calls surface first.
 fn decision_difficulty(p: f64) -> f64 {
@@ -422,11 +385,7 @@ mod tests {
         assert!(md.contains("Hint:"));
     }
 
-    #[test]
-    fn decision_hint_prefers_close_friend_over_dm_signal() {
-        let mut f = baseline_features("cf");
-        f.is_close_friend = true;
-        f.dm_messages_total_decayed = 10.0;
-        assert_eq!(decision_hint(&f, Bucket::Keep), "marked close friend");
-    }
+    // Comprehensive decision_hint branch coverage lives in
+    // src/output/mod.rs alongside the function itself — single source
+    // of truth for the precedence chain.
 }

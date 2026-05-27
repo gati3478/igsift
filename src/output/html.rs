@@ -21,7 +21,7 @@ use std::io::Write;
 use anyhow::{Context, Result};
 
 use super::csv::profile_url;
-use crate::features::AccountClass;
+use super::decision_hint;
 use crate::scoring::{Bucket, ScoredAccount};
 
 pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> {
@@ -248,46 +248,6 @@ fn contributions_inline(s: &ScoredAccount) -> String {
         "—".to_string()
     } else {
         parts.join(", ")
-    }
-}
-
-/// One-line shape characterization. Mirrors `markdown::decision_hint`
-/// — kept in sync by hand because duplicating one match arm is cheaper
-/// than the cross-module dep and the rule set is stable.
-fn decision_hint(f: &crate::features::AccountFeatures, bucket: Bucket) -> &'static str {
-    if f.is_keep_allowlisted {
-        return "explicit allowlist";
-    }
-    if f.is_close_friend {
-        return "marked close friend";
-    }
-    if f.is_favorited {
-        return "favorited";
-    }
-    if f.is_restricted {
-        return "restricted — kept in Review by floor";
-    }
-    if f.is_hide_story_from {
-        return "story hidden — negative signal";
-    }
-    if f.dm_messages_total_decayed > 0.0 {
-        return "active DM partner";
-    }
-    if f.likes_given_90d > 0 || f.comments_given_90d > 0 {
-        return "engaged with their content in last 90 days";
-    }
-    if f.dm_messages_total > 0 {
-        return "DM history exists but no recent messages";
-    }
-    if !f.is_mutual {
-        return "one-sided — you follow, no reciprocation";
-    }
-    if matches!(f.account_class, AccountClass::Brand) {
-        return "brand follow — review intent";
-    }
-    match bucket {
-        Bucket::Unfollow => "dormant — no interaction signal in any window",
-        _ => "tenure-only — no engagement signal",
     }
 }
 
