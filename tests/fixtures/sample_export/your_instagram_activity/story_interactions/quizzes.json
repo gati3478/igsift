@@ -1,13 +1,22 @@
-{
-  "story_activities_quizzes": [
-    {
-      "title": "quizzes_target_synth",
-      "string_list_data": [
-        {
-          "value": "Red",
-          "timestamp": 1701810000
-        }
-      ]
-    }
-  ]
-}
+[
+  {
+    "timestamp": 1701810000,
+    "media": [],
+    "label_values": [
+      {
+        "dict": [
+          {
+            "dict": [
+              { "label": "URL", "value": "http://quizzes.example/" },
+              { "label": "Name", "value": "Quizzes Target" },
+              { "label": "Username", "value": "quizzes_target_synth" }
+            ],
+            "title": ""
+          }
+        ],
+        "title": "Owner"
+      }
+    ],
+    "fbid": "20000000000000021"
+  }
+]

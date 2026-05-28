@@ -1,15 +1,20 @@
 {
-  "story_activities_countdowns": [
+  "timestamp": 1701860000,
+  "media": [],
+  "label_values": [
     {
-      "title": "countdowns_target_synth",
-      "media_list_data": [],
-      "string_list_data": [
+      "dict": [
         {
-          "href": "",
-          "value": "",
-          "timestamp": 1701860000
+          "dict": [
+            { "label": "URL", "value": "http://countdowns.example/" },
+            { "label": "Name", "value": "Countdowns Target" },
+            { "label": "Username", "value": "countdowns_target_synth" }
+          ],
+          "title": ""
         }
-      ]
+      ],
+      "title": "Owner"
     }
-  ]
+  ],
+  "fbid": "20000000000000026"
 }

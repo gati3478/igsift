@@ -26,8 +26,8 @@ input ──▶ archive::resolve  (dir / .zip / multipart .zip → extracted dir
 `run` (score + write audit), `init` (scaffold per-user config files from
 embedded templates), `check` (parser-only dry-run with per-source pass/fail).
 
-**Current bucket split on the real export:** `481 / 155 / 7`
-(keep / review / unfollow) at `25%` labeled-set agreement, 0 hard mismatches.
+**Current bucket split on the real export:** `485 / 154 / 10`
+(keep / review / unfollow) at `28.6%` labeled-set agreement, 0 hard mismatches.
 Scoring weights are tuned-on-Gati's-labels and live in `config/scoring.toml`;
 three unbiased presets (`balanced` / `engagement` / `tenure`) ship embedded
 via `--preset`. `balanced` mirrors the committed `scoring.toml` and is the

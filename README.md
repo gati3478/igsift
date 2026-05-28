@@ -34,7 +34,7 @@ that quantifies agreement after every run.
 Display names are mojibake-repaired at parse time (IG's exporter ships
 UTF-8 bytes as Latin-1, so `HÃ¼seyin` becomes `Hüseyin` and Arabic /
 Georgian / emoji surface correctly). Current bucket split on the real
-643-account export: `481 / 155 / 7` at 25% labeled-set agreement, 0 hard
+649-account export: `485 / 154 / 10` at 28.6% labeled-set agreement, 0 hard
 mismatches. See [`ROADMAP.md`](ROADMAP.md), [`docs/DESIGN.md`](docs/DESIGN.md)
 for the algorithm, and [`docs/TUNING.md`](docs/TUNING.md) for the
 weight-tuning journal.
@@ -124,7 +124,7 @@ Iterate from here by:
    `cp config/presets/engagement.toml config/scoring.toml`) and edit
    weights to chase higher label agreement. See
    [`docs/TUNING.md`](docs/TUNING.md) for the journal of how the
-   committed `config/scoring.toml` was tuned against a 643-account
+   committed `config/scoring.toml` was tuned against a 649-account
    labeled set.
 
 ## Development

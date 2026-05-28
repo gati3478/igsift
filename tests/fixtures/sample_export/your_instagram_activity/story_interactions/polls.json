@@ -1,13 +1,22 @@
-{
-  "story_activities_polls": [
-    {
-      "title": "polls_target_synth",
-      "string_list_data": [
-        {
-          "value": "Stay",
-          "timestamp": 1701800000
-        }
-      ]
-    }
-  ]
-}
+[
+  {
+    "timestamp": 1701800000,
+    "media": [],
+    "label_values": [
+      {
+        "dict": [
+          {
+            "dict": [
+              { "label": "URL", "value": "http://polls.example/" },
+              { "label": "Name", "value": "Polls Target" },
+              { "label": "Username", "value": "polls_target_synth" }
+            ],
+            "title": ""
+          }
+        ],
+        "title": "Owner"
+      }
+    ],
+    "fbid": "20000000000000020"
+  }
+]

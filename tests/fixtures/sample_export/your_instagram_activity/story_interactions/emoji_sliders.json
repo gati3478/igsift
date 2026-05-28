@@ -1,13 +1,22 @@
-{
-  "story_activities_emoji_sliders": [
-    {
-      "title": "sliders_target_synth",
-      "string_list_data": [
-        {
-          "value": "100",
-          "timestamp": 1701830000
-        }
-      ]
-    }
-  ]
-}
+[
+  {
+    "timestamp": 1701830000,
+    "media": [],
+    "label_values": [
+      {
+        "dict": [
+          {
+            "dict": [
+              { "label": "URL", "value": "http://sliders.example/" },
+              { "label": "Name", "value": "Sliders Target" },
+              { "label": "Username", "value": "sliders_target_synth" }
+            ],
+            "title": ""
+          }
+        ],
+        "title": "Owner"
+      }
+    ],
+    "fbid": "20000000000000023"
+  }
+]

@@ -1,15 +1,22 @@
-{
-  "story_activities_questions": [
-    {
-      "title": "questions_target_synth",
-      "media_list_data": [],
-      "string_list_data": [
-        {
-          "href": "",
-          "value": "",
-          "timestamp": 1701820000
-        }
-      ]
-    }
-  ]
-}
+[
+  {
+    "timestamp": 1701820000,
+    "media": [],
+    "label_values": [
+      {
+        "dict": [
+          {
+            "dict": [
+              { "label": "URL", "value": "http://questions.example/" },
+              { "label": "Name", "value": "Questions Target" },
+              { "label": "Username", "value": "questions_target_synth" }
+            ],
+            "title": ""
+          }
+        ],
+        "title": "Owner"
+      }
+    ],
+    "fbid": "20000000000000022"
+  }
+]
