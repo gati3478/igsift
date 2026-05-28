@@ -847,7 +847,13 @@ fn read_thread_dir(base: &Path) -> Result<Vec<DmThread>> {
                         .into_iter()
                         .map(|r| DmReaction {
                             reaction: r.reaction,
-                            actor: r.actor,
+                            // `actor` is a display name compared against the
+                            // mojibake-fixed `me.name` to classify a reaction
+                            // as given vs received — the same cross-side join
+                            // as `sender_name`, so it needs the same repair or
+                            // the user's own reactions misclassify when their
+                            // display name carries non-ASCII bytes.
+                            actor: r.actor.map(|a| crate::text::fix_mojibake(&a).into_owned()),
                         })
                         .collect(),
                 }
@@ -1280,6 +1286,44 @@ mod tests {
             .expect("repair must not error");
         assert_eq!(me.name, "Hüseyin", "mojibake must be repaired on Me.name");
         assert_eq!(me.handle, "me_handle", "handle is ASCII — no transform");
+    }
+
+    #[test]
+    fn read_inbox_repairs_mojibake_on_reaction_actor() {
+        // The reaction `actor` is a display name joined against the
+        // mojibake-fixed `me.name` to classify given-vs-received. If the
+        // parser leaves `actor` un-repaired, a user whose own display name
+        // carries non-ASCII bytes has their own reactions misclassified as
+        // received. "HÃ¼seyin" is the Latin-1-misread form of "Hüseyin".
+        let base = std::env::temp_dir().join(format!(
+            "ig-mgr-actor-mojibake-{}-{}",
+            std::process::id(),
+            jiff::Timestamp::now().as_nanosecond(),
+        ));
+        let thread_dir = base.join("your_instagram_activity/messages/inbox/h_thread");
+        std::fs::create_dir_all(&thread_dir).expect("mktemp thread dir");
+        std::fs::write(
+            thread_dir.join("message_1.json"),
+            r#"{
+                "participants": [{"name": "Partner"}, {"name": "HÃ¼seyin"}],
+                "messages": [
+                    {"sender_name": "Partner", "timestamp_ms": 1700000000000,
+                     "reactions": [{"reaction": "love", "actor": "HÃ¼seyin"}]}
+                ],
+                "title": "Partner"
+            }"#,
+        )
+        .expect("write thread part");
+
+        let threads = read_inbox(&base).expect("read inbox");
+        std::fs::remove_dir_all(&base).ok();
+
+        let actor = threads[0].messages[0].reactions[0].actor.as_deref();
+        assert_eq!(
+            actor,
+            Some("Hüseyin"),
+            "reaction actor must be mojibake-repaired like sender_name",
+        );
     }
 
     #[test]

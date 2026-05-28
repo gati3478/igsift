@@ -93,6 +93,26 @@ pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str
     }
 }
 
+/// Render the top-3 signed score contributions as an inline string —
+/// e.g. `tenure (+0.21), dm (-0.18)`. Shared by the Markdown and HTML
+/// writers (same drift-prevention rationale as [`decision_hint`]); the
+/// two callers differ only in `empty`, the placeholder rendered when no
+/// term is non-zero. Zero entries are skipped so an account with a single
+/// non-zero term doesn't render trailing `, (+0.00)` slots.
+pub(super) fn contributions_inline(s: &ScoredAccount, empty: &str) -> String {
+    let parts: Vec<String> = s
+        .top_terms
+        .iter()
+        .filter(|(_, v)| *v != 0.0)
+        .map(|(label, v)| format!("{label} ({v:+.2})"))
+        .collect();
+    if parts.is_empty() {
+        empty.to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
 /// Paths the writer produced. Always three: CSV, Markdown, HTML.
 #[derive(Debug)]
 pub struct WrittenPaths {

@@ -451,6 +451,7 @@ pub fn run(args: RunArgs) -> Result<()> {
         removed_suggestions: &removed_suggestions,
         liked_posts: &liked_posts,
         liked_comments: &liked_comments,
+        story_likes: &story_likes,
         stories_viewed: &stories_viewed,
         saved_posts: &saved_posts,
         story_polls: &story_polls,

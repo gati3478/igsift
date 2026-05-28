@@ -186,6 +186,11 @@ pub struct AggregateInputs<'a> {
 
     pub liked_posts: &'a [ShapeCEntry],
     pub liked_comments: &'a [ShapeAEntry],
+    /// Story likes — shape-C-with-`Owner`, folded into
+    /// `story_interactions_out` per DESIGN.md ("all `story_interactions/*`
+    /// aggregated"). Keyed via `owner_username`, unlike the seven shape-A
+    /// `story_*` files keyed on `entry.username`.
+    pub story_likes: &'a [ShapeCEntry],
     pub stories_viewed: &'a [ShapeCEntry],
     pub saved_posts: &'a [ShapeCEntry],
 
@@ -344,6 +349,20 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
         }
     }
 
+    // Story likes feed the same `story_interactions_out` feature as the
+    // seven shape-A files above, but ship shape-C-with-`Owner` (same as
+    // stories_viewed / saved_posts) so the target handle comes from
+    // `owner_username`, not `entry.username`.
+    for entry in inputs.story_likes {
+        if let Some(target) = owner_username(entry)
+            && let Some(features) = by_handle.get_mut(target)
+        {
+            features.story_interactions_out += 1;
+            features.story_interactions_out_decayed +=
+                decay_weight(shape_c_timestamp(entry), now, tau_content);
+        }
+    }
+
     for entry in inputs.stories_viewed {
         if let Some(target) = owner_username(entry)
             && let Some(features) = by_handle.get_mut(target)
@@ -467,8 +486,15 @@ fn walk_inbox_thread(
     tau_dm: u32,
 ) {
     for msg in &thread.messages {
+        // Reactions don't carry their own timestamps in the export — the
+        // parent message's timestamp drives both the decay weight and the
+        // 180d window predicate. A reaction is approximately contemporaneous
+        // with the message it's on, so the message's decay weight is reused
+        // for the message total AND every reaction on it (one `exp()` per
+        // message, not one per message plus one per reaction-loop entry).
+        let decayed = decay_weight(msg.timestamp, now, tau_dm);
         features.dm_messages_total += 1;
-        features.dm_messages_total_decayed += decay_weight(msg.timestamp, now, tau_dm);
+        features.dm_messages_total_decayed += decayed;
 
         match msg.sender.as_deref() {
             Some(s) if s == me_name => acc.outbound += 1,
@@ -483,11 +509,6 @@ fn walk_inbox_thread(
             });
         }
 
-        // Reactions don't carry their own timestamps in the export — the
-        // parent message's timestamp drives both the decay weight and the
-        // 180d window predicate. A reaction is approximately contemporaneous
-        // with the message it's on.
-        let decayed = decay_weight(msg.timestamp, now, tau_dm);
         let in_180d = within_window(msg.timestamp, now, 180);
         for r in &msg.reactions {
             match r.actor.as_deref() {
@@ -679,6 +700,7 @@ mod tests {
             removed_suggestions: &[],
             liked_posts: &[],
             liked_comments: &[],
+            story_likes: &[],
             stories_viewed: &[],
             saved_posts: &[],
             story_polls: &[],
@@ -909,8 +931,8 @@ mod tests {
         inputs.reels_comments = &reels_comments;
         inputs.hype = &hype;
 
-        // alice gets 1 entry across each of the 7 story shape-A files →
-        // story_interactions_out = 7.
+        // alice gets 1 entry across each of the 7 story shape-A files,
+        // plus 1 shape-C-with-Owner story_like → story_interactions_out = 8.
         let polls = vec![shape_a("alice")];
         let quizzes = vec![shape_a("alice")];
         let questions = vec![shape_a("alice")];
@@ -926,6 +948,11 @@ mod tests {
         inputs.story_reaction_stickers = &reaction_stickers;
         inputs.story_countdowns = &countdowns;
 
+        // Story likes are shape-C-with-Owner and must fold into the same
+        // story_interactions_out feature as the shape-A files above.
+        let story_likes = vec![owner_entry("alice")];
+        inputs.story_likes = &story_likes;
+
         let stories_viewed = vec![owner_entry("alice"), owner_entry("alice")];
         let saved_posts = vec![owner_entry("bob")];
         inputs.stories_viewed = &stories_viewed;
@@ -937,7 +964,10 @@ mod tests {
 
         assert_eq!(alice.likes_given, 3);
         assert_eq!(alice.comments_given, 0);
-        assert_eq!(alice.story_interactions_out, 7);
+        assert_eq!(
+            alice.story_interactions_out, 8,
+            "7 shape-A story interactions + 1 shape-C story_like",
+        );
         assert_eq!(alice.stories_viewed, 2);
         assert_eq!(alice.saved_their_content, 0);
 

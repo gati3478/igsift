@@ -24,7 +24,7 @@ use std::io::Write;
 use anyhow::{Context, Result};
 
 use super::csv::profile_url;
-use super::decision_hint;
+use super::{contributions_inline, decision_hint};
 use crate::features::AccountFeatures;
 use crate::scoring::{Bucket, ScoredAccount};
 
@@ -183,7 +183,12 @@ fn write_card(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
     .context("md card header")?;
 
     writeln!(writer, "{}", attribute_line(f)).context("md card attrs")?;
-    writeln!(writer, "- Why: {}", contributions_inline(s)).context("md card why")?;
+    writeln!(
+        writer,
+        "- Why: {}",
+        contributions_inline(s, "no non-zero terms")
+    )
+    .context("md card why")?;
     writeln!(writer, "- Hint: _{}_", decision_hint(f, s.bucket)).context("md card hint")?;
     writeln!(writer).context("md")?;
     Ok(())
@@ -230,23 +235,6 @@ fn format_tenure(days: u32) -> String {
         format!("{years:.1}y follow")
     } else {
         format!("{days}d follow")
-    }
-}
-
-/// "tenure (+0.21), dm (−0.18), no_recent_likes (−0.12)" — skips zero
-/// entries so an account with only one non-zero term doesn't render
-/// `, (+0.000), (+0.000)`.
-fn contributions_inline(s: &ScoredAccount) -> String {
-    let parts: Vec<String> = s
-        .top_terms
-        .iter()
-        .filter(|(_, v)| *v != 0.0)
-        .map(|(label, v)| format!("{label} ({v:+.2})"))
-        .collect();
-    if parts.is_empty() {
-        "no non-zero terms".to_string()
-    } else {
-        parts.join(", ")
     }
 }
 

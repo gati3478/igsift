@@ -21,7 +21,7 @@ use std::io::Write;
 use anyhow::{Context, Result};
 
 use super::csv::profile_url;
-use super::decision_hint;
+use super::{contributions_inline, decision_hint};
 use crate::scoring::{Bucket, ScoredAccount};
 
 pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> {
@@ -216,7 +216,7 @@ fn write_row(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
         .follow_tenure_days
         .map(|d| d.to_string())
         .unwrap_or_default();
-    let why = contributions_inline(s);
+    let why = contributions_inline(s, "—");
     let hint = decision_hint(f, s.bucket);
 
     writeln!(writer, "<tr>").context("html")?;
@@ -235,20 +235,6 @@ fn write_row(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
     writeln!(writer, "<td class=\"hint\">{}</td>", escape(hint)).context("html")?;
     writeln!(writer, "</tr>").context("html")?;
     Ok(())
-}
-
-fn contributions_inline(s: &ScoredAccount) -> String {
-    let parts: Vec<String> = s
-        .top_terms
-        .iter()
-        .filter(|(_, v)| *v != 0.0)
-        .map(|(label, v)| format!("{label} ({v:+.2})"))
-        .collect();
-    if parts.is_empty() {
-        "—".to_string()
-    } else {
-        parts.join(", ")
-    }
 }
 
 /// Minimal HTML entity escaping. Handles the four characters that can

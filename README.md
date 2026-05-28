@@ -33,9 +33,11 @@ that quantifies agreement after every run.
 
 Display names are mojibake-repaired at parse time (IG's exporter ships
 UTF-8 bytes as Latin-1, so `HÃ¼seyin` becomes `Hüseyin` and Arabic /
-Georgian / emoji surface correctly). Current bucket split on the real
-649-account export: `485 / 154 / 10` at 28.6% labeled-set agreement, 0 hard
-mismatches. See [`ROADMAP.md`](ROADMAP.md), [`docs/DESIGN.md`](docs/DESIGN.md)
+Georgian / emoji surface correctly). Bucket split on the real 649-account
+export was `485 / 154 / 10` at 28.6% labeled-set agreement, 0 hard
+mismatches — **now stale**: measured before `story_likes.json` was folded
+into `story_interactions_out`, so it needs a re-run and re-tune. See
+[`ROADMAP.md`](ROADMAP.md), [`docs/DESIGN.md`](docs/DESIGN.md)
 for the algorithm, and [`docs/TUNING.md`](docs/TUNING.md) for the
 weight-tuning journal.
 

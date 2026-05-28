@@ -28,7 +28,11 @@ embedded templates), `check` (parser-only dry-run with per-source pass/fail).
 
 **Current bucket split on the real export:** `485 / 154 / 10`
 (keep / review / unfollow) at `28.6%` labeled-set agreement, 0 hard mismatches.
-Scoring weights are tuned-on-Gati's-labels and live in `config/scoring.toml`;
+**STALE as of the `story_likes` wiring fix:** these numbers were measured
+before `story_likes.json` (~28k events on the real export) was folded into
+`story_interactions_out`. They no longer reflect current output — re-run on
+the real export and re-tune the weights against the labels, then refresh
+this line. Scoring weights are tuned-on-Gati's-labels and live in `config/scoring.toml`;
 three unbiased presets (`balanced` / `engagement` / `tenure`) ship embedded
 via `--preset`. `balanced` mirrors the committed `scoring.toml` and is the
 compiled-in fallback when no flag and no cwd file resolve.
@@ -149,7 +153,7 @@ docs/DESIGN.md  ROADMAP.md  TUNING.md
   names as UTF-8 bytes mis-read as Latin-1 (the `HÃ¼seyin` /
   `ÃÂÃÂ` bug). `src/text.rs::fix_mojibake` is the only repair site;
   every display-string capture in `src/export.rs` (DM participants,
-  sender_name, content, title, Me.name) AND the NameResolver
+  sender_name, reaction actor, content, title, Me.name) AND the NameResolver
   build-side in `src/features/name_resolution.rs` must apply it
   consistently — drop the fix from one side and the cross-side join
   silently breaks. The wire-through test in `name_resolution::tests`
