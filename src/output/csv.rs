@@ -14,6 +14,7 @@
 //! default, which is the right encoding for "this row doesn't have a
 //! value" vs. "this row has a zero." `0` would lie.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::io::Write;
 
@@ -28,8 +29,8 @@ use crate::scoring::ScoredAccount;
 /// handle and reused by the Markdown writer if it ever shares this row.
 #[derive(Serialize)]
 struct CsvRow<'a> {
-    username: &'a str,
-    display_name: &'a str,
+    username: Cow<'a, str>,
+    display_name: Cow<'a, str>,
     profile_url: String,
     bucket: &'static str,
     /// Three-decimal float matching the stdout summary so a user can
@@ -53,11 +54,25 @@ struct CsvRow<'a> {
     /// The `dominant_feature` from scoring — the term with the largest
     /// signed contribution to `score_raw`. Tells the user **why** this
     /// account landed where it did at a glance.
-    notes: &'a str,
+    notes: Cow<'a, str>,
 }
 
 fn fmt_three_decimals<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&format!("{v:.3}"))
+}
+
+/// Guard against CSV formula injection (CWE-1236). Excel, Google Sheets,
+/// and LibreOffice evaluate a cell whose first byte is `=`, `+`, `-`, `@`,
+/// TAB, or CR as a formula. `display_name` is free-form text controlled by
+/// the third-party account, so a name like `=HYPERLINK("http://evil")`
+/// would execute when the audit CSV is opened. Prefix any such cell with a
+/// `'` so the spreadsheet renders it as literal text; borrow through
+/// untouched in the (overwhelmingly common) safe case.
+fn sanitize_cell(s: &str) -> Cow<'_, str> {
+    match s.as_bytes().first() {
+        Some(b'=' | b'+' | b'-' | b'@' | b'\t' | b'\r') => Cow::Owned(format!("'{s}")),
+        _ => Cow::Borrowed(s),
+    }
 }
 
 /// Build the canonical Instagram profile URL for a handle. Instagram
@@ -84,8 +99,8 @@ pub fn write_to(scored: &[ScoredAccount], writer: impl Write) -> Result<()> {
     let mut wtr = ::csv::Writer::from_writer(writer);
     for s in sorted {
         let row = CsvRow {
-            username: &s.features.username,
-            display_name: s.features.display_name.as_deref().unwrap_or(""),
+            username: sanitize_cell(&s.features.username),
+            display_name: sanitize_cell(s.features.display_name.as_deref().unwrap_or("")),
             profile_url: profile_url(&s.features.username),
             bucket: s.bucket.as_str(),
             keep_prob: s.keep_prob,
@@ -98,7 +113,7 @@ pub fn write_to(scored: &[ScoredAccount], writer: impl Write) -> Result<()> {
             follow_tenure_days: s.features.follow_tenure_days,
             account_class: s.features.account_class.as_str(),
             mutual: s.features.is_mutual,
-            notes: s.dominant_feature,
+            notes: sanitize_cell(s.dominant_feature),
         };
         wtr.serialize(&row).context("serializing CSV row")?;
     }
@@ -230,5 +245,40 @@ mod tests {
         // last_dm_days is column 6, follow_tenure_days is column 11.
         assert_eq!(fields[6], "", "last_dm_days must be empty for None");
         assert_eq!(fields[11], "", "follow_tenure_days must be empty for None",);
+    }
+
+    #[test]
+    fn formula_injection_in_display_name_is_neutralized() {
+        // A third-party display name beginning with a spreadsheet formula
+        // trigger must be prefixed with `'` so Excel/Sheets render it as
+        // literal text rather than executing it (CWE-1236).
+        let mut scored = make_scored("victim", 0.5);
+        scored.features.display_name = Some("=HYPERLINK(\"http://evil\",\"x\")".to_owned());
+        let csv = render(std::slice::from_ref(&scored));
+        assert!(
+            csv.contains("'=HYPERLINK"),
+            "formula cell must be quoted with a leading apostrophe: {csv}",
+        );
+        assert!(
+            !csv.contains(",=HYPERLINK") && !csv.contains("\"=HYPERLINK"),
+            "raw formula must not reach a cell boundary unescaped: {csv}",
+        );
+    }
+
+    #[test]
+    fn ordinary_display_name_is_not_rewritten() {
+        // The guard must not touch a benign name — only leading
+        // `= + - @ TAB CR` triggers the prefix.
+        let mut scored = make_scored("normal", 0.5);
+        scored.features.display_name = Some("Sarah Connor".to_owned());
+        let csv = render(std::slice::from_ref(&scored));
+        assert!(
+            csv.contains("Sarah Connor"),
+            "benign name passes through: {csv}"
+        );
+        assert!(
+            !csv.contains("'Sarah"),
+            "benign name must not be prefixed: {csv}"
+        );
     }
 }

@@ -665,25 +665,10 @@ pub fn read_story_countdowns(export_dir: &Path) -> Result<Vec<ShapeAEntry>> {
 /// (post owner) lives at `string_map_data["Media Owner"].value`.
 pub fn read_post_comments(export_dir: &Path) -> Result<Vec<CommentEntry>> {
     let dir = export_dir.join(POST_COMMENTS_DIR);
-    let mut parts: Vec<(u32, PathBuf)> = std::fs::read_dir(&dir)
-        .with_context(|| format!("reading {}", dir.display()))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter_map(|path| {
-            let stem = path.file_stem().and_then(|s| s.to_str())?;
-            let ext = path.extension().and_then(|s| s.to_str())?;
-            if ext != "json" {
-                return None;
-            }
-            let suffix = stem.strip_prefix("post_comments_")?;
-            let n: u32 = suffix.parse().ok()?;
-            Some((n, path))
-        })
-        .collect();
-    parts.sort_by_key(|(n, _)| *n);
+    let parts = numeric_suffix_parts(&dir, "post_comments_")?;
 
     let mut raw_all: Vec<ShapeDEntryRaw> = Vec::new();
-    for (_, path) in parts {
+    for path in parts {
         let raw: Vec<ShapeDEntryRaw> = parse_json(&path)?;
         raw_all.extend(raw);
     }
@@ -803,7 +788,7 @@ fn read_thread_dir(base: &Path) -> Result<Vec<DmThread>> {
             .unwrap_or_default()
             .to_owned();
 
-        let parts = thread_part_paths(&thread_dir)?;
+        let parts = numeric_suffix_parts(&thread_dir, "message_")?;
         if parts.is_empty() {
             continue;
         }
@@ -956,12 +941,14 @@ fn shape_d_entries(raw: Vec<ShapeDEntryRaw>) -> Vec<CommentEntry> {
         .collect()
 }
 
-/// Read `message_1.json`, `message_2.json`, … sorted by numeric suffix.
-/// Falling back to lexicographic sort would put `message_10.json` before
-/// `message_2.json` — relevant for the `validoli` thread (10 parts).
-fn thread_part_paths(thread_dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut parts: Vec<(u32, PathBuf)> = std::fs::read_dir(thread_dir)
-        .with_context(|| format!("reading {}", thread_dir.display()))?
+/// Collect `<prefix>1.json`, `<prefix>2.json`, … under `dir`, sorted by
+/// numeric suffix. Lexicographic sort would put `…_10.json` before
+/// `…_2.json` — wrong for the `validoli` DM thread (10 `message_*` parts)
+/// and any chunked `post_comments_*` set. Shared by [`read_thread_dir`]
+/// and [`read_post_comments`]; non-matching filenames are skipped.
+fn numeric_suffix_parts(dir: &Path, prefix: &str) -> Result<Vec<PathBuf>> {
+    let mut parts: Vec<(u32, PathBuf)> = std::fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter_map(|path| {
@@ -970,7 +957,7 @@ fn thread_part_paths(thread_dir: &Path) -> Result<Vec<PathBuf>> {
             if ext != "json" {
                 return None;
             }
-            let suffix = stem.strip_prefix("message_")?;
+            let suffix = stem.strip_prefix(prefix)?;
             let n: u32 = suffix.parse().ok()?;
             Some((n, path))
         })

@@ -140,8 +140,8 @@ docs/DESIGN.md  ROADMAP.md  TUNING.md
   offending path_, not silently. Re-run `scripts/walk_export_schema.sh`
   against every fresh export and diff against the last-known-good output to
   catch drift before it bites the parser.
-- **Errors**: `anyhow::Result` in `main`/orchestration; `thiserror` enums inside
-  parser modules.
+- **Errors**: `anyhow::Result` throughout, with `.context(...)` /
+  `serde_path_to_error` carrying the offending path on parse failures.
 - **Tunables in TOML**, not code — weights/decay/thresholds live in
   `config/scoring.toml` (or one of the three embedded presets via
   `--preset`). Adding a new preset means dropping a new TOML in

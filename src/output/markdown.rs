@@ -18,6 +18,7 @@
 //! account is this?" so the user can pattern-match faster than they
 //! could from raw numbers.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::io::Write;
 
@@ -167,7 +168,7 @@ fn write_keep_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> Resu
 /// header line, top-3 score contributions, decision hint.
 fn write_card(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
     let f = &s.features;
-    let display = f.display_name.as_deref().unwrap_or("");
+    let display = md_escape(f.display_name.as_deref().unwrap_or(""));
     let display_segment = if display.is_empty() {
         String::new()
     } else {
@@ -244,6 +245,20 @@ fn decision_difficulty(p: f64) -> f64 {
     (p - 0.5).abs()
 }
 
+/// Escape the Markdown metacharacters that corrupt a table cell or card
+/// line when they appear in a free-form `display_name`: `|` ends a table
+/// column and a newline ends the row. Both are realistic in Instagram
+/// display names (e.g. `Sarah | Photographer`). Handles are not escaped —
+/// Instagram restricts them to `[A-Za-z0-9._]`. Borrows through when the
+/// input is already safe.
+fn md_escape(s: &str) -> Cow<'_, str> {
+    if s.contains(['|', '\n', '\r']) {
+        Cow::Owned(s.replace(['\n', '\r'], " ").replace('|', "\\|"))
+    } else {
+        Cow::Borrowed(s)
+    }
+}
+
 fn write_table<'a, I, W>(writer: &mut W, rows: I) -> Result<()>
 where
     I: Iterator<Item = &'a ScoredAccount>,
@@ -261,7 +276,7 @@ where
             "| [`{handle}`]({url}) | {display} | {prob:.3} | {mutual} | `{dom}` |",
             handle = s.features.username,
             url = profile_url(&s.features.username),
-            display = s.features.display_name.as_deref().unwrap_or(""),
+            display = md_escape(s.features.display_name.as_deref().unwrap_or("")),
             prob = s.keep_prob,
             mutual = if s.features.is_mutual { "yes" } else { "no" },
             dom = s.dominant_feature,
@@ -376,4 +391,20 @@ mod tests {
     // Comprehensive decision_hint branch coverage lives in
     // src/output/mod.rs alongside the function itself — single source
     // of truth for the precedence chain.
+
+    #[test]
+    fn pipe_in_display_name_does_not_break_table() {
+        // A display name containing `|` would otherwise split the table
+        // row into extra columns. It must be escaped so the row keeps its
+        // five-column shape.
+        let mut scored = make_scored("photog", 0.95, Bucket::Keep);
+        scored.features.display_name = Some("Sarah | Photographer".to_owned());
+        // Enough Keep rows to force the table path (≤ KEEP_EDGE_N*2 renders
+        // a single table directly).
+        let md = render(std::slice::from_ref(&scored));
+        assert!(
+            md.contains("Sarah \\| Photographer"),
+            "pipe in display name must be backslash-escaped: {md}",
+        );
+    }
 }

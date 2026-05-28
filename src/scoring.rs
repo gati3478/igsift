@@ -8,10 +8,10 @@
 //! `review` covers everything in between.
 //!
 //! Scoring is embarrassingly parallel across accounts; the current
-//! implementation is serial because 643 accounts is sub-millisecond and
-//! the `rayon` dependency isn't paying off yet. The `Vec<&AccountFeatures>`
-//! → `Vec<ScoredAccount>` boundary is shape-compatible with a future
-//! `par_iter` swap.
+//! implementation is serial because the account count keeps scoring
+//! sub-millisecond. The `&[AccountFeatures]` → `Vec<ScoredAccount>`
+//! boundary stays shape-compatible with a future parallel swap if that
+//! ever stops holding.
 //!
 //! ## Where penalties live
 //!
