@@ -151,6 +151,89 @@ fn bucket_col(b: Bucket) -> usize {
     }
 }
 
+/// Computed accuracy-report data, separated from printing so the matrix
+/// and agreement arithmetic are unit-testable — [`report`] only formats
+/// this to stdout. `missing` and `hard_mismatches` are sorted by handle
+/// for stable round-over-round diffs.
+#[derive(Debug, PartialEq)]
+pub(crate) struct ReportData {
+    confusion: Confusion,
+    keep_total: u32,
+    drop_total: u32,
+    missing: Vec<String>,
+    hard_mismatches: Vec<(String, Label)>,
+    agreed: u32,
+    scored_total: usize,
+    agreement_pct: f64,
+}
+
+/// Tally the confusion matrix, agreement, missing labels, and hard
+/// mismatches of `labels` against the `scored` set. Pure — no I/O.
+///
+/// Hard mismatches are the two unambiguous disagreements
+/// (`label=keep & bucket=unfollow`, `label=drop & bucket=keep`); soft
+/// mismatches against `review` are visible in the matrix but not listed,
+/// since `review` is an honest "unsure" outcome.
+pub(crate) fn compute(labels: &LabelSet, scored: &[ScoredAccount]) -> ReportData {
+    let by_handle: HashMap<&str, &ScoredAccount> = scored
+        .iter()
+        .map(|s| (s.features.username.as_str(), s))
+        .collect();
+
+    let mut confusion: Confusion = [[0; 3]; 2];
+    let mut missing: Vec<String> = Vec::new();
+    let mut hard_mismatches: Vec<(String, Label)> = Vec::new();
+    let mut keep_total: u32 = 0;
+    let mut drop_total: u32 = 0;
+
+    for (handle, label) in labels.iter() {
+        match label {
+            Label::Keep => keep_total += 1,
+            Label::Drop => drop_total += 1,
+        }
+        let Some(acct) = by_handle.get(handle) else {
+            missing.push(handle.to_owned());
+            continue;
+        };
+        let row = match label {
+            Label::Keep => 0,
+            Label::Drop => 1,
+        };
+        confusion[row][bucket_col(acct.bucket)] += 1;
+        let hard = matches!(
+            (label, acct.bucket),
+            (Label::Keep, Bucket::Unfollow) | (Label::Drop, Bucket::Keep)
+        );
+        if hard {
+            hard_mismatches.push((handle.to_owned(), label));
+        }
+    }
+
+    let scored_total = labels.len() - missing.len();
+    let agreed = confusion[0][0] + confusion[1][2];
+    let agreement_pct = if scored_total == 0 {
+        0.0
+    } else {
+        100.0 * f64::from(agreed) / scored_total as f64
+    };
+
+    // Sorted so round-over-round diffs only show real changes (HashMap
+    // iteration order is randomized per-process via `RandomState`).
+    missing.sort_unstable();
+    hard_mismatches.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+    ReportData {
+        confusion,
+        keep_total,
+        drop_total,
+        missing,
+        hard_mismatches,
+        agreed,
+        scored_total,
+        agreement_pct,
+    }
+}
+
 /// Print the accuracy report to stdout. Matches the style of the other
 /// `lib::run` smoke lines so the tuning iteration loop reads as one
 /// continuous report.
@@ -164,88 +247,50 @@ fn bucket_col(b: Bucket) -> usize {
 ///   label=drop & bucket=review) are visible in the matrix but not listed —
 ///   `review` is an honest "I'm unsure" outcome.
 pub fn report(labels: &LabelSet, scored: &[ScoredAccount]) {
+    let data = compute(labels, scored);
     let by_handle: HashMap<&str, &ScoredAccount> = scored
         .iter()
         .map(|s| (s.features.username.as_str(), s))
         .collect();
 
-    let mut confusion: Confusion = [[0; 3]; 2];
-    let mut missing: Vec<&str> = Vec::new();
-    let mut hard_mismatches: Vec<(&str, Label, &ScoredAccount)> = Vec::new();
-    let mut keep_total: u32 = 0;
-    let mut drop_total: u32 = 0;
-
-    for (handle, label) in labels.iter() {
-        match label {
-            Label::Keep => keep_total += 1,
-            Label::Drop => drop_total += 1,
-        }
-        let Some(acct) = by_handle.get(handle) else {
-            missing.push(handle);
-            continue;
-        };
-        let row = match label {
-            Label::Keep => 0,
-            Label::Drop => 1,
-        };
-        confusion[row][bucket_col(acct.bucket)] += 1;
-        let hard = matches!(
-            (label, acct.bucket),
-            (Label::Keep, Bucket::Unfollow) | (Label::Drop, Bucket::Keep)
-        );
-        if hard {
-            hard_mismatches.push((handle, label, acct));
-        }
-    }
-
-    let scored_total = labels.len() - missing.len();
-    let agreed = confusion[0][0] + confusion[1][2];
-    let agreement_pct = if scored_total == 0 {
-        0.0
-    } else {
-        100.0 * f64::from(agreed) / scored_total as f64
-    };
-
     println!(
-        "labels: {} total ({keep_total} keep, {drop_total} drop)",
+        "labels: {} total ({} keep, {} drop)",
         labels.len(),
+        data.keep_total,
+        data.drop_total,
     );
     println!("confusion matrix:");
     println!("                 bucket=keep  bucket=review  bucket=unfollow");
     println!(
         "  label=keep     {:>11}  {:>13}  {:>15}",
-        confusion[0][0], confusion[0][1], confusion[0][2],
+        data.confusion[0][0], data.confusion[0][1], data.confusion[0][2],
     );
     println!(
         "  label=drop     {:>11}  {:>13}  {:>15}",
-        confusion[1][0], confusion[1][1], confusion[1][2],
+        data.confusion[1][0], data.confusion[1][1], data.confusion[1][2],
     );
     println!(
-        "agreement: {agreed}/{scored_total} ({agreement_pct:.1}%)  \
-         [label=keep ∩ bucket=keep + label=drop ∩ bucket=unfollow]"
+        "agreement: {}/{} ({:.1}%)  \
+         [label=keep ∩ bucket=keep + label=drop ∩ bucket=unfollow]",
+        data.agreed, data.scored_total, data.agreement_pct,
     );
 
-    // Sort printed lists by handle so round-over-round diffs only show
-    // real changes. `LabelSet::iter` reflects `HashMap` iteration order,
-    // which is randomized per-process via `RandomState`.
-    missing.sort_unstable();
-    hard_mismatches.sort_unstable_by_key(|(handle, _, _)| *handle);
-
-    if !missing.is_empty() {
+    if !data.missing.is_empty() {
         println!(
             "labels not in scored set ({}; account may have been blocked or unfollowed):",
-            missing.len(),
+            data.missing.len(),
         );
-        for handle in &missing {
+        for handle in &data.missing {
             println!("  {handle}");
         }
     }
 
-    if hard_mismatches.is_empty() {
+    if data.hard_mismatches.is_empty() {
         println!("hard mismatches: none");
     } else {
-        println!("hard mismatches ({}):", hard_mismatches.len());
-        for (handle, label, acct) in &hard_mismatches {
+        println!("hard mismatches ({}):", data.hard_mismatches.len());
+        for (handle, label) in &data.hard_mismatches {
+            let acct = by_handle[handle.as_str()];
             println!(
                 "  {handle}  label={}  keep_prob={:.3}  bucket={}  dominant={}",
                 label.as_str(),
@@ -336,5 +381,115 @@ mod tests {
         // a labels file with hundreds of entries is unreadable without it.
         let msg = parse_err("alice keep\n\nbob bogus\n");
         assert!(msg.contains(":3:"), "error must include line 3: {msg}");
+    }
+
+    #[test]
+    fn non_empty_set_is_not_empty() {
+        let labels = parse_ok("alice keep\n");
+        assert!(!labels.is_empty());
+        assert_eq!(labels.len(), 1);
+    }
+
+    #[test]
+    fn label_as_str_values() {
+        assert_eq!(Label::Keep.as_str(), "keep");
+        assert_eq!(Label::Drop.as_str(), "drop");
+    }
+
+    fn scored_acct(handle: &str, bucket: Bucket) -> ScoredAccount {
+        use crate::features::{AccountClass, AccountFeatures};
+        ScoredAccount {
+            features: AccountFeatures {
+                username: handle.to_owned(),
+                display_name: None,
+                account_class: AccountClass::Personal,
+                follow_tenure_days: None,
+                is_close_friend: false,
+                is_favorited: false,
+                is_blocked: false,
+                is_restricted: false,
+                is_hide_story_from: false,
+                is_removed_suggestion: false,
+                recently_unfollowed: false,
+                is_mutual: false,
+                is_keep_allowlisted: false,
+                likes_given: 0,
+                comments_given: 0,
+                story_interactions_out: 0,
+                stories_viewed: 0,
+                saved_their_content: 0,
+                dm_messages_total: 0,
+                dm_recency_days: None,
+                dm_balance: None,
+                dm_reactions_given: 0,
+                dm_reactions_received: 0,
+                inbound_dm_request: false,
+                likes_given_decayed: 0.0,
+                comments_given_decayed: 0.0,
+                story_interactions_out_decayed: 0.0,
+                stories_viewed_decayed: 0.0,
+                saved_their_content_decayed: 0.0,
+                dm_messages_total_decayed: 0.0,
+                dm_reactions_given_decayed: 0.0,
+                dm_reactions_received_decayed: 0.0,
+                likes_given_90d: 0,
+                comments_given_90d: 0,
+                dm_reactions_given_180d: 0,
+                dm_reactions_received_180d: 0,
+            },
+            score_raw: 0.0,
+            keep_prob: 0.0,
+            bucket,
+            dominant_feature: "none",
+            top_terms: [("", 0.0); 3],
+        }
+    }
+
+    #[test]
+    fn compute_tallies_matrix_agreement_and_mismatches() {
+        let labels = parse_ok(
+            "agree_keep keep\n\
+             agree_drop drop\n\
+             soft_keep keep\n\
+             hard_keep keep\n\
+             missing_one drop\n",
+        );
+        let scored = vec![
+            scored_acct("agree_keep", Bucket::Keep), // keep∩keep → agree
+            scored_acct("agree_drop", Bucket::Unfollow), // drop∩unfollow → agree
+            scored_acct("soft_keep", Bucket::Review), // keep∩review → soft, not hard
+            scored_acct("hard_keep", Bucket::Unfollow), // keep∩unfollow → HARD
+                                                     // `missing_one` deliberately absent from the scored set.
+        ];
+        let data = compute(&labels, &scored);
+
+        assert_eq!(data.keep_total, 3);
+        assert_eq!(data.drop_total, 2);
+        assert_eq!(data.missing, vec!["missing_one".to_owned()]);
+        assert_eq!(data.scored_total, 4, "5 labels − 1 missing");
+
+        // confusion[label][bucket]; label keep=0/drop=1, bucket keep=0/review=1/unfollow=2.
+        assert_eq!(data.confusion[0][0], 1, "keep∩keep");
+        assert_eq!(data.confusion[0][1], 1, "keep∩review");
+        assert_eq!(data.confusion[0][2], 1, "keep∩unfollow");
+        assert_eq!(data.confusion[1][2], 1, "drop∩unfollow");
+
+        assert_eq!(data.agreed, 2, "keep∩keep + drop∩unfollow");
+        assert!((data.agreement_pct - 50.0).abs() < 1e-9, "2/4 = 50%");
+        assert_eq!(
+            data.hard_mismatches,
+            vec![("hard_keep".to_owned(), Label::Keep)],
+        );
+    }
+
+    #[test]
+    fn compute_empty_scored_set_is_zero_agreement_not_nan() {
+        // Guards the `scored_total == 0` branch — without it the agreement
+        // ratio divides by zero and prints NaN.
+        let labels = parse_ok("a keep\nb drop\n");
+        let data = compute(&labels, &[]);
+        assert_eq!(data.scored_total, 0);
+        assert_eq!(data.agreed, 0);
+        assert_eq!(data.agreement_pct, 0.0);
     }
 }

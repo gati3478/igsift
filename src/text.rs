@@ -162,4 +162,20 @@ mod tests {
         assert_eq!(pass_one, pass_two);
         assert_eq!(pass_one, "Hüseyin");
     }
+
+    #[test]
+    fn repairs_double_mojibake_via_multiple_passes() {
+        // A minority of strings round-trip through IG's exporter twice and
+        // arrive double-encoded (the ÃÂÃÂ shape). fix_mojibake iterates
+        // until a pass stops shortening the byte sequence. This pins that
+        // convergence loop: a `>=`→`<` mutation on the guard would stop
+        // after one pass and leave the string still single-mojibake'd.
+        fn mojibake_once(s: &str) -> String {
+            s.bytes().map(|b| b as char).collect()
+        }
+        let clean = "Hüseyin";
+        let double = mojibake_once(&mojibake_once(clean));
+        assert_ne!(double, clean, "double mojibake must differ from clean");
+        assert_eq!(fix_mojibake(&double), clean);
+    }
 }

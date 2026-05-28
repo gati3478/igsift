@@ -1582,4 +1582,137 @@ mod tests {
         assert_eq!(by["alice"].account_class, AccountClass::Personal);
         assert!(!by["bob"].is_keep_allowlisted);
     }
+
+    // ── decay-weighted + windowed accumulation ────────────────────────────
+    //
+    // Every other aggregate test feeds `timestamp: None`, which makes
+    // `decay_weight` return 0.0 and `within_window` false — so the `*_decayed`
+    // sums and the `*_90d` / `*_180d` counters (the values scoring actually
+    // consumes) are never exercised. These helpers + tests feed real recent
+    // timestamps and pin both.
+
+    fn owner_entry_ts(handle: &str, ts: i64) -> ShapeCEntry {
+        let mut e = owner_entry(handle);
+        e.timestamp = Some(ts);
+        e
+    }
+
+    fn shape_a_ts(username: &str, ts: i64) -> ShapeAEntry {
+        ShapeAEntry {
+            username: username.to_owned(),
+            timestamp: Timestamp::from_second(ts).ok(),
+        }
+    }
+
+    fn comment_ts(target: &str, ts: i64) -> CommentEntry {
+        CommentEntry {
+            target_username: target.to_owned(),
+            timestamp: Timestamp::from_second(ts).ok(),
+        }
+    }
+
+    #[test]
+    fn content_decay_and_window_accumulate_with_recent_timestamps() {
+        let now = fixed_now();
+        let ten_days_ago = now.as_second() - 10 * 86_400; // inside the 90d window
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let decay = synth_decay();
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+
+        let liked_posts = vec![owner_entry_ts("alice", ten_days_ago)];
+        let liked_comments = vec![shape_a_ts("alice", ten_days_ago)];
+        let post_comments = vec![comment_ts("alice", ten_days_ago)];
+        let polls = vec![shape_a_ts("alice", ten_days_ago)];
+        let story_likes = vec![owner_entry_ts("alice", ten_days_ago)];
+        let stories_viewed = vec![owner_entry_ts("alice", ten_days_ago)];
+        let saved_posts = vec![owner_entry_ts("alice", ten_days_ago)];
+        inputs.liked_posts = &liked_posts;
+        inputs.liked_comments = &liked_comments;
+        inputs.post_comments = &post_comments;
+        inputs.story_polls = &polls;
+        inputs.story_likes = &story_likes;
+        inputs.stories_viewed = &stories_viewed;
+        inputs.saved_posts = &saved_posts;
+
+        let alice = &by_username(aggregate(&inputs, now))["alice"];
+
+        // Decayed sums must be strictly positive — a `+=`→`-=`/`*=` mutation
+        // (or a dropped timestamp lift) collapses them to ≤ 0.
+        assert!(alice.likes_given_decayed > 0.0, "likes decayed");
+        assert!(alice.comments_given_decayed > 0.0, "comments decayed");
+        assert!(
+            alice.story_interactions_out_decayed > 0.0,
+            "story_out decayed (shape-A polls + shape-C story_likes)",
+        );
+        assert!(alice.stories_viewed_decayed > 0.0, "stories_viewed decayed");
+        assert!(alice.saved_their_content_decayed > 0.0, "saved decayed");
+        // A 10-day-old signal decays only slightly under τ=365d, so the
+        // weight stays above 0.9 — pins the sign of the exponent too.
+        assert!(
+            alice.likes_given_decayed > 0.9,
+            "10d-old like under τ=365 must retain most weight: {}",
+            alice.likes_given_decayed,
+        );
+
+        // Windowed counts: likes = post(1) + comment(1) = 2; comments = 1.
+        assert_eq!(alice.likes_given_90d, 2, "likes_given_90d");
+        assert_eq!(alice.comments_given_90d, 1, "comments_given_90d");
+    }
+
+    #[test]
+    fn dm_reaction_decay_and_180d_window_accumulate() {
+        let now = fixed_now();
+        let recent = now.as_second() - 5 * 86_400; // inside the 180d window
+        let followings = vec![following("alice", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = resolver_from(&[("Alice Real", "alice")]);
+        let decay = synth_decay();
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+
+        let threads = vec![dm_thread(
+            &["Alice Real", "Me Real"],
+            vec![msg(
+                Some("Me Real"),
+                Some(recent),
+                vec![react(Some("Me Real")), react(Some("Alice Real"))],
+            )],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let alice = &by_username(aggregate(&inputs, now))["alice"];
+        assert!(
+            alice.dm_reactions_given_decayed > 0.0,
+            "given reaction decayed must be > 0",
+        );
+        assert!(
+            alice.dm_reactions_received_decayed > 0.0,
+            "received reaction decayed must be > 0",
+        );
+        assert_eq!(alice.dm_reactions_given_180d, 1, "given within 180d");
+        assert_eq!(alice.dm_reactions_received_180d, 1, "received within 180d");
+    }
+
+    #[test]
+    fn followed_exactly_now_yields_zero_tenure_not_none() {
+        // Boundary: a follow timestamp equal to `now` is 0 days, not a
+        // future-skew `None`. Pins `days_since`'s `secs < 0` guard as a
+        // strict `<` (a `<=`/`==` mutation would map exactly-now to None).
+        let now = fixed_now();
+        let followings = vec![following("alice", Some(now))];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let decay = synth_decay();
+        let classifier = synth_classifier();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+
+        let by = by_username(aggregate(&inputs, now));
+        assert_eq!(by["alice"].follow_tenure_days, Some(0));
+    }
 }

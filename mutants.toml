@@ -1,0 +1,58 @@
+# cargo-mutants configuration — the deliberate skip-list.
+#
+# Run: `cargo mutants --test-tool nextest`
+#
+# Every mutant NOT matched below is expected to be CAUGHT by a test; a fresh
+# survivor outside these patterns is a real coverage gap, not noise. The
+# exclusions here are inert or cosmetic mutations — stdout diagnostics,
+# presentation sort/chunking, and edge branches that coincide under the test
+# fixtures or surface as loud downstream errors rather than silent corruption.
+# Each group carries its rationale. Re-audit after any logic change.
+
+exclude_re = [
+    # ── stdout-only diagnostics ───────────────────────────────────────────
+    # Not part of the CSV/MD/HTML audit artifacts the user acts on. These
+    # functions only print human-read smoke/diagnostic output; the pipeline
+    # values they echo are pinned by the unit tests (scoring/aggregate/…) and
+    # the fixture-count integration test in tests/cli.rs.
+    "init_tracing",
+    " in init$",   # `init` subcommand: written/skipped counters + hint gating
+    " in check$",  # `check` dry-run: per-source display counts
+    " in run$",    # `run` orchestration: verbose (-v) smoke-count lines
+    "print_keep_prob_histogram",
+    "print_trace",
+    " in report$", # labels report() is now pure formatting; the matrix +
+                   # agreement arithmetic moved to compute() and IS tested.
+
+    # ── progress UI ───────────────────────────────────────────────────────
+    # indicatif spinner; presentation side effects, auto-hidden off-TTY.
+    "Reporter::phase",
+    "Reporter::finish",
+
+    # ── thin wiring with no logic to pin ──────────────────────────────────
+    # Preset::name feeds only the debug-log source label; Preset::body()
+    # drives actual config selection and is value-tested.
+    "Preset::name",
+    # *_default loaders are file-IO wiring (exists?/read/parse). The parsers
+    # they delegate to are exhaustively tested, and the cwd-isolated test
+    # harness deliberately has no config file on disk to read.
+    "load_default",
+    "replace load ->",
+
+    # ── presentation: sort order + table/card chunking ────────────────────
+    # Initial review sort key and keep/review card-vs-table fold thresholds.
+    # The underlying data is identical regardless; HTML tables are
+    # client-sortable, and the Markdown review sort is value-tested.
+    " in write_review_section",
+    " in write_keep_section",
+    " in write_section",
+
+    # ── archive edge branches ─────────────────────────────────────────────
+    # Under the single-wrapper / clean-zip-dir fixtures these `&&` conditions
+    # coincide with `||`, and a real mis-detection surfaces as a loud
+    # ZipArchive / validate_shape error, never silent data corruption.
+    " in resolve$",
+    "is_zip -> bool",
+    " in find_zip_parts$",
+    " in extracted_root$",
+]

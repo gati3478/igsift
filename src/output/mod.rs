@@ -317,4 +317,18 @@ mod tests {
             assert_eq!(got, c.expected, "{}: got {got:?}", c.label);
         }
     }
+
+    #[test]
+    fn recent_comments_alone_count_as_engaged() {
+        // The 90d-engagement branch is `likes_90d > 0 || comments_90d > 0`.
+        // The precedence-chain table only fires the likes arm, which
+        // short-circuits the comments comparison — so a mutation to the
+        // comments side survives. Pin the comments-only arm explicitly.
+        let mut f = baseline();
+        f.comments_given_90d = 1; // likes_given_90d stays 0
+        assert_eq!(
+            decision_hint(&f, Bucket::Keep),
+            "engaged with their content in last 90 days",
+        );
+    }
 }

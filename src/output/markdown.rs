@@ -407,4 +407,20 @@ mod tests {
             "pipe in display name must be backslash-escaped: {md}",
         );
     }
+
+    #[test]
+    fn summary_lists_per_bucket_counts() {
+        // The Summary block reports each bucket count via `== Bucket::X`.
+        // Asymmetric counts so a `==`→`!=` mutation flips the number.
+        let scored = vec![
+            make_scored("k1", 0.90, Bucket::Keep),
+            make_scored("k2", 0.92, Bucket::Keep),
+            make_scored("r1", 0.50, Bucket::Review),
+            make_scored("u1", 0.10, Bucket::Unfollow),
+        ];
+        let md = render(&scored);
+        assert!(md.contains("- Keep: **2**"), "{md}");
+        assert!(md.contains("- Review: **1**"), "{md}");
+        assert!(md.contains("- Unfollow: **1**"), "{md}");
+    }
 }

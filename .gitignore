@@ -38,6 +38,10 @@ recommendations_*.md
 *.snap.new
 *.pending-snap
 
+# cargo-mutants scratch output (regenerated each `cargo mutants` run)
+/mutants.out/
+/mutants.out.old/
+
 # Editor / OS cruft
 .DS_Store
 *.swp

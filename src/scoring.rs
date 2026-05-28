@@ -662,4 +662,128 @@ mod tests {
         let scored = score(std::slice::from_ref(&acct), &cfg);
         assert_eq!(scored[0].dominant_feature, "hide_story_penalty");
     }
+
+    #[test]
+    fn bucket_as_str_labels() {
+        // The CSV `bucket` column is part of the DESIGN.md output contract;
+        // pin the exact strings so a mutation can't silently relabel them.
+        assert_eq!(Bucket::Keep.as_str(), "keep");
+        assert_eq!(Bucket::Review.as_str(), "review");
+        assert_eq!(Bucket::Unfollow.as_str(), "unfollow");
+    }
+
+    #[test]
+    fn keep_prob_divides_raw_score_by_scale() {
+        // keep_prob = sigmoid((score_raw - threshold) / scale). The default
+        // scale of 1.0 makes `/scale` and `*scale` indistinguishable; pin
+        // the division with a non-unit scale.
+        let mut cfg = baseline_cfg();
+        cfg.scoring.scale = 2.0;
+        let mut acct = baseline_account("scaled");
+        acct.likes_given_decayed = 2.0; // score_raw = 2.0 (likes weight 1.0)
+        let kp = score(std::slice::from_ref(&acct), &cfg)[0].keep_prob;
+        // sigmoid(2.0 / 2.0) = sigmoid(1.0) ≈ 0.7310586; a `*scale`
+        // mutation would yield sigmoid(4.0) ≈ 0.982.
+        assert!((kp - 0.731_058_578_630_005).abs() < 1e-9, "keep_prob={kp}");
+    }
+
+    #[test]
+    fn tenure_contribution_is_weight_times_log_days_plus_one() {
+        // Pins the exact tenure term `w.tenure * ln(days + 1)`. The existing
+        // ratio test tolerates `*`→`+` and `+1`→`-1`/`*1` mutations; an exact
+        // value does not.
+        let cfg = baseline_cfg();
+        let mut acct = baseline_account("tenured");
+        acct.follow_tenure_days = Some(99);
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        let expected = 0.3 * 100.0_f64.ln(); // w.tenure(0.3) * ln(99 + 1)
+        assert!(
+            (score_raw - expected).abs() < 1e-9,
+            "score_raw={score_raw} expected={expected}",
+        );
+    }
+
+    #[test]
+    fn hide_story_penalty_is_signed_negative() {
+        // A hide-story-only account must score exactly `-hide_story_penalty`.
+        // A deleted `-` (penalty applied as a boost) would flip the sign
+        // without tripping the bucket-level tests.
+        let cfg = baseline_cfg();
+        let mut acct = baseline_account("hidden");
+        acct.is_hide_story_from = true;
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        assert!((score_raw - (-2.0)).abs() < 1e-12, "score_raw={score_raw}");
+    }
+
+    #[test]
+    fn dm_balance_penalty_magnitude_is_pinned() {
+        // `(dm_balance - 0.5).max(0) * 2`, gated on volume. For balance=1.0
+        // above the floor the penalty is exactly 1.0 → contribution -1.0.
+        // Pins the `-0.5` offset and the `*2` scale, which the sign-only
+        // volume-gate test leaves free.
+        let cfg = baseline_cfg();
+        let mut acct = baseline_account("onesided");
+        acct.dm_messages_total = 10; // above MIN_DM_VOLUME_FOR_BALANCE
+        acct.dm_balance = Some(1.0); // fully one-sided me
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        assert!((score_raw - (-1.0)).abs() < 1e-12, "score_raw={score_raw}");
+    }
+
+    #[test]
+    fn reaction_balance_penalty_applies_above_volume_floor() {
+        // No test previously exercised reaction_balance_penalty at all.
+        // given=6, received=2 → total 8 ≥ floor, balance 0.75 →
+        // (0.75-0.5)*2 = 0.5 penalty; weight 0.5 → contribution -0.25.
+        // Raw reaction counts don't feed the positive decayed terms.
+        let cfg = baseline_cfg();
+        let mut acct = baseline_account("reactor");
+        acct.dm_reactions_given = 6;
+        acct.dm_reactions_received = 2;
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        assert!((score_raw - (-0.25)).abs() < 1e-12, "score_raw={score_raw}");
+    }
+
+    #[test]
+    fn reaction_balance_penalty_floor_is_exclusive_at_threshold() {
+        // total == MIN_REACTION_VOLUME_FOR_BALANCE (5) must still apply the
+        // penalty (the guard is `total < MIN`, strict). A `<`→`<=`/`==`
+        // mutation would suppress it exactly at the boundary.
+        let cfg = baseline_cfg();
+        let mut acct = baseline_account("boundary");
+        acct.dm_reactions_given = 5; // total 5, balance 1.0
+        acct.dm_reactions_received = 0;
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        // penalty = (1.0-0.5)*2 = 1.0; weight 0.5 → -0.5.
+        assert!((score_raw - (-0.5)).abs() < 1e-12, "score_raw={score_raw}");
+    }
+
+    #[test]
+    fn reaction_balance_penalty_suppressed_below_floor() {
+        let cfg = baseline_cfg();
+        let mut acct = baseline_account("light");
+        acct.dm_reactions_given = 3; // total 3 < floor → no penalty
+        acct.dm_reactions_received = 0;
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        assert!((score_raw - 0.0).abs() < 1e-12, "score_raw={score_raw}");
+    }
+
+    #[test]
+    fn keep_prob_equal_to_unfollow_max_is_review_not_unfollow() {
+        // The unfollow gate is `keep_prob < unfollow_max` — exclusive. Set
+        // unfollow_max to a keep_prob the scorer actually produces so the
+        // comparison is an exact equality; a `<`→`<=` mutation would flip
+        // this account into Unfollow.
+        let mut cfg = baseline_cfg();
+        let mut acct = baseline_account("edge");
+        acct.is_hide_story_from = true; // score_raw = -2.0
+        let kp = score(std::slice::from_ref(&acct), &cfg)[0].keep_prob;
+        cfg.scoring.unfollow_max = kp;
+        cfg.scoring.keep_min = kp + 0.1;
+        let bucket = score(std::slice::from_ref(&acct), &cfg)[0].bucket;
+        assert_eq!(
+            bucket,
+            Bucket::Review,
+            "keep_prob == unfollow_max must stay Review (exclusive `<`)",
+        );
+    }
 }

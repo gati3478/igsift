@@ -710,3 +710,32 @@ fn print_trace(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_output_stem_honors_explicit_out() {
+        let stem = resolve_output_stem(Some(Path::new("/tmp/custom")), Path::new("/data/export"));
+        assert_eq!(stem, PathBuf::from("/tmp/custom"));
+    }
+
+    #[test]
+    fn resolve_output_stem_default_lands_beside_export_dir() {
+        // No --out: the default stem goes in the export's PARENT directory,
+        // dated. Pins the `!is_empty` parent filter — a deleted `!` would
+        // drop the parent and write into the cwd instead of beside the
+        // export.
+        let stem = resolve_output_stem(None, Path::new("/data/export"));
+        assert_eq!(stem.parent(), Some(Path::new("/data")));
+        assert!(
+            stem.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("following-audit_"),
+            "default stem must be the dated audit name: {}",
+            stem.display(),
+        );
+    }
+}

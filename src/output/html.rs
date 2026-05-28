@@ -525,4 +525,37 @@ mod tests {
         assert!(html.contains("Unfollow <span class=\"count\">(0)</span>"));
         assert!(html.contains("No accounts in this bucket"));
     }
+
+    #[test]
+    fn escapes_double_quote_in_display_name() {
+        // The attribute-context guard. The existing escape test covers
+        // < > & but not the `"` arm — deleting that arm from `escape`
+        // would let a display name break out of an HTML attribute.
+        let mut s = baseline("alice", Bucket::Keep, 0.9);
+        s.features.display_name = Some("Sarah \"Q\" Connor".to_owned());
+        let html = render(&[s]);
+        assert!(
+            html.contains("Sarah &quot;Q&quot; Connor"),
+            "double quote must be escaped to &quot;: {html}",
+        );
+    }
+
+    #[test]
+    fn header_stat_tiles_show_per_bucket_counts() {
+        // The summary tiles compute keep/review/unfollow via `== Bucket::X`.
+        // Asymmetric counts (3/1/1) so a `==`→`!=` mutation changes each
+        // displayed number — the section-count test alone leaves the tile
+        // computation unpinned.
+        let scored = vec![
+            baseline("k1", Bucket::Keep, 0.90),
+            baseline("k2", Bucket::Keep, 0.92),
+            baseline("k3", Bucket::Keep, 0.95),
+            baseline("r1", Bucket::Review, 0.50),
+            baseline("u1", Bucket::Unfollow, 0.10),
+        ];
+        let html = render(&scored);
+        assert!(html.contains("<div class=\"stat keep\"><div class=\"num\">3</div>"));
+        assert!(html.contains("<div class=\"stat review\"><div class=\"num\">1</div>"));
+        assert!(html.contains("<div class=\"stat unfollow\"><div class=\"num\">1</div>"));
+    }
 }

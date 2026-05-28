@@ -1351,4 +1351,23 @@ mod tests {
         assert_eq!(out[0].target_username, "ok_synth");
         assert!(out[0].timestamp.is_some());
     }
+
+    #[test]
+    fn timestamp_converters_preserve_value_and_reject_out_of_range() {
+        // The Unix-seconds / millis lifts back every tenure, recency, and
+        // decay timestamp. A mutation to `None` or a default-epoch constant
+        // would silently zero or drop them all without tripping a count.
+        assert_eq!(
+            seconds_to_timestamp(1_700_000_000).map(|t| t.as_second()),
+            Some(1_700_000_000),
+        );
+        assert_eq!(
+            milliseconds_to_timestamp(1_700_000_000_000).map(|t| t.as_millisecond()),
+            Some(1_700_000_000_000),
+        );
+        // Out-of-range degrades to None (no panic) — also kills the
+        // "always Some(default)" mutation.
+        assert_eq!(seconds_to_timestamp(i64::MAX), None);
+        assert_eq!(milliseconds_to_timestamp(i64::MAX), None);
+    }
 }
