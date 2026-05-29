@@ -106,8 +106,10 @@ pub fn init(force: bool) -> Result<()> {
 
 /// `ig-mgr check <export>` — validate that an export folder is
 /// parseable without scoring it. Runs the shape pre-flight, then
-/// attempts every parser, surfacing per-source status. Exits
-/// non-zero (Err) on any failure.
+/// attempts every parser, surfacing per-source status, and finishes
+/// with a config sanity check (the keep-allowlist and drop-list must
+/// parse and be disjoint). Exits non-zero (Err) on any failure —
+/// a parse failure, or a both-listed handle that `run` would reject.
 ///
 /// Useful for verifying a freshly-extracted multipart archive
 /// before paying the cost of a full run, or as a CI dry-run
@@ -246,12 +248,45 @@ pub fn check(input: &Path, rebuild_cache: bool) -> Result<()> {
         export::read_me_identity(export_dir).map(|_| 1),
     );
 
-    if failures == 0 {
-        println!("\nAll sources parsed cleanly.");
-        Ok(())
-    } else {
-        anyhow::bail!("{failures} source(s) failed to parse")
+    // Config sanity (independent of the export): the two per-user handle
+    // lists must parse and be disjoint. A handle on both is a contradiction
+    // `run` rejects at load — surfacing it here lets the dry-run catch it
+    // before a full scoring pass, mirroring run's load-time gate. Tracked
+    // separately from `failures` so the summary wording stays accurate: a
+    // parse/conflict here is not a "source failed to parse".
+    let config_result: Result<(usize, usize)> = (|| {
+        let keep = allowlist::load_default()?;
+        let drop = allowlist::load_drop_list()?;
+        allowlist::ensure_disjoint(&keep, &drop)?;
+        Ok((keep.len(), drop.len()))
+    })();
+    let config_ok = config_result.is_ok();
+    match config_result {
+        Ok((keep, drop)) => {
+            println!(
+                "✓ {:30} {keep} keep + {drop} drop, disjoint",
+                "config: handle lists"
+            )
+        }
+        Err(e) => println!("✗ {:30} {e}", "config: handle lists"),
     }
+
+    if failures == 0 && config_ok {
+        println!("\nAll sources parsed cleanly.");
+        return Ok(());
+    }
+    let mut problems = Vec::new();
+    if failures > 0 {
+        problems.push(format!("{failures} source(s) failed to parse"));
+    }
+    if !config_ok {
+        // Terse + self-contained, mirroring the parser summary above: the
+        // offending handle/file is on the stdout `✗` line, so this verdict
+        // must not reference "above" (the streams split under redirection).
+        problems
+            .push("keep-allowlist / drop-list invalid (not disjoint or unparseable)".to_owned());
+    }
+    anyhow::bail!("{}", problems.join("; "))
 }
 
 /// Entry point for the analysis run.

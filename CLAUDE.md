@@ -24,7 +24,9 @@ input ──▶ archive::resolve  (dir / .zip / multipart .zip → extracted dir
 
 **Three subcommands** (legacy `ig-mgr <export>` still works as implicit Run):
 `run` (score + write audit), `init` (scaffold per-user config files from
-embedded templates), `check` (parser-only dry-run with per-source pass/fail).
+embedded templates), `check` (parser dry-run with per-source pass/fail,
+plus a config sanity check that the keep-allowlist + drop-list parse and
+are disjoint).
 
 **Current bucket split on the real export:** `510 / 130 / 9`
 (keep / review / unfollow) at `28.6%` labeled-set agreement (8/28 matched
@@ -69,7 +71,7 @@ compiled-in fallback when no flag and no cwd file resolve.
 ```bash
 cargo build --all-targets                          # compile lib, bin, tests
 cargo run -- <input> [flags]                       # implicit Run (legacy)
-cargo run -- check <input> [--rebuild-cache]       # parser-only dry-run
+cargo run -- check <input> [--rebuild-cache]       # parser dry-run + config sanity (disjoint lists)
 cargo run -- init [--force]                        # scaffold config/ files
 cargo fmt --all                                    # format (rustfmt.toml: edition 2024)
 cargo clippy --all-targets -- -D warnings          # lint; CI treats warnings as errors

@@ -84,7 +84,55 @@ fn check_subcommand_validates_fixture_and_exits_zero() {
         .success()
         .stdout(contains("Validating export:"))
         .stdout(contains("following.json"))
+        // The config sanity step runs even with no handle-list files
+        // present (cwd-isolated harness → empty, trivially disjoint).
+        .stdout(contains("config: handle lists"))
         .stdout(contains("All sources parsed cleanly"));
+}
+
+#[test]
+fn check_surfaces_both_listed_conflict() {
+    // Mirror of `both_listed_handle_aborts_the_run`, for the `check`
+    // dry-run: a keep/drop contradiction must surface (naming the handle
+    // and both files) and exit non-zero, so it's caught before a scoring
+    // run rather than only at `run` time. The fixture parses cleanly, so
+    // the config conflict is the sole failure.
+    let (mut cmd, cwd) = ig_mgr_with_config(
+        "check_conflict",
+        &[
+            ("config/keep_allowlist.txt", "dup_handle\n"),
+            ("config/drop_list.txt", "dup_handle\n"),
+        ],
+    );
+    let result = cmd.arg("check").arg(sample_export()).assert().failure();
+    let output = result.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    std::fs::remove_dir_all(&cwd).ok();
+    // Detail (handle + both files) on the stdout ✗ line, matching check's
+    // per-source diagnostic style.
+    assert!(
+        stdout.contains("dup_handle"),
+        "must name the handle:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("config/keep_allowlist.txt"),
+        "must name the keep-allowlist file:\n{stdout}",
+    );
+    assert!(
+        stdout.contains("config/drop_list.txt"),
+        "must name the drop-list file:\n{stdout}",
+    );
+    // Terse verdict on stderr (no "source failed to parse" — the fixture
+    // parsed fine; the config is the sole failure).
+    assert!(
+        stderr.contains("keep-allowlist / drop-list invalid"),
+        "verdict must name the config failure on stderr:\n{stderr}",
+    );
+    assert!(
+        !stderr.contains("source(s) failed to parse"),
+        "no source failed — verdict must not claim a parse failure:\n{stderr}",
+    );
 }
 
 #[test]

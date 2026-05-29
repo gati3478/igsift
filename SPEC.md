@@ -77,9 +77,11 @@ No new subcommand. Surfaces through existing flows:
   `lib::init`).
 - `ig-mgr run <export>` — loads the drop-list, enforces the cross-list
   conflict check, applies the gate. No new flags.
-- `ig-mgr check <export>` — unchanged (parser-only; does not score or load
-  handle lists). _Optional:_ surface the cross-list conflict here too as a
-  config sanity check — deferred unless wanted.
+- `ig-mgr check <export>` — runs the parser dry-run, then a config sanity
+  check: loads the keep-allowlist + drop-list and runs the same
+  `ensure_disjoint` gate, surfacing a both-listed conflict (handle + both
+  files) and exiting non-zero. Catches the contradiction before a full
+  scoring `run`. _(Implemented — was deferred in the original spec.)_
 
 ## Project structure (files to create / modify)
 

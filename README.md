@@ -69,13 +69,16 @@ parts that IG ships for large exports. Archives extract to
 ```bash
 ig-mgr <input>                       # implicit Run (legacy form)
 ig-mgr run <input>                   # explicit form of the above
-ig-mgr check <input>                 # parser-only dry-run, per-source ✓ / ✗
+ig-mgr check <input>                 # parser dry-run (per-source ✓/✗) + config sanity
 ig-mgr init [--force]                # scaffold config/{keep_allowlist,drop_list}.txt + labels.txt
 ```
 
 `check` runs the same parser stack as `run` without aggregation /
-scoring / writing, reporting each source individually. Fast pre-flight
-when you're not sure a fresh export extracted cleanly.
+scoring / writing, reporting each source individually, then a config
+sanity check: it loads the keep-allowlist and drop-list and verifies
+they're disjoint, so a both-listed handle (which `run` rejects at load)
+is caught in the dry-run. Fast pre-flight when you're not sure a fresh
+export extracted cleanly or your config is consistent.
 
 ### Options
 
