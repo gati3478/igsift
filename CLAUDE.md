@@ -39,9 +39,11 @@ keep), while `story_out` is a coin flip (it dominates an equal mix of
 keep- and drop-labeled accounts) and ~12 keep-labels are low-engagement
 brand/local follows that only `tenure` carries — raising them would also
 raise drop-intent old follows. The remaining hard mismatch is a
-story-heavy drop indistinguishable from story-heavy keeps. The real fix
-is a **drop-list** (mirror of `keep_allowlist`, a v2 feature), not more
-weight-tuning, which here trades keep-recall for drop-precision ~1:1. See
+story-heavy drop indistinguishable from story-heavy keeps. The fix is a
+**drop-list** (`config/drop_list.txt`, the mirror of `keep_allowlist`) —
+**implemented**: a hand-flagged handle is forced to `Unfollow` regardless
+of score, closing the hard mismatch that weight-tuning structurally can't
+(tuning here trades keep-recall for drop-precision ~1:1). See
 [`docs/TUNING.md`](docs/TUNING.md). Scoring weights live in
 `config/scoring.toml`; three presets (`balanced` / `engagement` /
 `tenure`) ship embedded via `--preset`. `balanced` mirrors the committed
@@ -98,7 +100,7 @@ src/
   archive.rs                    # input detect + zip extract + cache (.ig-mgr-extracted*/)
   config.rs                     # scoring.toml deserialization; preset resolution chain
   export.rs                     # IG export JSON parsers + validate_shape pre-flight
-  allowlist.rs                  # config/keep_allowlist.txt loader (case-insensitive HashSet)
+  allowlist.rs                  # config/{keep_allowlist,drop_list}.txt loaders + ensure_disjoint
   labels.rs                     # config/labels.txt loader + confusion-matrix report
   progress.rs                   # indicatif spinner wrapper (auto-hide on -v or off-TTY)
   text.rs                       # fix_mojibake — repairs IG's UTF-8-as-Latin-1 export bug
@@ -106,7 +108,7 @@ src/
     mod.rs                      # re-exports
     aggregate.rs                # per-account features: raw + decayed + windowed + is_mutual
     name_resolution.rs          # display_name → handle bridge for DM attribution
-    account_class.rs            # brand-detection (aho-corasick lexicon) + allowlist gate
+    account_class.rs            # brand-detection (aho-corasick lexicon) + keep-allowlist / drop-list gates
   scoring.rs                    # score_raw composition, sigmoid, bucket assignment, top_terms
   output/
     mod.rs                      # write() dispatcher (CSV+MD+HTML) + shared decision_hint SSOT
@@ -119,6 +121,7 @@ tests/
 config/
   scoring.toml                 # Gati's tuned weights + decay constants
   keep_allowlist.txt.example   # per-user keep-allowlist template (real .txt gitignored)
+  drop_list.txt.example        # per-user drop-list template — forces Unfollow (real .txt gitignored)
   labels.txt.example           # per-user labels template (real .txt gitignored)
   presets/
     balanced.toml              # default preset — mirror of config/scoring.toml; compiled-in fallback
@@ -171,9 +174,23 @@ docs/DESIGN.md  ROADMAP.md  TUNING.md
   pins this; don't relax it.
 - **Decision-hint SSOT.** The one-line account-shape characterization
   surfaced by both Markdown and HTML writers lives in
-  `src/output/mod.rs::decision_hint`. The 12-row precedence-chain test
+  `src/output/mod.rs::decision_hint`. The 13-row precedence-chain test
   is the contract; both writers call the shared function. Adding new
   rules: insert at the right precedence, extend the table-driven test.
+- **Keep-allowlist / drop-list are mirror overrides.** Two per-user
+  handle lists bracket the score: `config/keep_allowlist.txt` floors
+  `Unfollow → Review`, `config/drop_list.txt` forces `→ Unfollow`. Both
+  load through the shared `allowlist::parse` (case-insensitive
+  `HashSet<String>`), surface as `is_keep_allowlisted` / `is_drop_listed`
+  on `AccountFeatures`, and gate in `scoring::assign_bucket`. Precedence
+  (top wins): `is_restricted` (Review floor) → `is_drop_listed` (Unfollow)
+  → `keep_min` → keep-gates. `is_restricted` is the one floor the
+  drop-list yields to. A handle on **both** lists is a contradiction —
+  `allowlist::ensure_disjoint` rejects it loudly at load (in `run`),
+  before scoring, so the two rungs never compete by construction. When
+  adding a new override, mirror this end to end (loader → `Classifier`
+  field + lookup → `AccountFeatures` field → `assign_bucket` rung →
+  `decision_hint` row) and the ~7 test struct-builders.
 - **Archive cache fingerprint, not mtime.** `archive::resolve` writes
   `{count}\n{total_bytes}\n` into `.complete` and invalidates on any
   mismatch. mtime-based checks are vulnerable to `cp -p` and to

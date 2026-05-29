@@ -57,6 +57,12 @@ use crate::scoring::{Bucket, ScoredAccount};
 /// any single-arm test — the table-driven test in this module
 /// pins the precedence chain end to end.
 pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str {
+    // Most decisive signal: the user explicitly forced Unfollow. Can't
+    // co-occur with the allowlist (rejected at load by ensure_disjoint),
+    // so its placement above it is safe.
+    if f.is_drop_listed {
+        return "explicit drop-list";
+    }
     if f.is_keep_allowlisted {
         return "explicit allowlist";
     }
@@ -170,6 +176,7 @@ mod tests {
             recently_unfollowed: false,
             is_mutual: true,
             is_keep_allowlisted: false,
+            is_drop_listed: false,
             likes_given: 0,
             comments_given: 0,
             story_interactions_out: 0,
@@ -208,6 +215,19 @@ mod tests {
             bucket: Bucket,
         }
         let cases = &[
+            Case {
+                label: "drop-list beats allowlist",
+                expected: "explicit drop-list",
+                // is_drop_listed + is_keep_allowlisted is load-time-rejected
+                // in production (`allowlist::ensure_disjoint`); the pairing
+                // exists here only to pin the hint's source ordering so a
+                // reorder mutation trips.
+                mutate: |f| {
+                    f.is_drop_listed = true;
+                    f.is_keep_allowlisted = true;
+                },
+                bucket: Bucket::Unfollow,
+            },
             Case {
                 label: "allowlist beats close_friend",
                 expected: "explicit allowlist",

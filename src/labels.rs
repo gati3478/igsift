@@ -413,6 +413,7 @@ mod tests {
                 recently_unfollowed: false,
                 is_mutual: false,
                 is_keep_allowlisted: false,
+                is_drop_listed: false,
                 likes_given: 0,
                 comments_given: 0,
                 story_interactions_out: 0,

@@ -69,6 +69,7 @@ pub fn init(force: bool) -> Result<()> {
     use std::fs;
 
     const KEEP_ALLOWLIST_TEMPLATE: &str = include_str!("../config/keep_allowlist.txt.example");
+    const DROP_LIST_TEMPLATE: &str = include_str!("../config/drop_list.txt.example");
     const LABELS_TEMPLATE: &str = include_str!("../config/labels.txt.example");
 
     let config_dir = PathBuf::from("config");
@@ -77,6 +78,7 @@ pub fn init(force: bool) -> Result<()> {
 
     let targets: &[(&str, &str)] = &[
         ("config/keep_allowlist.txt", KEEP_ALLOWLIST_TEMPLATE),
+        ("config/drop_list.txt", DROP_LIST_TEMPLATE),
         ("config/labels.txt", LABELS_TEMPLATE),
     ];
 
@@ -96,6 +98,7 @@ pub fn init(force: bool) -> Result<()> {
     println!("\n{wrote} written, {skipped} skipped.");
     if wrote > 0 {
         println!("Edit config/keep_allowlist.txt to mark accounts that must stay in Keep.");
+        println!("Edit config/drop_list.txt to force accounts into Unfollow.");
         println!("Edit config/labels.txt with your hand-labels to enable the accuracy report.");
     }
     Ok(())
@@ -432,11 +435,16 @@ pub fn run(args: RunArgs) -> Result<()> {
         println!("resolvable DM threads: {resolvable_dm_threads}");
     }
 
-    progress.phase("Loading scoring config + allowlist");
+    progress.phase("Loading scoring config + handle lists");
     let scoring_config = config::read_scoring_config(args.config.as_deref(), args.preset)?;
     let keep_allowlist = allowlist::load_default()?;
+    let drop_list = allowlist::load_drop_list()?;
+    // A handle on both lists is a keep/drop contradiction — fail before
+    // scoring so `assign_bucket` never sees a both-listed handle.
+    allowlist::ensure_disjoint(&keep_allowlist, &drop_list)?;
     let keep_allowlist_size = keep_allowlist.len();
-    let classifier = features::Classifier::new(keep_allowlist);
+    let drop_list_size = drop_list.len();
+    let classifier = features::Classifier::new(keep_allowlist, drop_list);
 
     progress.phase("Aggregating per-account features");
     let inputs = features::aggregate::AggregateInputs {
@@ -491,6 +499,7 @@ pub fn run(args: RunArgs) -> Result<()> {
         .filter(|f| f.account_class == features::AccountClass::Brand)
         .count();
     let agg_keep_allowlisted = aggregated.iter().filter(|f| f.is_keep_allowlisted).count();
+    let agg_drop_listed = aggregated.iter().filter(|f| f.is_drop_listed).count();
 
     if args.verbose > 0 {
         println!("aggregated accounts: {}", aggregated.len());
@@ -503,6 +512,11 @@ pub fn run(args: RunArgs) -> Result<()> {
         // file-size line below is the loaded-from-disk count for sanity.
         println!("aggregated keep-allowlisted: {agg_keep_allowlisted}");
         println!("keep-allowlist size on disk: {keep_allowlist_size}");
+        // Same file-vs-followee distinction as the allowlist: the on-disk
+        // count includes drop-list handles that aren't (or are no longer)
+        // followees.
+        println!("aggregated drop-listed: {agg_drop_listed}");
+        println!("drop-list size on disk: {drop_list_size}");
         println!("aggregated with likes_given > 0: {agg_with_likes}");
         println!("aggregated with comments_given > 0: {agg_with_comments}");
         println!("DM-attributed accounts: {agg_dm_attributed}");

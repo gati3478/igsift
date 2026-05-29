@@ -1,18 +1,24 @@
-//! Load `config/keep_allowlist.txt` into an in-memory [`HashSet`].
+//! Load the two per-user handle lists — `config/keep_allowlist.txt`
+//! (never-unfollow) and `config/drop_list.txt` (always-unfollow) — into
+//! in-memory [`HashSet`]s. Both reuse the same [`parse`] rules.
 //!
 //! Format mirrors [`crate::labels`]: one handle per line, `#` introduces a
 //! comment to end-of-line, blank lines are ignored. Multi-token bare lines
 //! (e.g. `alice bob` without a `#`) are a HARD parse error — Instagram
 //! handles do not contain whitespace, and silently dropping the second
-//! token would create a phantom allowlist entry that never matches.
+//! token would create a phantom entry that never matches.
 //!
 //! Stored values are ASCII-lowercased on insert so
 //! [`Classifier::is_allowlisted`](crate::features::Classifier::is_allowlisted)
+//! and [`Classifier::is_drop_listed`](crate::features::Classifier::is_drop_listed)
 //! lookups don't re-allocate per query.
 //!
-//! Missing file → empty set. The allowlist is opt-in; a fresh install
-//! has no entries (only the comment-only template), and the brand
-//! lexicon is the primary defence.
+//! Missing file → empty set. Both lists are opt-in; a fresh install
+//! has no entries (only the comment-only templates), and the brand
+//! lexicon is the primary defence on the keep side.
+//!
+//! The two lists must be disjoint — a handle on both is a keep/drop
+//! contradiction. [`ensure_disjoint`] enforces this loudly at load.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -20,16 +26,47 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 
 const DEFAULT_PATH: &str = "config/keep_allowlist.txt";
+const DROP_LIST_PATH: &str = "config/drop_list.txt";
 
-/// Load the allowlist from the default path. Missing file → empty set.
+/// Load the keep-allowlist from the default path. Missing file → empty set.
 pub fn load_default() -> Result<HashSet<String>> {
-    let path = Path::new(DEFAULT_PATH);
+    load_handle_list(Path::new(DEFAULT_PATH))
+}
+
+/// Load the drop-list from the default path. Missing file → empty set.
+/// Exact mirror of [`load_default`] against `config/drop_list.txt`.
+pub fn load_drop_list() -> Result<HashSet<String>> {
+    load_handle_list(Path::new(DROP_LIST_PATH))
+}
+
+fn load_handle_list(path: &Path) -> Result<HashSet<String>> {
     if !path.exists() {
         return Ok(HashSet::new());
     }
     let body =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     parse(&body, &path.display().to_string())
+}
+
+/// Bail if any handle appears in both the keep-allowlist and the drop-list.
+///
+/// A both-listed handle is a contradiction (never-unfollow vs. always-
+/// unfollow); resolving it silently would be a lie about user intent.
+/// Called in `lib::run` before scoring, so `assign_bucket` never sees a
+/// both-listed handle and the drop-vs-keep precedence is moot by
+/// construction. The error names every offending handle (sorted, for a
+/// deterministic message) and both files.
+pub fn ensure_disjoint(keep: &HashSet<String>, drop: &HashSet<String>) -> Result<()> {
+    let mut overlap: Vec<&str> = keep.intersection(drop).map(String::as_str).collect();
+    if overlap.is_empty() {
+        return Ok(());
+    }
+    overlap.sort_unstable();
+    bail!(
+        "handle(s) appear in BOTH {DEFAULT_PATH} and {DROP_LIST_PATH}: {} \
+         — a keep/drop contradiction; remove each from one list before scoring",
+        overlap.join(", "),
+    );
 }
 
 /// Parse a newline-separated allowlist body, naming `source` in error
@@ -121,5 +158,58 @@ mod tests {
         let set = parse_ok("alice  # a close friend from college\n");
         assert_eq!(set.len(), 1);
         assert!(set.contains("alice"));
+    }
+
+    fn set_of(handles: &[&str]) -> HashSet<String> {
+        handles.iter().map(|h| (*h).to_owned()).collect()
+    }
+
+    #[test]
+    fn disjoint_lists_pass() {
+        let keep = set_of(&["alice", "bob"]);
+        let drop = set_of(&["carol", "dave"]);
+        ensure_disjoint(&keep, &drop).expect("disjoint lists must be Ok");
+    }
+
+    #[test]
+    fn empty_lists_are_disjoint() {
+        ensure_disjoint(&HashSet::new(), &HashSet::new()).expect("two empty sets are disjoint");
+        ensure_disjoint(&set_of(&["alice"]), &HashSet::new()).expect("one empty side is disjoint");
+    }
+
+    #[test]
+    fn overlapping_handle_is_a_hard_error_naming_both_files() {
+        // A handle on both lists is a keep/drop contradiction. The error
+        // must name the offending handle AND both files so the user can
+        // fix it without guessing which line to delete.
+        let keep = set_of(&["alice", "shared_handle"]);
+        let drop = set_of(&["shared_handle", "carol"]);
+        let err = ensure_disjoint(&keep, &drop).expect_err("overlap must error");
+        let msg = err.to_string();
+        assert!(msg.contains("shared_handle"), "must name the handle: {msg}");
+        assert!(
+            msg.contains("config/keep_allowlist.txt"),
+            "must name the keep-allowlist file: {msg}",
+        );
+        assert!(
+            msg.contains("config/drop_list.txt"),
+            "must name the drop-list file: {msg}",
+        );
+    }
+
+    #[test]
+    fn multiple_overlaps_are_all_named() {
+        // All conflicting handles surface in one error, sorted for a
+        // deterministic message — not just the first one found.
+        let keep = set_of(&["zeta", "alpha"]);
+        let drop = set_of(&["zeta", "alpha"]);
+        let err = ensure_disjoint(&keep, &drop).expect_err("overlap must error");
+        let msg = err.to_string();
+        assert!(msg.contains("alpha"), "must name alpha: {msg}");
+        assert!(msg.contains("zeta"), "must name zeta: {msg}");
+        // Sorted: alpha precedes zeta in the rendered list.
+        let a = msg.find("alpha").unwrap();
+        let z = msg.find("zeta").unwrap();
+        assert!(a < z, "handles must render sorted: {msg}");
     }
 }

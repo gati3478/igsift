@@ -274,8 +274,17 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
     // Restricted floors the bucket at `review`, regardless of `keep_prob`
     // — DESIGN.md treats "restricted" as a manual signal that the
     // account warrants human attention before any automated drop call.
+    // This is the one floor the drop-list yields to.
     if f.is_restricted {
         return Bucket::Review;
+    }
+    // Drop-list (`config/drop_list.txt`) is the user-maintained always-
+    // unfollow override — the inverse of the keep-allowlist. It beats
+    // `keep_min` and every keep-gate below; only the restricted floor
+    // above outranks it. A both-listed handle can't reach here:
+    // `allowlist::ensure_disjoint` rejects it at load.
+    if f.is_drop_listed {
+        return Bucket::Unfollow;
     }
     if keep_prob >= p.keep_min {
         return Bucket::Keep;
@@ -326,6 +335,7 @@ mod tests {
             recently_unfollowed: false,
             is_mutual: false,
             is_keep_allowlisted: false,
+            is_drop_listed: false,
             likes_given: 0,
             comments_given: 0,
             story_interactions_out: 0,
@@ -648,6 +658,51 @@ mod tests {
         assert_eq!(scored[0].bucket, Bucket::Review);
         // Class stayed Personal — allowlist is NOT classification.
         assert_eq!(scored[0].features.account_class, AccountClass::Personal);
+    }
+
+    #[test]
+    fn drop_listed_forces_unfollow_over_keep_signals() {
+        // Acceptance test 1: a drop-listed account with close-friend boost
+        // and keep_prob ≈ 1.0 must still bucket Unfollow — the drop-list
+        // beats keep_min and every keep-gate.
+        let cfg = baseline_cfg();
+        let mut acct = baseline_account("doomed");
+        acct.is_drop_listed = true;
+        acct.is_close_friend = true; // would drive keep_prob ≈ 0.993
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(
+            scored[0].keep_prob > 0.99,
+            "keep_prob {} should be high to prove the drop-list overrides it",
+            scored[0].keep_prob,
+        );
+        assert_eq!(scored[0].bucket, Bucket::Unfollow);
+    }
+
+    #[test]
+    fn drop_listed_forces_unfollow_over_brand_gate() {
+        // Acceptance test 2: a Brand account would normally floor at Review
+        // (the Unfollow gate blocks non-Personal). The drop-list overrides
+        // that gate and forces Unfollow.
+        let cfg = baseline_cfg();
+        let mut acct = baseline_account("brand_to_drop");
+        acct.account_class = AccountClass::Brand;
+        acct.is_drop_listed = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Unfollow);
+    }
+
+    #[test]
+    fn restricted_beats_drop_list() {
+        // Acceptance test 3: the one exception. `is_restricted` is a hard
+        // Review floor that the drop-list yields to — restricted means
+        // "look at this before any drop call", which outranks a standing
+        // drop intent.
+        let cfg = baseline_cfg();
+        let mut acct = baseline_account("watch_then_maybe_drop");
+        acct.is_drop_listed = true;
+        acct.is_restricted = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Review);
     }
 
     #[test]

@@ -34,6 +34,12 @@ recommendations_*.md
 # checked-in template; copy to `config/keep_allowlist.txt` to activate.
 /config/keep_allowlist.txt
 
+# Personal drop-list — handles the user wants forced into Unfollow. The exact
+# inverse of the keep-allowlist. Per-user data, never committed.
+# `config/drop_list.txt.example` is the checked-in template; copy to
+# `config/drop_list.txt` to activate.
+/config/drop_list.txt
+
 # insta: uncommitted pending snapshots (review then accept with `cargo insta`)
 *.snap.new
 *.pending-snap

@@ -1,0 +1,20 @@
+# drop_list — accounts to always recommend unfollowing.
+#
+# One username per line (without the leading @). Lines starting with '#' and
+# blank lines are ignored. Matching is case-insensitive.
+#
+# This is the exact inverse of keep_allowlist.txt: a handle listed here is
+# forced into the Unfollow bucket regardless of score or inferred keep-
+# signals (close friend, favorited, DM activity, brand class). It does NOT
+# auto-unfollow — it only changes the audit recommendation; you still act
+# manually inside Instagram.
+#
+# A restricted account stays in Review even if drop-listed (the restricted
+# floor wins — restricted means "look at this before any drop call").
+#
+# A handle present in BOTH this file and keep_allowlist.txt is a
+# contradiction and is a HARD error at load — fix it before the run scores.
+#
+# Examples (commented out):
+# an_account_i_keep_meaning_to_drop
+# brand_i_stopped_caring_about

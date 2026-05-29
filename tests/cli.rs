@@ -162,7 +162,7 @@ fn check_subcommand_accepts_a_zip_archive() {
 #[test]
 fn init_subcommand_writes_template_files() {
     // Spawn from an empty temp dir so the cwd-relative `config/`
-    // doesn't exist; init must create it and lay down the two
+    // doesn't exist; init must create it and lay down the three
     // template files.
     let cwd = std::env::temp_dir().join(format!("ig-mgr-init-{}", std::process::id()));
     std::fs::create_dir_all(&cwd).expect("mktemp");
@@ -173,18 +173,21 @@ fn init_subcommand_writes_template_files() {
         .assert()
         .success()
         .stdout(contains("wrote: config/keep_allowlist.txt"))
+        .stdout(contains("wrote: config/drop_list.txt"))
         .stdout(contains("wrote: config/labels.txt"));
 
     assert!(cwd.join("config/keep_allowlist.txt").is_file());
+    assert!(cwd.join("config/drop_list.txt").is_file());
     assert!(cwd.join("config/labels.txt").is_file());
 
-    // Re-running without --force skips both files.
+    // Re-running without --force skips all files.
     let mut cmd2 = Command::cargo_bin("ig-mgr").expect("binary");
     cmd2.current_dir(&cwd)
         .arg("init")
         .assert()
         .success()
         .stdout(contains("skipped: config/keep_allowlist.txt"))
+        .stdout(contains("skipped: config/drop_list.txt"))
         .stdout(contains("skipped: config/labels.txt"));
 
     std::fs::remove_dir_all(&cwd).ok();
@@ -598,5 +601,81 @@ fn writes_csv_and_markdown_at_out_path() {
     assert!(
         md.contains("Carol Synth"),
         "expected resolved display_name in Markdown body, got:\n{md}",
+    );
+}
+
+/// Spawn `ig-mgr` in a fresh temp cwd seeded with the given `config/`
+/// files. Mirrors [`ig_mgr`]'s cwd-isolation posture but lets a test
+/// inject per-user handle lists the binary loads cwd-relative. Returns
+/// `(Command, cwd)`; the caller removes `cwd` when done.
+fn ig_mgr_with_config(test_name: &str, files: &[(&str, &str)]) -> (Command, PathBuf) {
+    let cwd = std::env::temp_dir().join(format!("ig-mgr-cfg-{test_name}-{}", std::process::id()));
+    std::fs::create_dir_all(cwd.join("config")).expect("mk config dir");
+    for (rel, body) in files {
+        std::fs::write(cwd.join(rel), body).expect("write config file");
+    }
+    let mut cmd = Command::cargo_bin("ig-mgr").expect("binary `ig-mgr` should build");
+    cmd.current_dir(&cwd);
+    (cmd, cwd)
+}
+
+#[test]
+fn both_listed_handle_aborts_the_run() {
+    // Acceptance criterion 4: a handle in BOTH keep_allowlist.txt and
+    // drop_list.txt is a contradiction. `run` must fail loudly before
+    // scoring, naming the handle and both files. Pins that the run
+    // actually wires `ensure_disjoint` in — the unit test only covers
+    // the helper in isolation.
+    let (mut cmd, cwd) = ig_mgr_with_config(
+        "conflict",
+        &[
+            ("config/keep_allowlist.txt", "dup_handle\n"),
+            ("config/drop_list.txt", "dup_handle\n"),
+        ],
+    );
+    let result = cmd.arg(sample_export()).assert().failure();
+    let stderr = String::from_utf8_lossy(&result.get_output().stderr).into_owned();
+    std::fs::remove_dir_all(&cwd).ok();
+    assert!(
+        stderr.contains("dup_handle"),
+        "must name the handle:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("config/keep_allowlist.txt"),
+        "must name the keep-allowlist file:\n{stderr}",
+    );
+    assert!(
+        stderr.contains("config/drop_list.txt"),
+        "must name the drop-list file:\n{stderr}",
+    );
+}
+
+#[test]
+fn drop_list_forces_a_followee_to_unfollow() {
+    // End-to-end wire-through for the drop-list: `bob_synth` is a Keep
+    // account in the fixture (no drop signal on its own). A drop_list.txt
+    // entry must flip it to Unfollow in the CSV. Protects the run-level
+    // chain (load_drop_list -> Classifier -> aggregate -> assign_bucket)
+    // whose endpoints sit in the mutation-skip-listed `run` orchestration.
+    let stem = out_stem("drop_list_wire");
+    let csv_path = stem.with_extension("csv");
+    let _ = std::fs::remove_file(&csv_path);
+
+    let (mut cmd, cwd) = ig_mgr_with_config("droplist", &[("config/drop_list.txt", "bob_synth\n")]);
+    cmd.arg(sample_export())
+        .arg("--out")
+        .arg(&stem)
+        .assert()
+        .success();
+
+    let csv = std::fs::read_to_string(&csv_path).expect("CSV should exist");
+    std::fs::remove_dir_all(&cwd).ok();
+    let bob_row = csv
+        .lines()
+        .find(|l| l.starts_with("bob_synth,"))
+        .expect("bob_synth row");
+    assert!(
+        bob_row.contains(",unfollow,"),
+        "drop-listed bob_synth must bucket Unfollow: {bob_row}",
     );
 }

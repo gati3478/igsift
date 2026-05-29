@@ -127,6 +127,14 @@ pub struct AccountFeatures {
     /// the user has allowlisted stays `account_class == Personal` so the
     /// column doesn't misrepresent their profile.
     pub is_keep_allowlisted: bool,
+    /// Handle is in `config/drop_list.txt` — user-maintained always-
+    /// unfollow override, the exact inverse of `is_keep_allowlisted`.
+    /// Forces [`crate::scoring::assign_bucket`] to Unfollow regardless of
+    /// score or keep-signals (the one exception: `is_restricted` still
+    /// floors at Review). Cannot co-occur with `is_keep_allowlisted` —
+    /// [`crate::allowlist::ensure_disjoint`] rejects a both-listed handle
+    /// at load. Like the allowlist, NOT classification.
+    pub is_drop_listed: bool,
 
     pub likes_given: u32,
     pub comments_given: u32,
@@ -265,6 +273,7 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
             recently_unfollowed: false,
             is_mutual: follower_handles.contains(handle),
             is_keep_allowlisted: inputs.classifier.is_allowlisted(handle),
+            is_drop_listed: inputs.classifier.is_drop_listed(handle),
             likes_given: 0,
             comments_given: 0,
             story_interactions_out: 0,
@@ -726,7 +735,7 @@ mod tests {
     /// that only exercise the existing flag/activity paths use this; tests
     /// that exercise allowlist behaviour build their own.
     fn synth_classifier() -> Classifier {
-        Classifier::new(HashSet::new())
+        Classifier::new(HashSet::new(), HashSet::new())
     }
 
     fn synth_decay() -> DecayConfig {
@@ -1568,7 +1577,7 @@ mod tests {
         // BOTH, but classification stays honest.
         let mut allowlist = HashSet::new();
         allowlist.insert("alice".to_owned());
-        let classifier = Classifier::new(allowlist);
+        let classifier = Classifier::new(allowlist, HashSet::new());
 
         let followings = vec![following("alice", None), following("bob", None)];
         let hide = empty_hide_entry();
@@ -1581,6 +1590,34 @@ mod tests {
         assert!(by["alice"].is_keep_allowlisted);
         assert_eq!(by["alice"].account_class, AccountClass::Personal);
         assert!(!by["bob"].is_keep_allowlisted);
+    }
+
+    #[test]
+    fn classifier_stamps_drop_listed_and_ignores_non_followees() {
+        // Mirror of the allowlist case for the inverse signal. A drop-listed
+        // followee surfaces `is_drop_listed = true`; a non-followee handle
+        // in the drop-list creates no output row (acceptance criterion 8).
+        let mut drop = HashSet::new();
+        drop.insert("alice".to_owned());
+        drop.insert("ghost_not_followed".to_owned());
+        let classifier = Classifier::new(HashSet::new(), drop);
+
+        let followings = vec![following("alice", None), following("bob", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let decay = synth_decay();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+
+        let out = aggregate(&inputs, fixed_now());
+        let by = by_username(out);
+        assert!(by["alice"].is_drop_listed);
+        assert_eq!(by["alice"].account_class, AccountClass::Personal);
+        assert!(!by["bob"].is_drop_listed);
+        assert!(
+            !by.contains_key("ghost_not_followed"),
+            "a drop-list handle that isn't a followee must not anchor a row",
+        );
     }
 
     // ── decay-weighted + windowed accumulation ────────────────────────────

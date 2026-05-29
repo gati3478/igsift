@@ -24,7 +24,8 @@ binary accepts a directory or a `.zip` (single or multipart, transparently
 extracted and cached), runs a progress-bar pipeline through parser →
 feature aggregation (raw + decay-weighted + 90d/180d windowed counts +
 mutual-follower flag) → scoring (`keep_prob` + `keep`/`review`/`unfollow`
-bucket gated by brand/allowlist/restricted floor) → three writers (CSV,
+bucket gated by the restricted floor, the brand/keep-allowlist gates, and
+the drop-list force-Unfollow override) → three writers (CSV,
 decision-oriented Markdown with per-bucket cards, self-contained HTML with
 sortable+filterable tables). Three subcommands (`run`, `init`, `check`),
 three shipped scoring presets (`balanced`/`engagement`/`tenure`), and an
@@ -69,7 +70,7 @@ parts that IG ships for large exports. Archives extract to
 ig-mgr <input>                       # implicit Run (legacy form)
 ig-mgr run <input>                   # explicit form of the above
 ig-mgr check <input>                 # parser-only dry-run, per-source ✓ / ✗
-ig-mgr init [--force]                # scaffold config/keep_allowlist.txt + labels.txt
+ig-mgr init [--force]                # scaffold config/{keep_allowlist,drop_list}.txt + labels.txt
 ```
 
 `check` runs the same parser stack as `run` without aggregation /
@@ -115,10 +116,16 @@ ig-mgr ./instagram-export-folder --preset tenure
 
 Iterate from here by:
 
-1. `ig-mgr init` to scaffold `config/keep_allowlist.txt` and
-   `config/labels.txt`.
+1. `ig-mgr init` to scaffold `config/keep_allowlist.txt`,
+   `config/drop_list.txt`, and `config/labels.txt`.
 2. Append accounts you want to **never** unfollow to
-   `config/keep_allowlist.txt`.
+   `config/keep_allowlist.txt`; append accounts you want **always**
+   forced into Unfollow to `config/drop_list.txt` (the exact inverse —
+   it overrides the score and every keep-signal). A handle on both
+   lists is a contradiction and errors loudly at load. The drop-list is
+   the escape hatch for accounts the score can't separate (a story-heavy
+   follow you've decided to drop, say); a `restricted` account still
+   stays in Review even if drop-listed.
 3. Hand-label 20–30 followees in `config/labels.txt` (format in the
    template). The binary prints a confusion-matrix report against
    your labels at the end of every run.

@@ -177,30 +177,31 @@ one decision per account.
 
 ### Per-account features
 
-| Feature                  | Source                                              | Direction / handling                                           | Weight (initial)                        |
-| ------------------------ | --------------------------------------------------- | -------------------------------------------------------------- | --------------------------------------- |
-| `dm_messages_total`      | inbox `<thread>` messages                           | outbound + inbound, log-scaled                                 | high                                    |
-| `dm_recency_days`        | last `timestamp_ms` in thread                       | recency enters via decayed counts; field surfaces in CSV only  | (no separate weight)                    |
-| `dm_balance`             | outbound / (outbound + inbound) message count       | penalize one-sided threads                                     | medium                                  |
-| `dm_reactions_given`     | `reactions[?actor == me]`                           | log-scaled, recency-weighted                                   | medium                                  |
-| `dm_reactions_received`  | `reactions[?actor != me]` — **inbound** reciprocity | log-scaled, recency-weighted                                   | medium-high                             |
-| `dm_reaction_balance`    | given / (given + received)                          | penalize one-sided reactions                                   | low-medium                              |
-| `inbound_dm_request`     | thread present in `message_requests/`               | boolean                                                        | low keep-bias                           |
-| `likes_given`            | `liked_posts` + `liked_comments`                    | log-scaled, recency-weighted                                   | medium                                  |
-| `comments_given`         | `post_comments_*` + `reels_comments` + `hype`       | log-scaled, recency-weighted                                   | medium                                  |
-| `story_interactions_out` | all `story_interactions/*` aggregated               | log-scaled, recency-weighted                                   | medium                                  |
-| `stories_viewed`         | `stories_viewed.json`                               | log-scaled, recency-weighted                                   | low                                     |
-| `saved_their_content`    | `saved_posts.json`                                  | log-scaled                                                     | low                                     |
-| `follow_tenure_days`     | `following.json` per-account `timestamp`            | `log(days_since_follow + 1)`                                   | low                                     |
-| `is_close_friend`        | `close_friends.json`                                | boolean                                                        | hard boost                              |
-| `is_favorited`           | `profiles_you've_favorited.json`                    | boolean                                                        | hard boost (separate from close_friend) |
-| `is_blocked`             | `blocked_profiles.json`                             | boolean                                                        | **excludes from input set**             |
-| `is_restricted`          | `restricted_profiles.json`                          | boolean                                                        | floor bucket to `review`                |
-| `is_hide_story_from`     | `hide_story_from.json`                              | boolean                                                        | weak negative                           |
-| `is_removed_suggestion`  | `removed_suggestions.json`                          | boolean                                                        | very weak negative                      |
-| `recently_unfollowed`    | `recently_unfollowed_profiles.json`                 | boolean                                                        | **excludes from input set**             |
-| `account_class`          | username/name heuristic (below)                     | personal / brand (PublicFigure deferred — see heuristic below) | gates the `unfollow` recommendation     |
-| `is_keep_allowlisted`    | `config/keep_allowlist.txt`                         | boolean                                                        | parallel Unfollow→Review override       |
+| Feature                  | Source                                              | Direction / handling                                           | Weight (initial)                          |
+| ------------------------ | --------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------- |
+| `dm_messages_total`      | inbox `<thread>` messages                           | outbound + inbound, log-scaled                                 | high                                      |
+| `dm_recency_days`        | last `timestamp_ms` in thread                       | recency enters via decayed counts; field surfaces in CSV only  | (no separate weight)                      |
+| `dm_balance`             | outbound / (outbound + inbound) message count       | penalize one-sided threads                                     | medium                                    |
+| `dm_reactions_given`     | `reactions[?actor == me]`                           | log-scaled, recency-weighted                                   | medium                                    |
+| `dm_reactions_received`  | `reactions[?actor != me]` — **inbound** reciprocity | log-scaled, recency-weighted                                   | medium-high                               |
+| `dm_reaction_balance`    | given / (given + received)                          | penalize one-sided reactions                                   | low-medium                                |
+| `inbound_dm_request`     | thread present in `message_requests/`               | boolean                                                        | low keep-bias                             |
+| `likes_given`            | `liked_posts` + `liked_comments`                    | log-scaled, recency-weighted                                   | medium                                    |
+| `comments_given`         | `post_comments_*` + `reels_comments` + `hype`       | log-scaled, recency-weighted                                   | medium                                    |
+| `story_interactions_out` | all `story_interactions/*` aggregated               | log-scaled, recency-weighted                                   | medium                                    |
+| `stories_viewed`         | `stories_viewed.json`                               | log-scaled, recency-weighted                                   | low                                       |
+| `saved_their_content`    | `saved_posts.json`                                  | log-scaled                                                     | low                                       |
+| `follow_tenure_days`     | `following.json` per-account `timestamp`            | `log(days_since_follow + 1)`                                   | low                                       |
+| `is_close_friend`        | `close_friends.json`                                | boolean                                                        | hard boost                                |
+| `is_favorited`           | `profiles_you've_favorited.json`                    | boolean                                                        | hard boost (separate from close_friend)   |
+| `is_blocked`             | `blocked_profiles.json`                             | boolean                                                        | **excludes from input set**               |
+| `is_restricted`          | `restricted_profiles.json`                          | boolean                                                        | floor bucket to `review`                  |
+| `is_hide_story_from`     | `hide_story_from.json`                              | boolean                                                        | weak negative                             |
+| `is_removed_suggestion`  | `removed_suggestions.json`                          | boolean                                                        | very weak negative                        |
+| `recently_unfollowed`    | `recently_unfollowed_profiles.json`                 | boolean                                                        | **excludes from input set**               |
+| `account_class`          | username/name heuristic (below)                     | personal / brand (PublicFigure deferred — see heuristic below) | gates the `unfollow` recommendation       |
+| `is_keep_allowlisted`    | `config/keep_allowlist.txt`                         | boolean                                                        | parallel Unfollow→Review override         |
+| `is_drop_listed`         | `config/drop_list.txt`                              | boolean                                                        | forces → Unfollow (below `is_restricted`) |
 
 **Decay.** Every interaction count is recency-weighted with exponential decay
 so a 2019 like is worth far less than a 2026 like. τ is configurable; start
@@ -252,6 +253,18 @@ threaded into the aggregator via `AggregateInputs`.
   `is_close_friend` / `is_favorited`. Scoring's `assign_bucket` folds both
   signals into the Unfollow gate: `account_class != Personal ||
 is_keep_allowlisted` downgrades to Review.
+- **Drop-list override.** [`config/drop_list.txt`](../config/drop_list.txt)
+  is the exact inverse of the keep-allowlist: a user-maintained list of
+  handles forced to `unfollow` regardless of score or keep-signals. It
+  exists because keep/drop intent is not separable on the current features
+  (see [`TUNING.md`](TUNING.md) round 5) — the keep-allowlist handles the
+  low-engagement-keep failure mode, the drop-list handles the story-heavy
+  drop that scores into `keep`. Like the allowlist it is **NOT**
+  classification (a drop-listed handle keeps its real `account_class`). It
+  surfaces as `is_drop_listed: bool` on `AccountFeatures`; `assign_bucket`
+  applies it as the rung directly below the `is_restricted` floor (the one
+  signal it yields to). A handle on both lists is rejected at load
+  (`allowlist::ensure_disjoint`).
 - **Honest uncertainty.** Follower count cannot be inferred from the export,
   so the heuristic is limited to name patterns + allowlist. The text-only
   surface is inherently lossy. **If uncertain, never auto-suggest unfollow —
@@ -324,10 +337,35 @@ line of code and one line of config.
   `is_close_friend`/`is_favorited`/`is_restricted`) — confident recommendation.
 
 `is_blocked` and `recently_unfollowed` filter the input set **entirely** — they
-never appear in output. `is_restricted` floors the bucket at `review`, even if
-`keep_prob` is below `unfollow_max`. Public figures / brands with low
-`keep_prob` get `review`, never `unfollow` — that decision criterion ("do I
-still care about their content?") is different and out of scope for v1.
+never appear in output. Public figures / brands with low `keep_prob` get
+`review`, never `unfollow` — that decision criterion ("do I still care about
+their content?") is different and out of scope for v1.
+
+#### Bucket precedence (top wins)
+
+`assign_bucket` resolves overrides in a fixed order. Two user-maintained
+lists bracket the inferred score:
+
+```
+1. is_restricted       → Review     hard floor; the manual "look first" signal
+2. is_drop_listed      → Unfollow   config/drop_list.txt — forces drop
+3. keep_prob ≥ keep_min → Keep
+4. keep_prob < unfollow_max:
+     is_close_friend | is_favorited | is_keep_allowlisted | non-Personal → Review
+     else → Unfollow
+5. otherwise           → Review
+```
+
+`is_restricted` floors at `review` even when `keep_prob` is below
+`unfollow_max` — and it is the **one** floor the drop-list yields to
+("restricted" means human attention is required before any drop call, which
+outranks a standing drop intent). The **drop-list**
+([`config/drop_list.txt`](../config/drop_list.txt)) is the exact inverse of
+the keep-allowlist: a listed handle is forced to `unfollow` regardless of
+score, close-friend/favorited boosts, or brand class. A handle present in
+**both** lists is a contradiction and is rejected at load
+(`allowlist::ensure_disjoint`) before scoring, so rung 2 never competes with
+rung 4's keep-allowlist gate by construction.
 
 ## Output
 
