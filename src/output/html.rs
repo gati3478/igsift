@@ -222,7 +222,8 @@ fn write_row(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
     writeln!(writer, "<tr>").context("html")?;
     writeln!(
         writer,
-        "<td class=\"handle\"><a href=\"{url}\" target=\"_blank\" rel=\"noopener noreferrer\">@{}</a></td>",
+        "<td class=\"handle\"><a href=\"{}\" target=\"_blank\" rel=\"noopener noreferrer\">@{}</a></td>",
+        escape(&url),
         escape(handle)
     )
     .context("html")?;
@@ -538,6 +539,26 @@ mod tests {
         assert!(
             html.contains("Sarah &quot;Q&quot; Connor"),
             "double quote must be escaped to &quot;: {html}",
+        );
+    }
+
+    #[test]
+    fn escapes_special_characters_in_handle_href() {
+        // The handle flows into the `href` attribute via `profile_url`. The
+        // displayed `@handle` text is escaped, but the URL in the attribute
+        // must be too — a handle carrying `"` (schema drift / a corrupted
+        // export; IG's own charset never emits it) would otherwise break out
+        // of the attribute. Pin the attribute-context escape on the handle
+        // side, mirroring the display-name guard.
+        let s = baseline("a\"b", Bucket::Keep, 0.9);
+        let html = render(&[s]);
+        assert!(
+            html.contains("https://www.instagram.com/a&quot;b/"),
+            "handle in href must be escaped: {html}",
+        );
+        assert!(
+            !html.contains("/a\"b/"),
+            "raw double-quote must not reach the href attribute: {html}",
         );
     }
 
