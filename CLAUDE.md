@@ -26,15 +26,26 @@ input ──▶ archive::resolve  (dir / .zip / multipart .zip → extracted dir
 `run` (score + write audit), `init` (scaffold per-user config files from
 embedded templates), `check` (parser-only dry-run with per-source pass/fail).
 
-**Current bucket split on the real export:** `485 / 154 / 10`
-(keep / review / unfollow) at `28.6%` labeled-set agreement, 0 hard mismatches.
-**STALE as of the `story_likes` wiring fix:** these numbers were measured
-before `story_likes.json` (~28k events on the real export) was folded into
-`story_interactions_out`. They no longer reflect current output — re-run on
-the real export and re-tune the weights against the labels, then refresh
-this line. Scoring weights are tuned-on-Gati's-labels and live in `config/scoring.toml`;
-three unbiased presets (`balanced` / `engagement` / `tenure`) ship embedded
-via `--preset`. `balanced` mirrors the committed `scoring.toml` and is the
+**Current bucket split on the real export:** `510 / 130 / 9`
+(keep / review / unfollow) at `28.6%` labeled-set agreement (8/28 matched
+labels), 1 hard mismatch. Measured 2026-05-29 with `story_out = 0.5`
+(halved after `story_likes.json`, ~28k events, folded into
+`story_interactions_out` and ~doubled its volume).
+
+**Agreement is feature-ceilinged (~30–36%), not a tuning bug.** The labeled
+set shows keep/drop intent is largely _non-separable_ on the current
+features: DM is the only clean keep signal (every DM-dominated label is
+keep), while `story_out` is a coin flip (it dominates an equal mix of
+keep- and drop-labeled accounts) and ~12 keep-labels are low-engagement
+brand/local follows that only `tenure` carries — raising them would also
+raise drop-intent old follows. The remaining hard mismatch is a
+story-heavy drop indistinguishable from story-heavy keeps. The real fix
+is a **drop-list** (mirror of `keep_allowlist`, a v2 feature), not more
+weight-tuning, which here trades keep-recall for drop-precision ~1:1. See
+[`docs/TUNING.md`](docs/TUNING.md). Scoring weights live in
+`config/scoring.toml`; three presets (`balanced` / `engagement` /
+`tenure`) ship embedded via `--preset`. `balanced` mirrors the committed
+`scoring.toml` (both carry the `story_out = 0.5` correction) and is the
 compiled-in fallback when no flag and no cwd file resolve.
 
 ## Tech stack

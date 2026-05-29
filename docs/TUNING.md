@@ -10,6 +10,74 @@ The methodology choice for this pass was the **hybrid** in DESIGN.md's
 with `config/labels.txt` (when laid down) serving as a held-out accuracy
 floor. The labels file is not committed — it's a per-user artifact.
 
+## 2026-05-29 — halve `story_out` (round 5, weights)
+
+First round run _after_ `story_likes.json` (~28k events) was folded into
+`story_interactions_out`, against the 42-entry `config/labels.txt`
+(28 matched the followings set; 14 were since-blocked/unfollowed).
+
+### Verdict
+
+`story_out` 1.0 → 0.5. Bucket split `510 / 130 / 9` (keep / review /
+unfollow) on 649 followings; agreement `8/28` (28.6%); **hard mismatches
+2 → 1**. Mirrored into `config/presets/balanced.toml` — the justification
+is general, not user-specific.
+
+### Before / after
+
+```
+story_out = 1.0:  525 / 115 / 9   agreement 10/28 (35.7%)   2 hard mismatches
+story_out = 0.5:  510 / 130 / 9   agreement  8/28 (28.6%)   1 hard mismatch
+```
+
+Both hard mismatches at baseline were `label=drop`, `story_out`-dominated
+accounts at `keep_prob` ≈ 0.84 and 0.92 — story-heavy follows the user
+wants gone, inflated into `keep`.
+
+### Why halve it (two independent reasons)
+
+1. **Volume de-duplication.** Folding `story_likes` roughly doubled the
+   events feeding `story_interactions_out`; leaving the weight at 1.0
+   double-counts the signal. This argument is export-independent, which
+   is why it goes into `balanced` too.
+2. **It doesn't discriminate.** Among story-dominated labels the split is
+   ~2 keep vs ~2 drop — a coin flip for intent. A non-discriminating
+   signal shouldn't be a strong driver.
+
+### Why agreement _fell_ yet this is correct
+
+The two keep-agreements lost (a brand magazine page and a personal
+story-heavy follow, both `keep`-labeled) were held in `keep` _only_ by
+the inflated `story_out` term — coincidence, not signal. The 35.7%
+leaned on that; 28.6% is the more honest floor.
+
+### Ceiling finding — why we stopped tuning weights
+
+Tuning is **near zero-sum** here (keep-recall vs drop-precision ~1:1)
+because intent is not separable on the current features:
+
+- **DM is the only clean signal** — every DM-dominated label is `keep`,
+  no drop is DM-dominated. Already weighted highest (3.0).
+- **`story_out` and `likes` are noisy** (mixed keep/drop among the labels
+  each dominates).
+- **~12 keep-labels are low-engagement** brand / local-business / sparse
+  personal follows carried only by `tenure`. No global weight lifts them
+  into `keep` without also lifting drop-intent _old_ follows (a
+  `label=drop` personal account already sits at `keep_prob` ≈ 0.30,
+  tenure-dominated — raising tenure promotes it too).
+
+Pushing `story_out` to ≈0.3 to chase 0 hard mismatches was rejected: it
+overfits one account and drops more story-keepers into Review.
+
+### Open follow-up — the real fix is a feature, not a weight
+
+The remaining hard mismatch and the low-engagement-keep misses both want
+a **drop-list**: a user-maintained `config/drop_list.txt` mirroring
+`keep_allowlist.txt`, gating `keep → review` (never auto-keep a
+hand-flagged drop). With the existing keep-allowlist for the
+low-engagement keeps, that covers what global weights structurally
+cannot. Candidate v2 (see ROADMAP). Decay constants still unrevisited.
+
 ## 2026-05-27 — brand-lexicon expansion (round 4, structural)
 
 Not a TOML edit — a code change to `BRAND_LEXICON` in

@@ -19,7 +19,8 @@
 dm = 3.0
 likes = 1.0
 comments = 1.5
-story_out = 1.0
+story_out = 0.5   # de-duplicated after story_likes.json folded ~28k events
+                  # into this signal; weight halved so volume doesn't double-count
 stories_viewed = 0.2
 saved = 0.5
 reactions_given = 1.0

@@ -19,7 +19,11 @@
 dm = 3.0                          # DM volume (log-scaled, recency-weighted)
 likes = 1.0                       # likes I gave on their posts/comments
 comments = 1.5                    # comments I left on their posts/reels/stories
-story_out = 1.0                   # story interactions I sent (polls, quizzes, etc.)
+story_out = 0.5                   # story interactions I sent (polls, quizzes, likes, etc.)
+                                  # Halved from 1.0 after story_likes.json (~28k events)
+                                  # folded into this signal: the volume ~doubled, so the
+                                  # weight compensates. Was inflating drop-intent
+                                  # story-heavy accounts into `keep` (hard mismatches).
 stories_viewed = 0.2              # passive — I watched their story (low intent)
 saved = 0.5                       # saves of their posts
 reactions_given = 1.0             # DM reactions I sent on their messages
