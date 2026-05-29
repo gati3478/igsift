@@ -1640,23 +1640,28 @@ mod tests {
 
         let alice = &by_username(aggregate(&inputs, now))["alice"];
 
-        // Decayed sums must be strictly positive — a `+=`→`-=`/`*=` mutation
-        // (or a dropped timestamp lift) collapses them to ≤ 0.
-        assert!(alice.likes_given_decayed > 0.0, "likes decayed");
-        assert!(alice.comments_given_decayed > 0.0, "comments decayed");
-        assert!(
-            alice.story_interactions_out_decayed > 0.0,
-            "story_out decayed (shape-A polls + shape-C story_likes)",
-        );
-        assert!(alice.stories_viewed_decayed > 0.0, "stories_viewed decayed");
-        assert!(alice.saved_their_content_decayed > 0.0, "saved decayed");
-        // A 10-day-old signal decays only slightly under τ=365d, so the
-        // weight stays above 0.9 — pins the sign of the exponent too.
-        assert!(
-            alice.likes_given_decayed > 0.9,
-            "10d-old like under τ=365 must retain most weight: {}",
+        // Exact decayed values, not just `> 0`: each accumulator fed by two
+        // sources (likes = posts + comments; story_out = polls + story_likes)
+        // would mask a `+=`→`*=` mutation on ONE source behind the other's
+        // contribution under a loose `> 0` check. `w` is the weight of a
+        // single 10-day-old signal under τ_content = 365d.
+        let w = (-10.0_f64 / 365.0).exp();
+        let approx = |got: f64, want: f64, label: &str| {
+            assert!((got - want).abs() < 1e-9, "{label}: got {got}, want {want}");
+        };
+        approx(
             alice.likes_given_decayed,
+            2.0 * w,
+            "likes decayed (post + comment)",
         );
+        approx(alice.comments_given_decayed, w, "comments decayed");
+        approx(
+            alice.story_interactions_out_decayed,
+            2.0 * w,
+            "story_out decayed (shape-A poll + shape-C story_like)",
+        );
+        approx(alice.stories_viewed_decayed, w, "stories_viewed decayed");
+        approx(alice.saved_their_content_decayed, w, "saved decayed");
 
         // Windowed counts: likes = post(1) + comment(1) = 2; comments = 1.
         assert_eq!(alice.likes_given_90d, 2, "likes_given_90d");

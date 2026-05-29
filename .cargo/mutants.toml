@@ -21,6 +21,7 @@ exclude_re = [
     " in run$",    # `run` orchestration: verbose (-v) smoke-count lines
     "print_keep_prob_histogram",
     "print_trace",
+    "replace report with", # labels report() no-op: stdout formatting only
     " in report$", # labels report() is now pure formatting; the matrix +
                    # agreement arithmetic moved to compute() and IS tested.
 
