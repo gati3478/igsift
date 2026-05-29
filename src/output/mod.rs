@@ -57,10 +57,16 @@ use crate::scoring::{Bucket, ScoredAccount};
 /// any single-arm test — the table-driven test in this module
 /// pins the precedence chain end to end.
 pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str {
-    // Most decisive signal: the user explicitly forced Unfollow. Can't
-    // co-occur with the allowlist (rejected at load by ensure_disjoint),
-    // so its placement above it is safe.
-    if f.is_drop_listed {
+    // Most decisive signal: the user explicitly forced Unfollow — but the
+    // drop-list yields to the restricted floor, so guard on `!is_restricted`
+    // to stay consistent with `assign_bucket` (restricted → Review beats
+    // drop → Unfollow). Without the guard, a restricted + drop-listed
+    // account would sit in Review yet report "explicit drop-list",
+    // contradicting its own bucket. Placement above the keep-signals is
+    // intentional and safe: it can't co-occur with the allowlist (rejected
+    // at load by ensure_disjoint), and a drop-listed close-friend/favorited
+    // correctly buckets Unfollow, so the drop hint is the honest one there.
+    if f.is_drop_listed && !f.is_restricted {
         return "explicit drop-list";
     }
     if f.is_keep_allowlisted {
@@ -225,6 +231,34 @@ mod tests {
                 mutate: |f| {
                     f.is_drop_listed = true;
                     f.is_keep_allowlisted = true;
+                },
+                bucket: Bucket::Unfollow,
+            },
+            Case {
+                // The drop-list yields to the restricted floor, exactly as
+                // `assign_bucket` does (restricted → Review beats drop →
+                // Unfollow). The hint must mirror that: a restricted +
+                // drop-listed account sits in Review, so reporting
+                // "explicit drop-list" would contradict its own bucket.
+                // This `!is_restricted` guard is the one place the two
+                // precedence chains must agree; pin it.
+                label: "restricted beats drop-list in the hint",
+                expected: "restricted — kept in Review by floor",
+                mutate: |f| {
+                    f.is_drop_listed = true;
+                    f.is_restricted = true;
+                },
+                bucket: Bucket::Review,
+            },
+            Case {
+                // Drop-list alone (no other flag) → its own hint. Pins that
+                // the arm fires without being coupled to any other signal,
+                // and keeps the compound `is_drop_listed && !is_restricted`
+                // condition's mutations caught.
+                label: "drop-list alone",
+                expected: "explicit drop-list",
+                mutate: |f| {
+                    f.is_drop_listed = true;
                 },
                 bucket: Bucket::Unfollow,
             },

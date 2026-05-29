@@ -198,6 +198,18 @@ mod tests {
     }
 
     #[test]
+    fn disjointness_compares_case_folded_when_built_via_parse() {
+        // The contract: `ensure_disjoint` assumes pre-lowercased input and
+        // both production sets come through `parse` (which lowercases on
+        // insert). Pin that end to end — `Alice` in one file and `alice`
+        // in the other IS a conflict, even though the raw casing differs.
+        let keep = parse("Alice\n", "keep").expect("keep parses");
+        let drop = parse("alice\n", "drop").expect("drop parses");
+        let err = ensure_disjoint(&keep, &drop).expect_err("case-differing dup must conflict");
+        assert!(err.to_string().contains("alice"), "{err}");
+    }
+
+    #[test]
     fn multiple_overlaps_are_all_named() {
         // All conflicting handles surface in one error, sorted for a
         // deterministic message — not just the first one found.

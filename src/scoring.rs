@@ -282,7 +282,9 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
     // unfollow override — the inverse of the keep-allowlist. It beats
     // `keep_min` and every keep-gate below; only the restricted floor
     // above outranks it. A both-listed handle can't reach here:
-    // `allowlist::ensure_disjoint` rejects it at load.
+    // `allowlist::ensure_disjoint` rejects it at load. The presentation
+    // mirror of this ordering lives in `output::decision_hint` (its
+    // drop-list rule is guarded on `!is_restricted`); keep the two in sync.
     if f.is_drop_listed {
         return Bucket::Unfollow;
     }

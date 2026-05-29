@@ -674,8 +674,12 @@ fn drop_list_forces_a_followee_to_unfollow() {
         .lines()
         .find(|l| l.starts_with("bob_synth,"))
         .expect("bob_synth row");
-    assert!(
-        bob_row.contains(",unfollow,"),
+    // `bucket` is CSV column 4 (0-indexed 3): username,display_name,
+    // profile_url,bucket,... Assert the exact column, not a loose
+    // substring, so a stray "unfollow" elsewhere can't pass it.
+    assert_eq!(
+        bob_row.split(',').nth(3),
+        Some("unfollow"),
         "drop-listed bob_synth must bucket Unfollow: {bob_row}",
     );
 }
