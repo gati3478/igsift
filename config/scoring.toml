@@ -51,7 +51,7 @@ inbound_request = 0.5             # thread present in messages/message_requests/
 # ~37% of a fresh one; older interactions fade rather than count forever.
 [decay]
 tau_dm_days = 180
-tau_content_days = 365
+tau_content_days = 730   # 2-yr relevance horizon (round 8); mirrors deep_mutual_keep_days
 
 # Sigmoid mapping score_raw -> keep_probability, and the bucket cut-offs.
 [scoring]

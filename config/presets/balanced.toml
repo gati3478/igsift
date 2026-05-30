@@ -44,7 +44,7 @@ inbound_request = 0.5
 
 [decay]
 tau_dm_days = 180
-tau_content_days = 365
+tau_content_days = 730   # 2-yr relevance horizon (round 8); mirrors deep_mutual_keep_days
 
 [scoring]
 threshold = 1.5

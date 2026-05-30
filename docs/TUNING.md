@@ -10,6 +10,74 @@ The methodology choice for this pass was the **hybrid** in DESIGN.md's
 with `config/labels.txt` (when laid down) serving as a held-out accuracy
 floor. The labels file is not committed — it's a per-user artifact.
 
+## 2026-05-30 — decay sensitivity: `tau_content_days` 365 → 730 (round 8)
+
+First decay-constant edit (the τ defaults had been first-pass guesses since the
+first calibration pass). Motivated by a measurement gap: the audit CSV's
+**windowed** columns (`likes_90d`, `reactions_*_180d`) report `0` for every
+keep-labeled account stuck in `review`, which read as "feature-ceiling, keeplist
+territory". A `--trace` audit overturned that — **14 of the 15** stuck keeps carry
+real _decayed all-time_ `likes` / `story_out` (up to +0.58), invisible in the 90d
+window because the engagement is older than 90 days. The keep signal was present
+but **crushed by the content decay** (τ_content = 365 → a 1-year-old like worth
+`e^-1` = 0.37).
+
+The three round-1 "under-used signal" candidates were measured first and
+**rejected for zero separating power** on the 58-label set: `dm_recency_days` and
+the 90d/180d windowed counts are `0` for all 15 stuck keeps _and_ all 6 drops;
+`is_mutual` is **inverted** (33% of keeps vs 83% of drops — adding it as a positive
+weight would lift drops). The live lever was the _existing_ engagement terms that
+decay was suppressing, i.e. τ — not a new signal.
+
+### Sweep (real export, 649 accounts; τ_dm fixed at 180)
+
+```
+τ_content   keep / review / unfollow   agreement   hard MM
+365 (base)      552 / 54 / 43           42/58         0
+540             568 / 42 / 39           43/58         0
+730             573 / 40 / 36           45/58         1   ← engaged drop crosses
+1095            584 / 29 / 36           54/58         1
+```
+
+`tau_dm_days` is **inert**: 180 / 270 / 365 produce identical buckets — the
+DM-engaged accounts are already saturated in `keep`, so τ_dm moves nothing. Left
+at 180.
+
+### Why 730, not the agreement-maximizing 1095
+
+Agreement is **monotone** in `tau_content_days` (longer τ only raises decayed
+sums), so maximizing it pushes τ → ∞ and makes decay meaningless — not a tuning
+target. 730 is the principled value: a 2-year relevance horizon (a like from 18 months ago
+weighs 0.61 instead of 0.37), and it mirrors `deep_mutual_keep_days = 730` — one
+consistent "2-year relationship memory" across the config.
+1095 (a 3-year-old single like still at half weight) overstretches the decay and
+aggressively inflates `keep`, against the tool's surface-unfollows purpose.
+
+### Monotonic safety + the one false-keep
+
+Because lengthening τ only ever raises a score, `unfollow` can only **shrink** —
+**no τ value can manufacture a wrongful unfollow** (the expensive error). It can,
+though, lift the single _engaged_ drop-labeled account (mutual, content-consumed,
+`keep_prob` 0.544 → 0.716) into `keep` — the _cheap_ false-keep, and a textbook
+droplist case (round-7 pattern: a mutual you consume but want gone, invisible to
+signals). Added to `droplist.txt`, which restores hard = 0.
+
+### After (730 + droplist)
+
+```
+                 bucket=keep  bucket=review  bucket=unfollow
+  label=keep            40            12               0
+  label=drop             0             0               6
+agreement: 46/58 (79.3%)   hard mismatches: 0
+```
+
+Up from 42/58 (72.4%) at the round-7 anchor. The three newly-surfaced keeps are
+content/brand-shaped accounts whose older (>90d) likes the short decay had buried;
+all six drops now sit correctly in `unfollow`, and **no keep-labeled account
+reaches `unfollow` at any τ**. Propagated to all three presets
+(`balanced` / `engagement` / `tenure`) as well — the relevance-horizon argument is
+general, not user-specific.
+
 ## 2026-05-30 — labeling pass: reciprocity ceiling defaulted OFF (round 7)
 
 A fresh 58-account labeling pass (the prior `labels.txt` was a known-noisy
