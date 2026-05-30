@@ -1,10 +1,16 @@
 ## Lefthook — local CI mirror. Install once per clone: `lefthook install`.
 ##
 ## pre-commit is the fast gate (fmt only) so it never gets in the way.
-## pre-push runs the slow gates (clippy, tests, cargo-deny). Together with the
-## pre-commit fmt these cover every CI lane (CI's separate `build` step is
-## subsumed by `clippy --all-targets`, which compiles all targets), so broken
-## pushes fail locally instead of burning CI minutes.
+## pre-push runs the slow gates (clippy, tests, cargo-deny) — the same lanes CI
+## runs (CI's separate `build` step is subsumed by `clippy --all-targets`).
+##
+## lefthook file-scopes these: a command fires only when the push contains a
+## file matching its `glob`. The globs below cover code/manifests/fixtures, so a
+## code push runs the gates while a docs-only push skips them (nothing to check).
+## Edge cases where lefthook computes an empty file set (force-push of rewritten
+## history, brand-new branch) skip the gates entirely — so CI, which runs every
+## push/PR unconditionally, is the authoritative gate. For a guaranteed local
+## run regardless of the diff: `lefthook run pre-push --all-files`.
 
 pre-commit:
   parallel: true
@@ -18,10 +24,13 @@ pre-push:
   parallel: true
   commands:
     clippy:
+      glob: "*.{rs,toml,lock,json}"
       run: cargo clippy --all-targets -- -D warnings
     test:
+      glob: "*.{rs,toml,lock,json}"
       run: cargo nextest run
     deny:
+      glob: "*.{rs,toml,lock,json}"
       # Mirrors the `cargo-deny` CI job. Hard-fails (not skips) when the tool
       # is absent so "passed locally" can't diverge from CI. The presence
       # check is separate from the run so a real advisory failure surfaces
