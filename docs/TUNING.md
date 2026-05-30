@@ -29,7 +29,7 @@ the 90d/180d windowed counts are `0` for all 15 stuck keeps _and_ all 6 drops;
 weight would lift drops). The live lever was the _existing_ engagement terms that
 decay was suppressing, i.e. τ — not a new signal.
 
-### Sweep (real export, 649 accounts; τ_dm fixed at 180)
+### Sweep (real export, 649 accounts; τ_dm fixed at 180, committed `config/scoring.toml` — `unfollow_max = 0.43`)
 
 ```
 τ_content   keep / review / unfollow   agreement   hard MM
@@ -50,17 +50,20 @@ sums), so maximizing it pushes τ → ∞ and makes decay meaningless — not a 
 target. 730 is the principled value: a 2-year relevance horizon (a like from 18 months ago
 weighs 0.61 instead of 0.37), and it mirrors `deep_mutual_keep_days = 730` — one
 consistent "2-year relationship memory" across the config.
-1095 (a 3-year-old single like still at half weight) overstretches the decay and
-aggressively inflates `keep`, against the tool's surface-unfollows purpose.
+1095 (a 3-year-old single like still at half weight) overstretches the decay
+without surfacing more unfollows — the unfollow bucket is identical at 730 and
+1095 (36 either way). What it does is drain the `review` band into `keep`
+(40 → 29), eroding the human-triage middle the tool exists to populate.
 
 ### Monotonic safety + the one false-keep
 
 Because lengthening τ only ever raises a score, `unfollow` can only **shrink** —
 **no τ value can manufacture a wrongful unfollow** (the expensive error). It can,
-though, lift the single _engaged_ drop-labeled account (mutual, content-consumed,
-`keep_prob` 0.544 → 0.716) into `keep` — the _cheap_ false-keep, and a textbook
-droplist case (round-7 pattern: a mutual you consume but want gone, invisible to
-signals). Added to `droplist.txt`, which restores hard = 0.
+though, lift the single _engaged_ drop-labeled account this round's τ change
+itself pushes review → keep (mutual, content-consumed, `keep_prob` 0.544 → 0.716)
+— the _cheap_ false-keep, and a textbook droplist case (round-7 pattern: a mutual
+you consume but want gone, invisible to signals). Added to `droplist.txt`, which
+restores hard = 0.
 
 ### After (730 + droplist)
 
