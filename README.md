@@ -20,20 +20,59 @@ by hand.
 
 ## Quickstart
 
-1. **Get your data.** In Instagram, request a **Download Your Information**
-   export in **JSON** format and download the `.zip`(s) once they're ready.
-2. **Build the tool.** Needs a stable Rust toolchain.
-    ```bash
-    cargo build --release          # binary lands at target/release/igsift
-    ```
-3. **Run it** against the export — a folder, a single `.zip`, or the folder of
-   multipart `.zip` parts Instagram ships for large accounts:
-    ```bash
-    igsift ./instagram-export       # or, without installing: cargo run -- ./instagram-export
-    ```
-4. **Read the report.** Three files appear next to your input as
-   `following-audit_<date>.{csv,md,html}`. Open the **HTML** in a browser — a
-   sortable, filterable table — then do the unfollows by hand in Instagram.
+### 1. Get your data
+
+In Instagram, request a **Download Your Information** export in **JSON** format
+and download the `.zip`(s) once they're ready.
+
+### 2. Get `igsift`
+
+Pick whichever fits — a prebuilt binary if you just want to run it, or a build
+from source if you'd rather compile it yourself.
+
+**Option A — Download a release (fastest).** Grab the binary for your platform
+from the [**Releases**](https://github.com/gati3478/igsift/releases) page — it's
+`igsift` on macOS/Linux and `igsift.exe` on Windows — then clear the
+"downloaded from the internet" guard so the OS will run it:
+
+```bash
+# macOS / Linux
+chmod +x igsift                                   # mark it executable
+xattr -d com.apple.quarantine igsift 2>/dev/null || true   # macOS only
+```
+
+```powershell
+# Windows (PowerShell)
+Unblock-File .\igsift.exe                          # clear the SmartScreen block
+```
+
+**Option B — Build from source (any OS).** Needs a stable Rust toolchain —
+install it via [**rustup**](https://www.rust-lang.org/tools/install) (the official
+installer) if you don't have one:
+
+```bash
+cargo build --release    # binary lands at target/release/igsift (igsift.exe on Windows)
+```
+
+### 3. Run it
+
+Point it at the export — a folder, a single `.zip`, or the folder of multipart
+`.zip` parts Instagram ships for large accounts:
+
+```bash
+./igsift ./instagram-export                       # macOS / Linux downloaded binary
+cargo run -- ./instagram-export                   # from a source checkout (any OS)
+```
+
+```powershell
+.\igsift.exe .\instagram-export                    # Windows (PowerShell)
+```
+
+### 4. Read the report
+
+Three files appear next to your input as `following-audit_<date>.{csv,md,html}`.
+Open the **HTML** in a browser — a sortable, filterable table — then do the
+unfollows by hand in Instagram.
 
 No config files are required; `igsift` ships with sensible defaults.
 

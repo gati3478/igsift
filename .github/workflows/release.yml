@@ -1,0 +1,77 @@
+name: Release
+
+# Build cross-platform binaries and attach them to a GitHub Release.
+# Triggered by pushing a version tag (e.g. `v0.1.0`). Can also be run from the
+# Actions tab via "Run workflow" — pick the tag in the ref dropdown there, which
+# sets `github.ref` to that tag (no manual input needed).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# The job creates a Release and uploads assets, so it needs write access.
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  upload:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS — Apple Silicon only (no Intel/x86_64 build).
+          - target: aarch64-apple-darwin
+            os: macos-14
+
+          # Windows — x64 and ARM64. ARM64 cross-compiles on the x64 runner
+          # (build-only; its tests can't execute here, which is fine for a
+          # release artifact).
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+
+          # Linux — statically linked against musl so the binary has no glibc
+          # version dependency and runs on Fedora (and every other distro)
+          # regardless of the builder's libc. ARM64 cross-builds via `cross`,
+          # which the upload action invokes automatically for this target.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Builds `igsift` for the target, archives it (.tar.gz on unix, .zip on
+      # Windows) with README + LICENSE, writes a SHA-256 checksum file, and
+      # attaches all of it to the Release for the tag in github.ref.
+      - name: Build and upload
+        uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1.30.2
+        with:
+          bin: igsift
+          target: ${{ matrix.target }}
+          archive: $bin-$tag-$target
+          include: README.md,LICENSE
+          checksum: sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
