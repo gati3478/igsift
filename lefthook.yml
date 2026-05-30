@@ -1,8 +1,10 @@
 ## Lefthook — local CI mirror. Install once per clone: `lefthook install`.
 ##
 ## pre-commit is the fast gate (fmt only) so it never gets in the way.
-## pre-push runs the slow gates (clippy, tests) that CI would also run, so
-## broken pushes fail locally instead of burning CI minutes.
+## pre-push runs the slow gates (clippy, tests, cargo-deny). Together with the
+## pre-commit fmt these cover every CI lane (CI's separate `build` step is
+## subsumed by `clippy --all-targets`, which compiles all targets), so broken
+## pushes fail locally instead of burning CI minutes.
 
 pre-commit:
   parallel: true
@@ -19,3 +21,11 @@ pre-push:
       run: cargo clippy --all-targets -- -D warnings
     test:
       run: cargo nextest run
+    deny:
+      # Mirrors the `cargo-deny` CI job. Hard-fails (not skips) when the tool
+      # is absent so "passed locally" can't diverge from CI. The presence
+      # check is separate from the run so a real advisory failure surfaces
+      # cargo-deny's own error instead of a misleading "not installed".
+      run: |
+        command -v cargo-deny >/dev/null || { echo "cargo-deny not installed — run: cargo install --locked cargo-deny"; exit 1; }
+        cargo deny check advisories bans sources

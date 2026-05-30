@@ -1,5 +1,8 @@
 # Instagram Manager (`ig-mgr`)
 
+[![CI](https://github.com/gati3478/ig-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/gati3478/ig-manager/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Local-first CLI that reads an Instagram personal data export and produces a
 ranked audit — who to unfollow (and remove from followers) versus who to keep,
 with a `keep_probability` per account derived from the full breadth of
@@ -34,13 +37,13 @@ that quantifies agreement after every run.
 
 Display names are mojibake-repaired at parse time (IG's exporter ships
 UTF-8 bytes as Latin-1, so `HÃ¼seyin` becomes `Hüseyin` and Arabic /
-Georgian / emoji surface correctly). Bucket split on the real 649-account
-export was `485 / 154 / 10` at 28.6% labeled-set agreement, 0 hard
-mismatches — **now stale**: measured before `story_likes.json` was folded
-into `story_interactions_out`, so it needs a re-run and re-tune. See
-[`ROADMAP.md`](ROADMAP.md), [`docs/DESIGN.md`](docs/DESIGN.md)
-for the algorithm, and [`docs/TUNING.md`](docs/TUNING.md) for the
-weight-tuning journal.
+Georgian / emoji surface correctly). On the maintainer's real 649-account
+export the current bucket split is `510 / 130 / 9` (keep / review / unfollow)
+at 28.6% labeled-set agreement, measured with the `story_out = 0.5` weight
+after `story_likes.json` was folded into `story_interactions_out`. Agreement
+is feature-ceilinged rather than a tuning bug — see
+[`docs/TUNING.md`](docs/TUNING.md) for why, [`docs/DESIGN.md`](docs/DESIGN.md)
+for the algorithm, and [`ROADMAP.md`](ROADMAP.md) for build order.
 
 > A previous SvelteKit web-app prototype (card-deck review UI, SQLite/Drizzle)
 > was retired — the interactive direction is friction I don't need for a
@@ -142,20 +145,26 @@ Iterate from here by:
 ## Development
 
 ```bash
-cargo build --all-targets        # compile lib, bin, and tests
-cargo fmt --all                  # format
+cargo build --all-targets             # compile lib, bin, and tests
+cargo fmt --all                       # format
 cargo clippy --all-targets -- -D warnings
-cargo nextest run                # tests (or: cargo test)
+cargo nextest run                     # tests (or: cargo test)
+cargo deny check advisories bans sources   # supply-chain gate (CI runs this too)
 ```
 
-`cargo-nextest` is an optional local tool:
-`cargo install --locked cargo-nextest` (only installs with `--locked`).
-CI uses nextest; `cargo test` works without it.
+The two local tools the hooks expect (CI runs the same checks):
+`cargo install --locked cargo-nextest cargo-deny` (both install with `--locked`).
+`cargo test` works without nextest.
 
 Local git hooks are managed by [Lefthook](https://github.com/evilmartians/lefthook)
 ([`lefthook.yml`](lefthook.yml)): `pre-commit` runs `cargo fmt --check` (fast
-gate), `pre-push` runs `cargo clippy -D warnings` and `cargo nextest run`
-(mirrors CI). Set up once per clone: `brew install lefthook && lefthook install`.
+gate), `pre-push` runs `cargo clippy -D warnings`, `cargo nextest run`, and
+`cargo deny`. Together they cover every CI lane — CI's separate `build` step is
+subsumed by `clippy --all-targets`. Set up once per clone:
+`brew install lefthook && lefthook install`.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for conventions and
+[`SECURITY.md`](SECURITY.md) for reporting privacy/security issues.
 
 ## Tech stack
 
