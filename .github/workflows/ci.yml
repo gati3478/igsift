@@ -47,7 +47,7 @@ jobs:
         run: cargo build --all-targets
 
       - name: Install nextest
-        uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 # v2
+        uses: taiki-e/install-action@0fd46367812ee04360509b4169d9f659d6892bb2 # v2
         with:
           tool: nextest
 
