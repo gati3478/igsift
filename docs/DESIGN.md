@@ -2,11 +2,11 @@
 
 The full design for the Instagram following-cleanup CLI. Status, build, and the
 short pitch live in the [README](../README.md); the task list in
-[ROADMAP.md](../ROADMAP.md). Parser layer, feature aggregation, first-pass
-scoring, CSV/Markdown writers, and the brand/public-figure account-class
-heuristic (with user-maintained keeplist override) are all landed today;
-weight tuning against a labeled set and the run-on-real-export feedback loop
-are the remaining ROADMAP items.
+[ROADMAP.md](../ROADMAP.md). The full pipeline is implemented and tuned:
+parsers, feature aggregation, decay-weighted scoring with the two relationship
+gates, the brand/public-figure account-class heuristic, the keeplist/droplist
+overrides, and the CSV/Markdown/HTML writers. The weight/decay calibration
+journal is [`docs/TUNING.md`](TUNING.md) (8 rounds through 2026-05-30).
 
 ## Inputs
 
@@ -200,8 +200,8 @@ one decision per account.
 | `is_removed_suggestion`  | `removed_suggestions.json`                          | boolean                                                        | very weak negative                        |
 | `recently_unfollowed`    | `recently_unfollowed_profiles.json`                 | boolean                                                        | **excludes from input set**               |
 | `account_class`          | username/name heuristic (below)                     | personal / brand (PublicFigure deferred — see heuristic below) | gates the `unfollow` recommendation       |
-| `is_keeplisted`    | `config/keeplist.txt`                         | boolean                                                        | parallel Unfollow→Review override         |
-| `is_droplisted`         | `config/droplist.txt`                              | boolean                                                        | forces → Unfollow (below `is_restricted`) |
+| `is_keeplisted`          | `config/keeplist.txt`                               | boolean                                                        | parallel Unfollow→Review override         |
+| `is_droplisted`          | `config/droplist.txt`                               | boolean                                                        | forces → Unfollow (below `is_restricted`) |
 
 **Decay.** Every interaction count is recency-weighted with exponential decay
 so a 2019 like is worth far less than a 2026 like. τ is configurable; start

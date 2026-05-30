@@ -1,15 +1,13 @@
 # Scoring configuration for ig-mgr.
 #
-# Edit these to tune recommendations without recompiling. All values are
-# INITIAL guesses from the design sketch — expect to iterate empirically once
-# the pipeline runs against a real export. See docs/DESIGN.md.
+# Edit these to tune recommendations without recompiling — loaded by
+# src/config.rs (resolution: --config PATH, else cwd config/scoring.toml,
+# else the compiled-in `balanced` preset). See docs/DESIGN.md for the formula
+# and docs/TUNING.md for the calibration journal behind these values.
 #
 # Every key in [weights] appears exactly once in the scoring formula
 # (DESIGN.md "Scoring composition"). When adding or removing a feature,
-# update both files together to keep them in sync.
-#
-# NOTE: this file is read by code that does not exist yet. It documents the
-# intended shape; the deserialization struct lands with the scoring module.
+# update src/scoring.rs and this file together to keep them in sync.
 
 # Feature weights. Relative magnitudes matter more than absolute scale (a
 # sigmoid squashes the result). "high / medium / low" from the design map

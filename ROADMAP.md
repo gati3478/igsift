@@ -18,8 +18,10 @@ behind each item.
       643 followings, 695 followers, 593 DM threads, 706,095 total messages
       (multi-part threads concatenated). Fixture-driven integration test in
       `tests/cli.rs` exercises shape A, shape B, and a multi-part thread.
-- [ ] **Remaining feature extractors**, one at a time, verifying counts against
-      spot-checks (likes, comments, stories, tags, saved, searches).
+- [x] **Remaining feature extractors** (2026-05-27) — verified against
+      spot-checks (likes, comments, stories, saved). Tags and searches are
+      dropped, not deferred: the export ships no such files (see DESIGN.md
+      "Signals the export does NOT ship").
     - [x] **Relationship-flag parsers** (2026-05-26) — `read_close_friends`,
           `read_favorited`, `read_blocked`, `read_restricted`,
           `read_recently_unfollowed`, `read_removed_suggestions` (shape C
@@ -260,12 +262,15 @@ behind each item.
       ascending by `keep_prob` so actionable accounts surface at the top
       of the file. Markdown is the skim artifact: bucket counts plus
       bottom-20 / top-20 tables with `dominant_feature` per row. Default
-      stem `<export-parent>/recommendations_<YYYY-MM-DD>`, overridable
+      stem `<export-parent>/following-audit_<YYYY-MM-DD>`, overridable
       via `--out`. Display names resolve via `NameResolver::display_name_for`
       (the reverse direction added in this slice; same "no guessing on
       collision" posture as the forward direction). `account_class`
       stub-materialized as a single `Personal` variant — the brand /
       public-figure slice upgrades that field in place rather than
       adding a new one.
-- [ ] **Run on the real export**, do the cleanup, evaluate regret a few weeks
-      later, iterate.
+- [x] **Run on the real export and tune** (2026-05-27 → 2026-05-30) — 8
+      calibration rounds against a 58-account held-out label set (story-weight,
+      brand lexicon, reciprocity + deep-mutual gates, decay constants); see
+      [`docs/TUNING.md`](docs/TUNING.md). Ongoing use: act on the output,
+      evaluate regret over time, iterate.

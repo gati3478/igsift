@@ -290,13 +290,11 @@ pub fn check(input: &Path, rebuild_cache: bool) -> Result<()> {
 
 /// Entry point for the analysis run.
 ///
-/// At this stage the pipeline parses every export source, loads the
-/// scoring config, builds the `me` identity and the `display_name → handle`
-/// resolver, then runs the feature aggregator and emits a row of smoke
-/// counts (per-source totals plus aggregator-level totals for handle-keyed
-/// flags, DM signals, decay-weighted sums, and 90d/180d windowed counts).
-/// Scoring composition and the CSV / Markdown output writers land in
-/// later ROADMAP steps.
+/// The pipeline parses every export source, loads the scoring config, builds
+/// the `me` identity and the `display_name → handle` resolver, runs the
+/// feature aggregator, scores every account, and writes the CSV + Markdown +
+/// HTML audit — plus a smoke-count summary and, when `config/labels.txt`
+/// exists, the confusion-matrix report.
 pub fn run(args: RunArgs) -> Result<()> {
     use anyhow::{anyhow, ensure};
 
@@ -618,7 +616,7 @@ pub fn run(args: RunArgs) -> Result<()> {
 
     // Top/bottom 10 as the human-readable sanity surface. Borrows into
     // `scored` rather than cloning — the full ranking stays a Vec<ScoredAccount>
-    // for the CSV writer to consume in a later slice.
+    // that the output writers (CSV/Markdown/HTML) consume.
     let mut by_prob: Vec<&scoring::ScoredAccount> = scored.iter().collect();
     by_prob.sort_by(|a, b| {
         b.keep_prob

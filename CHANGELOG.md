@@ -24,6 +24,9 @@ automated unfollow.
   keep/review/unfollow bucketing.
 - Brand/public-figure classifier, restricted-account floor, and mirror
   keeplist / droplist overrides.
+- Relationship-aware bucket gates: a deep-mutual keep-floor and an opt-in
+  reciprocity keep-ceiling, both monotonic — they only refuse to auto-keep a
+  stranger or refuse to drop a years-deep mutual, never manufacture an unfollow.
 - Three subcommands (`run`, `init`, `check`), three scoring presets
   (`balanced`/`engagement`/`tenure`), per-term `--trace`, and an optional
   labeled-set confusion-matrix report.
