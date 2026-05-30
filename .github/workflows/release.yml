@@ -9,7 +9,7 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
-# The job creates a Release and uploads assets, so it needs write access.
+# Both jobs create / write the Release, so they need write access.
 permissions:
   contents: write
 
@@ -17,8 +17,29 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Create the GitHub Release once, up front. The build matrix below fans out
+  # in parallel and each leg only *uploads* to this pre-existing release —
+  # without this, every leg races to find/create the release, none wins, and
+  # they all fail with "release not found".
+  create-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Create release if absent
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — reusing it."
+          else
+            gh release create "$TAG" --verify-tag --title "igsift $TAG" --generate-notes
+          fi
+
   upload:
     name: ${{ matrix.target }}
+    needs: create-release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -39,8 +60,7 @@ jobs:
 
           # Linux — statically linked against musl so the binary has no glibc
           # version dependency and runs on Fedora (and every other distro)
-          # regardless of the builder's libc. ARM64 cross-builds via `cross`,
-          # which the upload action invokes automatically for this target.
+          # regardless of the builder's libc.
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
           - target: aarch64-unknown-linux-musl
@@ -68,13 +88,13 @@ jobs:
       # build below links correctly. macOS/Windows build natively and skip it.
       - name: Set up cross toolchain (Linux)
         if: contains(matrix.target, '-linux-')
-        uses: taiki-e/setup-cross-toolchain-action@441e0a4d69b94f4ce0d1d6dbb30c7c2e0c9ac4b8 # v1.31.0
+        uses: taiki-e/setup-cross-toolchain-action@3d9770ce98eb7dbcf378563182a5e8031165f75b # v1.41.0
         with:
           target: ${{ matrix.target }}
 
       # Builds `igsift` for the target, archives it (.tar.gz on unix, .zip on
       # Windows) with README + LICENSE, writes a SHA-256 checksum file, and
-      # attaches all of it to the Release for the tag in github.ref.
+      # uploads them to the release created above.
       - name: Build and upload
         uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1.30.2
         with:
