@@ -62,6 +62,16 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      # Linux targets cross-compile against musl; the runner has no musl
+      # linker by default (`error: linker 'cc' not found`). This sets up the
+      # cross C toolchain and the CARGO_TARGET_*_LINKER env so the plain cargo
+      # build below links correctly. macOS/Windows build natively and skip it.
+      - name: Set up cross toolchain (Linux)
+        if: contains(matrix.target, '-linux-')
+        uses: taiki-e/setup-cross-toolchain-action@441e0a4d69b94f4ce0d1d6dbb30c7c2e0c9ac4b8 # v1.31.0
+        with:
+          target: ${{ matrix.target }}
+
       # Builds `igsift` for the target, archives it (.tar.gz on unix, .zip on
       # Windows) with README + LICENSE, writes a SHA-256 checksum file, and
       # attaches all of it to the Release for the tag in github.ref.
