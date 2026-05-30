@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a new signal, scoring change, output, or CLI capability.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that the tool doesn't support today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        What should happen? If it touches scoring/weights, note that tunables live
+        in `config/scoring.toml` (see docs/DESIGN.md) — a config change may be all
+        that's needed.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you weighed, and why this one.
+    validations:
+      required: false

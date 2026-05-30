@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security / Privacy Vulnerability
+    url: https://github.com/gati3478/ig-manager/security/advisories/new
+    about: Report security or privacy vulnerabilities privately via GitHub's advisory system (see SECURITY.md).

@@ -64,8 +64,17 @@ The crate is `v0.1.0` and unreleased. If/when you want a GitHub Release:
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-Then draft a release from the tag. A `CHANGELOG.md` is intentionally deferred
-until the first tagged release.
+Then draft a release from the tag — GitHub's auto-generated notes are
+categorized by `.github/release.yml` (New Features / Bug Fixes / Dependencies /
+Other), and `CHANGELOG.md`'s `[Unreleased]` section should be promoted to
+`[0.1.0]` at the same time.
+
+**Not yet automated (deliberate):** there is no binary-build release workflow.
+For an unreleased solo CLI a cross-compile matrix (macOS/Linux/Windows targets
+uploaded to the Release) is premature — add `.github/workflows/release.yml`
+when the first real release demands prebuilt binaries, rather than carrying
+speculative CI now. Until then, users install with `cargo install --path .` or
+`cargo build --release`.
 
 ## Not enabled (deliberate)
 

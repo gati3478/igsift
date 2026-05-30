@@ -1,0 +1,44 @@
+name: Bug report
+description: Something the CLI does wrong — a crash, a wrong score, a parser failure.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Do not paste real export data, real handles, or
+        any personal information** — `ig-mgr` processes private data and this is a
+        public issue tracker. Describe the shape of the data, not its contents.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did the CLI do, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: |
+        The exact command (redact paths) and the relevant output / error. If a
+        parser failed, the `serde_path_to_error` path in the message is the most
+        useful single line.
+      placeholder: |
+        $ ig-mgr check ./export
+        Error: ... at your_instagram_activity/...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `ig-mgr --version`, or the commit SHA you built from.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / platform
+      placeholder: macOS 15.5 (arm64) / Ubuntu 24.04 / Windows 11
+    validations:
+      required: true
