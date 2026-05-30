@@ -4,7 +4,13 @@ Everything in this list happens **outside the repo** (GitHub UI / one-off git
 commands) and cannot be committed as code. Work top to bottom. Items marked
 **done** are recorded for auditability.
 
-## 0. Purge the leaked blob from the remote (GATING — not done yet)
+## 0. Purge the leaked blob from the remote (GATING — ✅ DONE 2026-05-30)
+
+> **Resolved 2026-05-30.** The repo was deleted and recreated from the clean
+> local clone (see "reliable fix" below), then clean `main` was pushed.
+> Verified: `gh api .../git/blobs/08d58c4c…` returns **404**, and
+> `git ls-remote origin` shows only `refs/heads/main` — no `dependabot/*`, no
+> `refs/pull/*`. The blob is gone from the remote.
 
 A real audit report (`following-audit_2026-05-27.html`, ~643 real handles + the
 maintainer's keep/drop intent, blob `08d58c4`) was accidentally committed in
