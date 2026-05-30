@@ -33,7 +33,7 @@ git push --force-with-lease origin main
 >   `git push --delete` them. PR #17's `refs/pull/17/head` reaches the blob, and
 >   closing the PR / deleting the branch does **not** remove that ref.
 > - The blob is directly downloadable today:
->   `gh api repos/gati3478/ig-manager/git/blobs/08d58c4c4b989b1747f8f8d2b66ececcc18f7857 --jq .size`
+>   `gh api repos/gati3478/igsift/git/blobs/08d58c4c4b989b1747f8f8d2b66ececcc18f7857 --jq .size`
 >   returns `232745`.
 
 ### The reliable fix: delete and recreate the repo
@@ -47,12 +47,12 @@ unshared, so this is low-cost (Dependabot PRs regenerate against clean `main`):
 # Local main is already clean (no blob). Confirm:
 git rev-list --all --objects | grep following-audit   # must print nothing (local)
 
-gh repo delete gati3478/ig-manager --yes               # destructive; requires delete_repo scope
-gh repo create gati3478/ig-manager --private --source=. --remote=origin --push
+gh repo delete gati3478/igsift --yes               # destructive; requires delete_repo scope
+gh repo create gati3478/igsift --private --source=. --remote=origin --push
 git push origin --tags                                 # if any tags exist
 
 # Definitive remote verification — must 404, not return a size:
-gh api repos/gati3478/ig-manager/git/blobs/08d58c4c4b989b1747f8f8d2b66ececcc18f7857 --jq .size
+gh api repos/gati3478/igsift/git/blobs/08d58c4c4b989b1747f8f8d2b66ececcc18f7857 --jq .size
 git ls-remote origin | grep -i following-audit || echo "clean"
 ```
 
@@ -118,6 +118,6 @@ speculative CI now. Until then, users install with `cargo install --path .` or
 
 - **Publishing to crates.io** — not done; the tool is consumed by cloning, not as
   a dependency. The `repository` URL in `Cargo.toml` is already correct
-  (`github.com/gati3478/ig-manager`).
+  (`github.com/gati3478/igsift`).
 - **GitHub Advanced Security extras** beyond the free public-repo defaults — not
   needed; the supply chain is covered by `cargo-deny` + Dependabot.

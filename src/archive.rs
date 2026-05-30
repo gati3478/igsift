@@ -39,9 +39,9 @@ const EXTRACTED_MARKER: &str = "connections/followers_and_following/following.js
 /// - A directory that already contains [`EXTRACTED_MARKER`] → returned
 ///   as-is.
 /// - A directory containing one or more `*.zip` files → all extracted
-///   to `<dir>/.ig-mgr-extracted/`.
+///   to `<dir>/.igsift-extracted/`.
 /// - A single `.zip` file → extracted to
-///   `<parent>/.ig-mgr-extracted-<stem>/`.
+///   `<parent>/.igsift-extracted-<stem>/`.
 /// - Anything else → returned as-is so the caller's existing
 ///   `validate_shape` can surface a precise diagnosis.
 ///
@@ -54,7 +54,7 @@ pub fn resolve(input: &Path, rebuild: bool, progress_enabled: bool) -> Result<Pa
         }
         let zips = find_zip_parts(input)?;
         if !zips.is_empty() {
-            let cache = input.join(".ig-mgr-extracted");
+            let cache = input.join(".igsift-extracted");
             return extract_or_reuse(&zips, &cache, rebuild, progress_enabled);
         }
         // No marker, no zips — fall through and let validate_shape
@@ -67,7 +67,7 @@ pub fn resolve(input: &Path, rebuild: bool, progress_enabled: bool) -> Result<Pa
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("export");
-        let cache = parent.join(format!(".ig-mgr-extracted-{stem}"));
+        let cache = parent.join(format!(".igsift-extracted-{stem}"));
         return extract_or_reuse(&[input.to_path_buf()], &cache, rebuild, progress_enabled);
     }
     Ok(input.to_path_buf())
@@ -255,7 +255,7 @@ mod tests {
     /// Mirrors the IG export shape: a single top-level wrapper folder
     /// inside the zip so we exercise the [`extracted_root`] descent.
     fn synth_zip(test_id: &str, with_wrapper: bool) -> PathBuf {
-        let tmp = std::env::temp_dir().join(format!("ig-mgr-archive-{test_id}.zip"));
+        let tmp = std::env::temp_dir().join(format!("igsift-archive-{test_id}.zip"));
         let _ = fs::remove_file(&tmp);
         let file = fs::File::create(&tmp).expect("create zip");
         let mut writer = zip::ZipWriter::new(file);
@@ -314,7 +314,7 @@ mod tests {
             resolved.display(),
         );
         let _ = fs::remove_dir_all(zip_path.parent().unwrap().join(format!(
-            ".ig-mgr-extracted-{}",
+            ".igsift-extracted-{}",
             zip_path.file_stem().unwrap().to_string_lossy()
         )));
         let _ = fs::remove_file(&zip_path);
@@ -326,7 +326,7 @@ mod tests {
         let resolved = resolve(&zip_path, true, false).expect("resolve");
         assert!(resolved.join(EXTRACTED_MARKER).is_file());
         let _ = fs::remove_dir_all(zip_path.parent().unwrap().join(format!(
-            ".ig-mgr-extracted-{}",
+            ".igsift-extracted-{}",
             zip_path.file_stem().unwrap().to_string_lossy()
         )));
         let _ = fs::remove_file(&zip_path);
@@ -356,7 +356,7 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(zip_path.parent().unwrap().join(format!(
-            ".ig-mgr-extracted-{}",
+            ".igsift-extracted-{}",
             zip_path.file_stem().unwrap().to_string_lossy()
         )));
         let _ = fs::remove_file(&zip_path);
@@ -390,10 +390,10 @@ mod tests {
 
         let parent = zip_path.parent().unwrap();
         let stem = zip_path.file_stem().unwrap().to_string_lossy();
-        let _ = fs::remove_dir_all(parent.join(format!(".ig-mgr-extracted-{stem}")));
+        let _ = fs::remove_dir_all(parent.join(format!(".igsift-extracted-{stem}")));
         let _ = fs::remove_file(&zip_path);
         let _ =
-            fs::remove_dir_all(parent.join(format!(".ig-mgr-extracted-{}", "cache-resize-bigger")));
+            fs::remove_dir_all(parent.join(format!(".igsift-extracted-{}", "cache-resize-bigger")));
     }
 
     #[test]
@@ -408,7 +408,7 @@ mod tests {
         // present.
 
         let dir = std::env::temp_dir().join(format!(
-            "ig-mgr-multipart-{}-{}",
+            "igsift-multipart-{}-{}",
             std::process::id(),
             jiff::Timestamp::now().as_nanosecond(),
         ));
@@ -502,7 +502,7 @@ mod tests {
         // and prove neither escapes the cache dir while a benign sibling
         // still lands. This test FAILS if the guard is weakened.
         let dir = std::env::temp_dir().join(format!(
-            "ig-mgr-zipslip-{}-{}",
+            "igsift-zipslip-{}-{}",
             std::process::id(),
             jiff::Timestamp::now().as_nanosecond(),
         ));

@@ -1,6 +1,6 @@
-//! `ig-mgr` — local-first analysis of an Instagram personal data export.
+//! `igsift` — local-first analysis of an Instagram personal data export.
 //!
-//! The library crate holds the pipeline; the `ig-mgr` binary ([`main`]) is a
+//! The library crate holds the pipeline; the `igsift` binary ([`main`]) is a
 //! thin shell that parses arguments and calls [`run`]. Integration tests in
 //! `tests/` drive the same code paths.
 //!
@@ -50,7 +50,7 @@ pub fn init_tracing(verbose: u8) {
         _ => "trace",
     };
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("ig_mgr={default_level}")));
+        .unwrap_or_else(|_| EnvFilter::new(format!("igsift={default_level}")));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -58,7 +58,7 @@ pub fn init_tracing(verbose: u8) {
         .init();
 }
 
-/// `ig-mgr init` — scaffold per-user `config/` files from their
+/// `igsift init` — scaffold per-user `config/` files from their
 /// checked-in templates. The .example files are embedded in the
 /// binary at compile time so a fresh user who has only the binary
 /// (no repo checkout) can still bootstrap.
@@ -104,7 +104,7 @@ pub fn init(force: bool) -> Result<()> {
     Ok(())
 }
 
-/// `ig-mgr check <export>` — validate that an export folder is
+/// `igsift check <export>` — validate that an export folder is
 /// parseable without scoring it. Runs the shape pre-flight, then
 /// attempts every parser, surfacing per-source status, and finishes
 /// with a config sanity check (the keeplist and droplist must
@@ -301,7 +301,7 @@ pub fn run(args: RunArgs) -> Result<()> {
     let input = args
         .export_dir
         .as_deref()
-        .ok_or_else(|| anyhow!("export directory required — pass a path or use `ig-mgr --help`"))?;
+        .ok_or_else(|| anyhow!("export directory required — pass a path or use `igsift --help`"))?;
 
     let progress_enabled = args.verbose == 0;
 

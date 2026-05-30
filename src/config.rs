@@ -19,7 +19,7 @@
 //!    — so a fresh `cargo install` runs zero-config with the documented
 //!    starting weights even if the user never lays down a config file.
 //!
-//! A platform config dir (`~/.config/ig-mgr/scoring.toml`) is in the
+//! A platform config dir (`~/.config/igsift/scoring.toml`) is in the
 //! comments of the slice 6 scaffold; it needs the `directories` /
 //! `dirs` crate and is deferred until somebody actually installs the
 //! binary outside the dev tree.

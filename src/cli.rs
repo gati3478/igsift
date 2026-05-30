@@ -3,7 +3,7 @@
 //! Three entry points share one binary:
 //!
 //! - Default / `run` — score an export and write the audit. The legacy
-//!   form `ig-mgr <export_dir>` is preserved; `ig-mgr run <export_dir>`
+//!   form `igsift <export_dir>` is preserved; `igsift run <export_dir>`
 //!   is its explicit alias.
 //! - `init` — scaffold the per-user `config/` files (keep keeplist,
 //!   labels template) for a fresh checkout.
@@ -39,7 +39,7 @@ pub enum Preset {
 /// unfollow vs. keep.
 #[derive(Debug, Parser)]
 #[command(
-    name = "ig-mgr",
+    name = "igsift",
     version,
     about,
     long_about = None,
@@ -49,7 +49,7 @@ pub enum Preset {
 )]
 pub struct Cli {
     /// Legacy / default Run args. Used when no subcommand is provided;
-    /// equivalent to `ig-mgr run <export_dir>`. clap's
+    /// equivalent to `igsift run <export_dir>`. clap's
     /// `args_conflicts_with_subcommands` ensures these can't be mixed
     /// with `init` / `check` at the same invocation.
     #[command(flatten)]
@@ -109,7 +109,7 @@ pub struct RunArgs {
     pub trace: Option<String>,
 
     /// Force re-extraction of an archive input, ignoring any
-    /// `.ig-mgr-extracted/` cache. No effect when the input is an
+    /// `.igsift-extracted/` cache. No effect when the input is an
     /// already-extracted directory.
     #[arg(long)]
     pub rebuild_cache: bool,
@@ -137,7 +137,7 @@ pub enum Command {
         export_dir: PathBuf,
 
         /// Force re-extraction of an archive input, ignoring any
-        /// `.ig-mgr-extracted/` cache. No effect when the input is
+        /// `.igsift-extracted/` cache. No effect when the input is
         /// already an extracted directory.
         #[arg(long)]
         rebuild_cache: bool,
@@ -170,33 +170,33 @@ impl Preset {
 const EXAMPLES: &str = "\
 EXAMPLES:
   # Basic run — writes following-audit_<DATE>.{csv,md} next to the input
-  ig-mgr ./ig-exported-data
+  igsift ./ig-exported-data
 
   # Run against a single .zip directly (extracts on first run, then caches)
-  ig-mgr ~/Downloads/instagram-username-2026-05-11-abc.zip
+  igsift ~/Downloads/instagram-username-2026-05-11-abc.zip
 
   # Run against a folder of multipart .zip parts (merged into one cache)
-  ig-mgr ~/Downloads/instagram-username-2026-05-11/
+  igsift ~/Downloads/instagram-username-2026-05-11/
 
   # Force a fresh extract, ignoring the cache
-  ig-mgr ./ig-exported-data --rebuild-cache
+  igsift ./ig-exported-data --rebuild-cache
 
   # Try a different scoring shape without writing a config file
-  ig-mgr ./ig-exported-data --preset engagement
-  ig-mgr ./ig-exported-data --preset tenure
+  igsift ./ig-exported-data --preset engagement
+  igsift ./ig-exported-data --preset tenure
 
   # Custom output stem (writes /tmp/audit.csv + /tmp/audit.md)
-  ig-mgr ./ig-exported-data --out /tmp/audit
+  igsift ./ig-exported-data --out /tmp/audit
 
   # Explain why one account landed where it did
-  ig-mgr ./ig-exported-data --trace some_handle
+  igsift ./ig-exported-data --trace some_handle
 
-  # Debug verbosity (or use RUST_LOG=ig_mgr=debug to override)
-  ig-mgr ./ig-exported-data -v
+  # Debug verbosity (or use RUST_LOG=igsift=debug to override)
+  igsift ./ig-exported-data -v
 
   # Scaffold config/keeplist.txt + config/labels.txt from templates
-  ig-mgr init
+  igsift init
 
   # Dry-run: validate the export shape without scoring
-  ig-mgr check ./ig-exported-data
+  igsift check ./ig-exported-data
 ";

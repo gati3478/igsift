@@ -1,4 +1,4 @@
-//! End-to-end tests that run the `ig-mgr` binary against the filesystem.
+//! End-to-end tests that run the `igsift` binary against the filesystem.
 //!
 //! Smoke tests cover the CLI surface; the fixture-driven case asserts the
 //! parser-pass acceptance criteria — exact follower/following/thread/message
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use assert_cmd::Command;
 use predicates::str::contains;
 
-fn ig_mgr() -> Command {
+fn igsift() -> Command {
     // Spawn with cwd = OS temp dir so the binary's cwd-relative config
     // lookups (`config/scoring.toml`, `config/labels.txt`,
     // `config/keeplist.txt`) miss the per-user files at the repo
@@ -21,7 +21,7 @@ fn ig_mgr() -> Command {
     // sees the fixture-count test contaminate itself with real labels
     // and a non-zero keeplist size. Each spawned command gets its own
     // cwd, so parallel test execution is safe.
-    let mut cmd = Command::cargo_bin("ig-mgr").expect("binary `ig-mgr` should build");
+    let mut cmd = Command::cargo_bin("igsift").expect("binary `igsift` should build");
     cmd.current_dir(std::env::temp_dir());
     cmd
 }
@@ -35,12 +35,12 @@ fn sample_export() -> PathBuf {
 /// fixture directory (gitignored but still noise). Each test name maps
 /// to a unique path so tests can run in parallel without colliding.
 fn out_stem(test_name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("ig-mgr-test-{test_name}"))
+    std::env::temp_dir().join(format!("igsift-test-{test_name}"))
 }
 
 #[test]
 fn help_mentions_instagram() {
-    ig_mgr()
+    igsift()
         .arg("--help")
         .assert()
         .success()
@@ -49,7 +49,7 @@ fn help_mentions_instagram() {
 
 #[test]
 fn version_is_printed() {
-    ig_mgr()
+    igsift()
         .arg("--version")
         .assert()
         .success()
@@ -59,12 +59,12 @@ fn version_is_printed() {
 #[test]
 fn missing_export_dir_is_an_error() {
     // No positional argument: clap should reject the invocation.
-    ig_mgr().assert().failure();
+    igsift().assert().failure();
 }
 
 #[test]
 fn nonexistent_export_dir_fails_gracefully() {
-    ig_mgr()
+    igsift()
         .arg("/no/such/export/dir")
         .assert()
         .failure()
@@ -73,11 +73,11 @@ fn nonexistent_export_dir_fails_gracefully() {
 
 #[test]
 fn check_subcommand_validates_fixture_and_exits_zero() {
-    // `ig-mgr check <export>` exits zero against a well-shaped fixture
+    // `igsift check <export>` exits zero against a well-shaped fixture
     // and prints a per-source success line for each parser. Acts as the
     // dispatch test (subcommand reaches the `check` handler) AND the
     // per-source-status format test in one go.
-    ig_mgr()
+    igsift()
         .arg("check")
         .arg(sample_export())
         .assert()
@@ -97,7 +97,7 @@ fn check_surfaces_both_listed_conflict() {
     // and both files) and exit non-zero, so it's caught before a scoring
     // run rather than only at `run` time. The fixture parses cleanly, so
     // the config conflict is the sole failure.
-    let (mut cmd, cwd) = ig_mgr_with_config(
+    let (mut cmd, cwd) = igsift_with_config(
         "check_conflict",
         &[
             ("config/keeplist.txt", "dup_handle\n"),
@@ -140,9 +140,9 @@ fn check_subcommand_fails_on_non_export_dir() {
     // Point check at a directory that isn't an IG export — the
     // pre-flight validator should surface every missing top-level
     // marker in one error.
-    let empty = std::env::temp_dir().join(format!("ig-mgr-check-empty-{}", std::process::id()));
+    let empty = std::env::temp_dir().join(format!("igsift-check-empty-{}", std::process::id()));
     std::fs::create_dir_all(&empty).expect("mktemp");
-    let result = ig_mgr().arg("check").arg(&empty).assert().failure();
+    let result = igsift().arg("check").arg(&empty).assert().failure();
     let stderr = String::from_utf8_lossy(&result.get_output().stderr).into_owned();
     std::fs::remove_dir(&empty).ok();
     assert!(
@@ -154,10 +154,10 @@ fn check_subcommand_fails_on_non_export_dir() {
 #[test]
 fn check_subcommand_accepts_a_zip_archive() {
     // Zip the sanitized fixture into a tempfile, then run
-    // `ig-mgr check <tempfile.zip>`. End-to-end coverage of the
+    // `igsift check <tempfile.zip>`. End-to-end coverage of the
     // archive resolver -> validate_shape -> per-parser path.
     use std::io::Write as _;
-    let zip_path = std::env::temp_dir().join(format!("ig-mgr-cli-zip-{}.zip", std::process::id()));
+    let zip_path = std::env::temp_dir().join(format!("igsift-cli-zip-{}.zip", std::process::id()));
     let _ = std::fs::remove_file(&zip_path);
     {
         let file = std::fs::File::create(&zip_path).expect("create zip");
@@ -193,7 +193,7 @@ fn check_subcommand_accepts_a_zip_archive() {
         writer.finish().expect("finish zip");
     }
 
-    ig_mgr()
+    igsift()
         .arg("check")
         .arg(&zip_path)
         .assert()
@@ -203,7 +203,7 @@ fn check_subcommand_accepts_a_zip_archive() {
     // Cleanup: cache dir and zip file.
     let parent = zip_path.parent().expect("parent");
     let stem = zip_path.file_stem().and_then(|s| s.to_str()).expect("stem");
-    let _ = std::fs::remove_dir_all(parent.join(format!(".ig-mgr-extracted-{stem}")));
+    let _ = std::fs::remove_dir_all(parent.join(format!(".igsift-extracted-{stem}")));
     let _ = std::fs::remove_file(&zip_path);
 }
 
@@ -212,10 +212,10 @@ fn init_subcommand_writes_template_files() {
     // Spawn from an empty temp dir so the cwd-relative `config/`
     // doesn't exist; init must create it and lay down the three
     // template files.
-    let cwd = std::env::temp_dir().join(format!("ig-mgr-init-{}", std::process::id()));
+    let cwd = std::env::temp_dir().join(format!("igsift-init-{}", std::process::id()));
     std::fs::create_dir_all(&cwd).expect("mktemp");
 
-    let mut cmd = Command::cargo_bin("ig-mgr").expect("binary");
+    let mut cmd = Command::cargo_bin("igsift").expect("binary");
     cmd.current_dir(&cwd)
         .arg("init")
         .assert()
@@ -229,7 +229,7 @@ fn init_subcommand_writes_template_files() {
     assert!(cwd.join("config/labels.txt").is_file());
 
     // Re-running without --force skips all files.
-    let mut cmd2 = Command::cargo_bin("ig-mgr").expect("binary");
+    let mut cmd2 = Command::cargo_bin("igsift").expect("binary");
     cmd2.current_dir(&cwd)
         .arg("init")
         .assert()
@@ -249,12 +249,12 @@ fn init_force_overwrites_existing_content() {
     // distinct bytes, run `init --force`, assert the file matches
     // the embedded template body (the standard keeplist marker
     // line is sufficient).
-    let cwd = std::env::temp_dir().join(format!("ig-mgr-init-force-{}", std::process::id()));
+    let cwd = std::env::temp_dir().join(format!("igsift-init-force-{}", std::process::id()));
     std::fs::create_dir_all(cwd.join("config")).expect("mktemp config dir");
     let keeplist = cwd.join("config/keeplist.txt");
     std::fs::write(&keeplist, "MY_CUSTOM_HAND_EDITED_HANDLE\n").expect("seed user content");
 
-    let mut cmd = Command::cargo_bin("ig-mgr").expect("binary");
+    let mut cmd = Command::cargo_bin("igsift").expect("binary");
     cmd.current_dir(&cwd)
         .arg("init")
         .arg("--force")
@@ -284,7 +284,7 @@ fn check_surfaces_per_source_failure_without_masking_others() {
     // missing `relationships_following` key) in a temp copy of the
     // fixture; assert ✗ for following.json + at least one ✓ for an
     // unrelated source + non-zero exit + named failure count.
-    let cwd = std::env::temp_dir().join(format!("ig-mgr-check-fail-{}", std::process::id()));
+    let cwd = std::env::temp_dir().join(format!("igsift-check-fail-{}", std::process::id()));
     // Mirror the fixture into the temp dir so we can corrupt one
     // file without touching the committed test data.
     fn copy_dir(src: &std::path::Path, dst: &std::path::Path) {
@@ -312,7 +312,7 @@ fn check_surfaces_per_source_failure_without_masking_others() {
     )
     .expect("inject broken following.json");
 
-    let mut cmd = Command::cargo_bin("ig-mgr").expect("binary");
+    let mut cmd = Command::cargo_bin("igsift").expect("binary");
     cmd.current_dir(std::env::temp_dir())
         .arg("check")
         .arg(&cwd)
@@ -336,7 +336,7 @@ fn preset_engagement_produces_different_buckets_than_tenure() {
     let eng_stem = out_stem("preset-eng");
     let ten_stem = out_stem("preset-ten");
 
-    ig_mgr()
+    igsift()
         .arg(sample_export())
         .arg("--out")
         .arg(&eng_stem)
@@ -344,7 +344,7 @@ fn preset_engagement_produces_different_buckets_than_tenure() {
         .arg("engagement")
         .assert()
         .success();
-    ig_mgr()
+    igsift()
         .arg(sample_export())
         .arg("--out")
         .arg(&ten_stem)
@@ -385,7 +385,7 @@ fn preset_and_config_are_mutually_exclusive() {
     // would become undefined — exactly the "owner's calibration bias
     // leaks in" failure the config-resolution chain is designed to
     // prevent. Passing both must fail at parse time.
-    ig_mgr()
+    igsift()
         .arg(sample_export())
         .arg("--preset")
         .arg("tenure")
@@ -402,7 +402,7 @@ fn trace_unknown_handle_fails_loudly() {
     // almost certainly a typo at the command line. The run errors with
     // the offending handle named in the message so the user can fix it
     // immediately rather than seeing an empty trace and wondering why.
-    ig_mgr()
+    igsift()
         .arg(sample_export())
         .arg("--out")
         .arg(out_stem("trace_unknown"))
@@ -421,7 +421,7 @@ fn trace_known_handle_prints_contributions() {
     // term-contributions array order independent of how rustc lays out
     // the literal — a future term reordering shouldn't silently drop
     // the boost from the trace.
-    ig_mgr()
+    igsift()
         .arg(sample_export())
         .arg("--out")
         .arg(out_stem("trace_known"))
@@ -477,7 +477,7 @@ fn fixture_counts_match_expected() {
     // -v is required: per-source smoke counts move behind verbose in
     // the default stdout. The counts themselves are still load-bearing
     // (catch silent parser drift); the test just opts back in.
-    ig_mgr()
+    igsift()
         .arg(sample_export())
         .arg("--out")
         .arg(out_stem("fixture_counts"))
@@ -585,7 +585,7 @@ fn writes_csv_and_markdown_at_out_path() {
     let _ = std::fs::remove_file(&md_path);
     let _ = std::fs::remove_file(&html_path);
 
-    ig_mgr()
+    igsift()
         .arg(sample_export())
         .arg("--out")
         .arg(&stem)
@@ -657,7 +657,7 @@ fn writes_csv_and_markdown_at_out_path() {
     );
 
     // Markdown self-documents the run.
-    assert!(md.contains("# ig-mgr following audit"));
+    assert!(md.contains("# igsift following audit"));
     assert!(md.contains("Accounts scored: **4**"));
     assert!(md.contains("Keep: **3**"));
     assert!(md.contains("Review: **1**"));
@@ -672,17 +672,17 @@ fn writes_csv_and_markdown_at_out_path() {
     );
 }
 
-/// Spawn `ig-mgr` in a fresh temp cwd seeded with the given `config/`
-/// files. Mirrors [`ig_mgr`]'s cwd-isolation posture but lets a test
+/// Spawn `igsift` in a fresh temp cwd seeded with the given `config/`
+/// files. Mirrors [`igsift`]'s cwd-isolation posture but lets a test
 /// inject per-user handle lists the binary loads cwd-relative. Returns
 /// `(Command, cwd)`; the caller removes `cwd` when done.
-fn ig_mgr_with_config(test_name: &str, files: &[(&str, &str)]) -> (Command, PathBuf) {
-    let cwd = std::env::temp_dir().join(format!("ig-mgr-cfg-{test_name}-{}", std::process::id()));
+fn igsift_with_config(test_name: &str, files: &[(&str, &str)]) -> (Command, PathBuf) {
+    let cwd = std::env::temp_dir().join(format!("igsift-cfg-{test_name}-{}", std::process::id()));
     std::fs::create_dir_all(cwd.join("config")).expect("mk config dir");
     for (rel, body) in files {
         std::fs::write(cwd.join(rel), body).expect("write config file");
     }
-    let mut cmd = Command::cargo_bin("ig-mgr").expect("binary `ig-mgr` should build");
+    let mut cmd = Command::cargo_bin("igsift").expect("binary `igsift` should build");
     cmd.current_dir(&cwd);
     (cmd, cwd)
 }
@@ -694,7 +694,7 @@ fn both_listed_handle_aborts_the_run() {
     // scoring, naming the handle and both files. Pins that the run
     // actually wires `ensure_disjoint` in — the unit test only covers
     // the helper in isolation.
-    let (mut cmd, cwd) = ig_mgr_with_config(
+    let (mut cmd, cwd) = igsift_with_config(
         "conflict",
         &[
             ("config/keeplist.txt", "dup_handle\n"),
@@ -729,7 +729,7 @@ fn droplist_forces_a_followee_to_unfollow() {
     let csv_path = stem.with_extension("csv");
     let _ = std::fs::remove_file(&csv_path);
 
-    let (mut cmd, cwd) = ig_mgr_with_config("droplist", &[("config/droplist.txt", "bob_synth\n")]);
+    let (mut cmd, cwd) = igsift_with_config("droplist", &[("config/droplist.txt", "bob_synth\n")]);
     cmd.arg(sample_export())
         .arg("--out")
         .arg(&stem)

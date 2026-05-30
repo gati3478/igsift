@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Initial development; not yet tagged. `ig-mgr` reads an Instagram personal-data
+Initial development; not yet tagged. `igsift` reads an Instagram personal-data
 export and writes a CSV + Markdown + HTML audit ranking who to unfollow vs. keep,
 with a `keep_probability` per account. Fully offline — no network, database, or
 automated unfollow.

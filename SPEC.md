@@ -72,12 +72,12 @@ precedence between droplist and keeplist is moot by construction.
 
 No new subcommand. Surfaces through existing flows:
 
-- `ig-mgr init` — scaffolds `config/droplist.txt` from the embedded
+- `igsift init` — scaffolds `config/droplist.txt` from the embedded
   `config/droplist.txt.example` template (add to the `targets` array in
   `lib::init`).
-- `ig-mgr run <export>` — loads the droplist, enforces the cross-list
+- `igsift run <export>` — loads the droplist, enforces the cross-list
   conflict check, applies the gate. No new flags.
-- `ig-mgr check <export>` — runs the parser dry-run, then a config sanity
+- `igsift check <export>` — runs the parser dry-run, then a config sanity
   check: loads the keeplist + droplist and runs the same
   `ensure_disjoint` gate, surfacing a both-listed conflict (handle + both
   files) and exiting non-zero. Catches the contradiction before a full
@@ -162,7 +162,7 @@ Integration-first, mirroring the existing coverage:
   with the `"explicit droplist"` row at the top.
 - **Unit (`aggregate.rs`)**: a droplisted followee surfaces
   `is_droplisted = true`; a non-followee drop entry creates no row.
-- **Integration (`tests/cli.rs`)**: the `ig_mgr()` helper already runs with
+- **Integration (`tests/cli.rs`)**: the `igsift()` helper already runs with
   `cwd = temp_dir` so the repo's per-user files don't leak — keep that. Add
   a fixture-scoped case only if a synthetic `droplist.txt` can be injected
   via the existing harness; otherwise the unit gate tests are sufficient.

@@ -1139,7 +1139,7 @@ mod tests {
         // diagnosis in one message, not three sequential parser
         // failures.
         let empty = std::env::temp_dir().join(format!(
-            "ig-mgr-validate-empty-{}-{}",
+            "igsift-validate-empty-{}-{}",
             std::process::id(),
             jiff::Timestamp::now().as_nanosecond(),
         ));
@@ -1163,7 +1163,7 @@ mod tests {
         // regression that bailed at the first missing path would still
         // pass `validate_shape_lists_every_missing_path` but fail here.
         let dir = std::env::temp_dir().join(format!(
-            "ig-mgr-validate-partial-{}-{}",
+            "igsift-validate-partial-{}-{}",
             std::process::id(),
             jiff::Timestamp::now().as_nanosecond(),
         ));
@@ -1286,7 +1286,7 @@ mod tests {
         // the same thread file parses. "HÃ¼seyin" is the Latin-1-misread
         // form of "Hüseyin".
         let base = std::env::temp_dir().join(format!(
-            "ig-mgr-dm-mojibake-{}-{}",
+            "igsift-dm-mojibake-{}-{}",
             std::process::id(),
             jiff::Timestamp::now().as_nanosecond(),
         ));

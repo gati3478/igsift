@@ -1,4 +1,4 @@
-# Scoring configuration for ig-mgr.
+# Scoring configuration for igsift.
 #
 # Edit these to tune recommendations without recompiling — loaded by
 # src/config.rs (resolution: --config PATH, else cwd config/scoring.toml,

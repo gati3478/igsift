@@ -15,7 +15,7 @@
 # `review` is intentionally NOT supported: review is "I haven't decided",
 # and a label means "I have decided".
 #
-# When `config/labels.txt` exists, `ig-mgr` prints a confusion matrix
+# When `config/labels.txt` exists, `igsift` prints a confusion matrix
 # (label × bucket) after the standard report, plus a per-account list
 # of hard mismatches (label=keep ∩ bucket=unfollow OR
 # label=drop ∩ bucket=keep). Soft mismatches (anything involving

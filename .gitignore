@@ -13,8 +13,8 @@
 # Archive extraction caches — written by `archive::resolve` next to the
 # input. Hidden but still need ignoring in case an export lives inside
 # the repo for testing.
-.ig-mgr-extracted/
-.ig-mgr-extracted-*/
+.igsift-extracted/
+.igsift-extracted-*/
 
 # Generated audit artifacts
 following-audit_*.csv

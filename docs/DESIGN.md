@@ -1,4 +1,4 @@
-# Design — `ig-mgr`
+# Design — `igsift`
 
 The full design for the Instagram following-cleanup CLI. Status, build, and the
 short pitch live in the [README](../README.md); the task list in
@@ -443,7 +443,7 @@ the input by default, overridable via `--out`.
 ## Implementation notes (tech choices)
 
 **Format: CLI, not TUI.** One-shot batch job; the CSV + Markdown output is the
-interface. A `ratatui` review subcommand (`ig-mgr review`) is an optional v2
+interface. A `ratatui` review subcommand (`igsift review`) is an optional v2
 direction — out of scope for v1.
 
 **Language: Rust** (edition 2024, stable). The workload is its sweet spot: file

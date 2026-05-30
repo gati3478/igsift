@@ -15,7 +15,7 @@ treated as the top priority.
 
 ## Threat model / what to look for
 
-`ig-mgr` is a **local-first, offline** tool. It reads an Instagram data export
+`igsift` is a **local-first, offline** tool. It reads an Instagram data export
 from disk and writes report files to disk. It performs no network I/O, has no
 server, no database, no telemetry, and never transmits export data anywhere.
 The most relevant classes of issue are therefore:

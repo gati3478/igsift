@@ -2,7 +2,7 @@
 
 ## Project overview
 
-`ig-mgr` — a local-first Rust **CLI** that reads an Instagram personal data
+`igsift` — a local-first Rust **CLI** that reads an Instagram personal data
 export and writes a three-format audit (CSV + Markdown + HTML): who to
 unfollow vs. keep, with a `keep_probability` per account. One-shot run, no UI,
 no network, no database, no automated unfollow. The user acts on the output
@@ -22,7 +22,7 @@ input ──▶ archive::resolve  (dir / .zip / multipart .zip → extracted dir
       ──▶ output::*          (CSV + Markdown + HTML writers)
 ```
 
-**Three subcommands** (legacy `ig-mgr <export>` still works as implicit Run):
+**Three subcommands** (legacy `igsift <export>` still works as implicit Run):
 `run` (score + write audit), `init` (scaffold per-user config files from
 embedded templates), `check` (parser dry-run with per-source pass/fail,
 plus a config sanity check that the keeplist + droplist parse and
@@ -47,8 +47,8 @@ tuning results; don't restate the numbers here.
 ## Tech stack
 
 - **Language**: Rust, edition 2024, stable toolchain (`rust-toolchain.toml` pins it).
-- **Package shape**: single package, two targets — library crate `ig_mgr`
-  (`src/lib.rs`) holds the logic; binary `ig-mgr` (`src/main.rs`) is a thin
+- **Package shape**: single package, two targets — library crate `igsift`
+  (`src/lib.rs`) holds the logic; binary `igsift` (`src/main.rs`) is a thin
   shell. **Not** a workspace. Integration tests in `tests/` use the lib.
 - **Dependencies**: the full set lives in `Cargo.toml`; per-crate rationale and
   the deliberately-not-used list are in [`docs/DESIGN.md`](docs/DESIGN.md).
@@ -78,7 +78,7 @@ breakdown), `--rebuild-cache` (force archive re-extract), `-v` / `-vv`
 
 `<input>` is a directory (extracted or containing `*.zip` parts) or a
 single `.zip` — `archive::resolve` detects and extracts transparently
-into `.ig-mgr-extracted*/` next to the input, with cache reuse keyed on
+into `.igsift-extracted*/` next to the input, with cache reuse keyed on
 a `{count}\n{total_bytes}` fingerprint (mtime-immune to `cp -p` and
 `rsync --times`).
 
@@ -91,7 +91,7 @@ src/
   main.rs                       # binary entry: dispatch on subcommand (run / init / check)
   lib.rs                        # run() / init() / check() orchestration; init_tracing(); re-exports
   cli.rs                        # clap derive: Cli, RunArgs, Command (Run/Init/Check), Preset enum
-  archive.rs                    # input detect + zip extract + cache (.ig-mgr-extracted*/)
+  archive.rs                    # input detect + zip extract + cache (.igsift-extracted*/)
   config.rs                     # scoring.toml deserialization; preset resolution chain
   export.rs                     # IG export JSON parsers + validate_shape pre-flight
   lists.rs                  # config/{keeplist,droplist}.txt loaders + ensure_disjoint
@@ -214,7 +214,7 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   relax the assertion. Pair with the structural unit tests in
   `src/export.rs` (`#[cfg(test)] mod tests`) which pin nested fields so
   counts alone can't paper over a regression that returns defaulted
-  entries. The `ig_mgr()` test helper spawns the binary with
+  entries. The `igsift()` test helper spawns the binary with
   `cwd = std::env::temp_dir()` so the cwd-relative `config/*` loaders miss
   any per-user files at the repo root — without this, a developer with
   their own `config/labels.txt` or `config/keeplist.txt` sees

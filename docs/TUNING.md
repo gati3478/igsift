@@ -328,7 +328,7 @@ list** before trusting these numbers transitively.
 
 ### Side effect — test isolation
 
-`tests/cli.rs::ig_mgr()` now sets the spawned binary's cwd to
+`tests/cli.rs::igsift()` now sets the spawned binary's cwd to
 `std::env::temp_dir()` so the binary's cwd-relative config lookups
 (`config/scoring.toml`, `config/labels.txt`,
 `config/keeplist.txt`) miss the per-user files at the repo root.

@@ -1,19 +1,20 @@
 [package]
-name = "ig-mgr"
+name = "igsift"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Local-first CLI that scores Instagram followings from a personal data export and ranks who to unfollow vs. keep."
+description = "Local-first CLI that sifts your Instagram followings from a personal data export into a keep/unfollow audit."
 authors = ["Gati Petriashvili <gatipetriashvili@gmail.com>"]
 license = "MIT"
-repository = "https://github.com/gati3478/ig-manager"
+repository = "https://github.com/gati3478/igsift"
 readme = "README.md"
 keywords = ["instagram", "cli", "data-export", "local-first"]
 categories = ["command-line-utilities"]
 
-# Binary is `ig-mgr`; library crate is `ig_mgr` (shared by the binary and the
-# integration tests in `tests/`). This is one package with two targets, not a
-# workspace split — see docs/DESIGN.md.
+# Binary and library crate are both `igsift` (Cargo auto-derives the lib name
+# from the package). The library is shared by the binary and the integration
+# tests in `tests/`. This is one package with two targets, not a workspace
+# split — see docs/DESIGN.md.
 
 [lints.rust]
 unsafe_code = "forbid"

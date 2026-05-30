@@ -46,7 +46,7 @@ pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> 
         .filter(|s| s.bucket == Bucket::Unfollow)
         .count();
 
-    writeln!(writer, "# ig-mgr following audit").context("md header")?;
+    writeln!(writer, "# igsift following audit").context("md header")?;
     writeln!(writer).context("md")?;
     writeln!(writer, "## Summary").context("md")?;
     writeln!(writer).context("md")?;

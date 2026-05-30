@@ -1,4 +1,4 @@
-# Roadmap — `ig-mgr`
+# Roadmap — `igsift`
 
 Implementation order. Each parser/feature step is verified against a real
 export before moving on — see [`docs/DESIGN.md`](docs/DESIGN.md) for the design

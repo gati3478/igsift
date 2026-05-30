@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for the report. **Do not paste real export data, real handles, or
-        any personal information** — `ig-mgr` processes private data and this is a
+        any personal information** — `igsift` processes private data and this is a
         public issue tracker. Describe the shape of the data, not its contents.
   - type: textarea
     id: what-happened
@@ -24,7 +24,7 @@ body:
         parser failed, the `serde_path_to_error` path in the message is the most
         useful single line.
       placeholder: |
-        $ ig-mgr check ./export
+        $ igsift check ./export
         Error: ... at your_instagram_activity/...
     validations:
       required: true
@@ -32,7 +32,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: Output of `ig-mgr --version`, or the commit SHA you built from.
+      description: Output of `igsift --version`, or the commit SHA you built from.
     validations:
       required: true
   - type: input
