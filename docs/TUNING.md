@@ -44,18 +44,18 @@ so it ships off, not removed).
 18 of 20 sampled floored accounts were labeled keep. The 2 exceptions were a
 3.4-year and an **8.8-year** mutual the owner wants gone — indistinguishable
 from the keeps by reciprocal age (raising the threshold past 8.8y would lose
-dozens of real keeps), so they go on the drop-list, not into a threshold tweak.
+dozens of real keeps), so they go on the droplist, not into a threshold tweak.
 The floor stays at 730 days.
 
 ### Residual hard mismatches → override lists (not tuning)
 
 The 3 hard mismatches after the ceiling flip were all feature-ceiling cases
-resolved by the lists: two years-deep mutuals labeled drop → `drop_list.txt`;
-one low-engagement non-mutual content account labeled keep → `keep_allowlist.txt`
+resolved by the lists: two years-deep mutuals labeled drop → `droplist.txt`;
+one low-engagement non-mutual content account labeled keep → `keeplist.txt`
 (floored Unfollow → Review). Result: **0 hard mismatches**. The remaining ~15
 non-agreements are mid-score keeps correctly sitting in `review` — tangled with
 a mid-score _drop_ at the same `keep_prob`, so no `keep_min` / weight move
-separates them. That residue is allowlist territory, not a tuning lever.
+separates them. That residue is keeplist territory, not a tuning lever.
 
 ## 2026-05-30 — reciprocity gates (round 6, **gates not weights**)
 
@@ -170,9 +170,9 @@ overfits one account and drops more story-keepers into Review.
 ### Open follow-up — the real fix is a feature, not a weight
 
 The remaining hard mismatch and the low-engagement-keep misses both want
-a **drop-list**: a user-maintained `config/drop_list.txt` mirroring
-`keep_allowlist.txt`, gating `keep → review` (never auto-keep a
-hand-flagged drop). With the existing keep-allowlist for the
+a **droplist**: a user-maintained `config/droplist.txt` mirroring
+`keeplist.txt`, gating `keep → review` (never auto-keep a
+hand-flagged drop). With the existing keeplist for the
 low-engagement keeps, that covers what global weights structurally
 cannot. Candidate v2 (see ROADMAP). Decay constants still unrevisited.
 
@@ -187,9 +187,9 @@ as the weights rounds. Same shape as the round-3-precursor "brand gate
 ### Verdict
 
 Brand count `19 → 44` on 643 followings. Bucket split `481 / 155 / 7`
-**unchanged from the round-3 post-allowlist anchor** (`481 / 154 / 8` at
+**unchanged from the round-3 post-keeplist anchor** (`481 / 154 / 8` at
 round-3 commit → `481 / 155 / 7` after `moonrisecrystals` was added to
-`keep_allowlist.txt`; the round-4 lexicon then shifts nothing because
+`keeplist.txt`; the round-4 lexicon then shifts nothing because
 all 25 newly-classified brands already sit at
 `keep_prob > unfollow_max = 0.35`, so the gate has no work to do at
 current weights). Confusion matrix vs `config/labels.txt` also unchanged
@@ -252,7 +252,7 @@ list** before trusting these numbers transitively.
   call: handles like `indiebydesign` could be personal-designer
   portfolio accounts, not brands. The brand-gate flooring would be
   reasonable for explicit design studios but wrong for personal
-  designers; `keep_allowlist.txt` is the right venue case-by-case.
+  designers; `keeplist.txt` is the right venue case-by-case.
 - `bar` (3 chars, 3 real hits, 5 FPs without word boundaries:
   `bardic.cub`, `mimosa_barr`, `nbaratelli`, `waynebarlowe_thedarkness`,
   `thebarewytchproject`). Safe only under word-boundary semantics.
@@ -263,10 +263,10 @@ list** before trusting these numbers transitively.
 `tests/cli.rs::ig_mgr()` now sets the spawned binary's cwd to
 `std::env::temp_dir()` so the binary's cwd-relative config lookups
 (`config/scoring.toml`, `config/labels.txt`,
-`config/keep_allowlist.txt`) miss the per-user files at the repo root.
+`config/keeplist.txt`) miss the per-user files at the repo root.
 Without this, `cargo test` after laying down a real `config/labels.txt`
 contaminates `fixture_counts_match_expected` with a non-zero
-allowlist size and 28 "labels not in scored set" warnings, even though
+keeplist size and 28 "labels not in scored set" warnings, even though
 nothing in the fixture itself changed.
 
 ### Why we stopped
@@ -292,8 +292,8 @@ rationale are what's preserved here.
 `481 / 160 / 2`. Single edit: `unfollow_max 0.3 → 0.35`. Agreement
 against labels improved 6/28 → 7/28 (21.4 % → 25.0 %). The single hard
 mismatch at commit time (a brand-shaped shop-page, label=keep
-∩ bucket=unfollow, identified in `keep_allowlist.txt` as the allowlist
-target) was resolved post-commit via the user-side allowlist — see
+∩ bucket=unfollow, identified in `keeplist.txt` as the keeplist
+target) was resolved post-commit via the user-side keeplist — see
 **Addendum** below for the post-commit state.
 
 Personal handles named in the original drafting of this entry have been
@@ -321,7 +321,7 @@ Reading the matrix — three patterns, ranked by signal strength:
    IRL-known accounts. None have positive engagement features the
    algorithm can amplify (zero likes/comments/DMs × any weight = zero).
    Brand-gate already floors 4 of them to Review; the remaining 11 are
-   allowlist or future lexicon-expansion territory.
+   keeplist or future lexicon-expansion territory.
 2. **6 drop-labels in bucket=review** — algorithm marks them borderline
    correctly but doesn't push below the 0.3 cutoff. One labeled-drop
    sits just above `unfollow_max` at `keep_prob=0.302`; the other five
@@ -331,7 +331,7 @@ Reading the matrix — three patterns, ranked by signal strength:
    without breaking the keeps.
 3. **1 hard mismatch** — `moonrisecrystals` (label=keep, bucket=unfollow,
    0.276). Shop page; brand lexicon doesn't catch `moonrise` or
-   `crystals`. Allowlist territory, not weight-tunable.
+   `crystals`. Keeplist territory, not weight-tunable.
 
 ### Decision — raise `unfollow_max` (0.3 → 0.35)
 
@@ -393,7 +393,7 @@ Conservative widening into actionable territory.
 
 - The dominant matrix pattern (15 keeps in review) isn't addressable by
   any single-knob TOML edit — those accounts have zero positive
-  engagement features. The fix is either keep_allowlist expansion
+  engagement features. The fix is either keeplist expansion
   (user-side) or brand-lexicon widening (code-side, accepting more
   lexicon false positives for more brand recall). Neither is a weights
   edit.
@@ -408,7 +408,7 @@ Conservative widening into actionable territory.
 ### Open follow-ups
 
 - **RESOLVED 2026-05-27.** Add `moonrisecrystals` (and similar shop-page
-  false negatives) to `keep_allowlist.txt`. The brand lexicon will never
+  false negatives) to `keeplist.txt`. The brand lexicon will never
   catch store names without unacceptable collateral. Actioned immediately
   post-commit; see Addendum below.
 - The 5 mid-band labeled drops at `keep_prob ∈ [0.43, 0.68]` won't move
@@ -422,11 +422,11 @@ Conservative widening into actionable territory.
   `books`, `zine`, plus six others added. `bar` deferred pending
   word-boundary semantics.
 
-### Addendum — post-commit allowlist resolution
+### Addendum — post-commit keeplist resolution
 
 Immediately after the `unfollow_max` commit landed, the open follow-up
 above was actioned: `moonrisecrystals` added to
-`config/keep_allowlist.txt`. The allowlist gate floors
+`config/keeplist.txt`. The keeplist gate floors
 `Unfollow → Review`, producing the post-commit state below — this is
 what the binary reports today.
 
@@ -447,12 +447,12 @@ Agreement unchanged (a `label=keep ∩ bucket=unfollow` hard mismatch
 becoming a `label=keep ∩ bucket=review` soft mismatch is not an
 agreement gain). Hard-mismatch count: 1 → 0 — the cleanest matrix state
 achievable without code changes. Round 4 then anchors against this
-post-allowlist `481 / 155 / 7`, not the `481 / 154 / 8` at-commit state.
+post-keeplist `481 / 155 / 7`, not the `481 / 154 / 8` at-commit state.
 
 ## 2026-05-27 — brand gate (structural change, not a weights edit)
 
 The brand / public-figure account-class heuristic landed alongside the
-keep-allowlist override (see ROADMAP). Not a TOML edit — a code-level
+keeplist override (see ROADMAP). Not a TOML edit — a code-level
 addition of a new Unfollow gate — but it shifts the bucket distribution
 on the real export, so worth recording here for continuity:
 
@@ -484,8 +484,8 @@ false positives, because the gate catches them upstream.
   tells us which of the two is closer to the user's intent.
 - Lexicon false-positive triage: `butt_news` is the only known case
   on this export. If the labeled set confirms it should be Unfollow,
-  the user can add it to `keep_allowlist.txt`'s **opposite** — there
-  isn't one yet; allowlist semantics are "never unfollow". For now,
+  the user can add it to `keeplist.txt`'s **opposite** — there
+  isn't one yet; keeplist semantics are "never unfollow". For now,
   the false positive surfaces as a Review-band account and the user
   handles it manually.
 

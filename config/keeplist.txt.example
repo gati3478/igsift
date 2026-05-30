@@ -1,4 +1,4 @@
-# keep_allowlist — accounts to never suggest unfollowing.
+# keeplist — accounts to never suggest unfollowing.
 #
 # One username per line (without the leading @). Lines starting with '#' and
 # blank lines are ignored. Matching is case-insensitive.

@@ -36,11 +36,11 @@ exclude_re = [
     "Preset::name",
     # *_default loaders are file-IO wiring (exists?/read/parse). The parsers
     # they delegate to are exhaustively tested, and the cwd-isolated test
-    # harness deliberately has no config file on disk to read. `load_drop_list`
+    # harness deliberately has no config file on disk to read. `load_droplist`
     # and the shared `load_handle_list` helper are the same exists?/read/parse
     # wiring (the disjointness check + parse rules ARE tested separately).
     "load_default",
-    "load_drop_list",
+    "load_droplist",
     "load_handle_list",
     "replace load ->",
 

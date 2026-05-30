@@ -23,7 +23,7 @@ automated unfollow.
   mutual-follow flag) and a sigmoid `keep_probability` scorer with
   keep/review/unfollow bucketing.
 - Brand/public-figure classifier, restricted-account floor, and mirror
-  keep-allowlist / drop-list overrides.
+  keeplist / droplist overrides.
 - Three subcommands (`run`, `init`, `check`), three scoring presets
   (`balanced`/`engagement`/`tenure`), per-term `--trace`, and an optional
   labeled-set confusion-matrix report.

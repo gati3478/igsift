@@ -58,8 +58,12 @@ tau_content_days = 365
 threshold = 1.5    # center of the sigmoid (score_raw at keep_prob = 0.5)
 scale = 1.0        # spread; larger = softer transition
 keep_min = 0.7     # keep_prob >= keep_min            -> keep
-unfollow_max = 0.35 # keep_prob <  unfollow_max (+gates) -> unfollow
+unfollow_max = 0.43 # keep_prob <  unfollow_max (+gates) -> unfollow
                    # everything in between             -> review
+                   # Raised 0.35 -> 0.43 (2026-05-30): surfaces 13 -> 43 unfollow
+                   # candidates with still 0 hard mismatches vs labels.txt. 0.44 is
+                   # the floor of the labeled-keep cluster; 0.45+ flips real keeps.
+                   # Personal calibration — the balanced preset stays at 0.35.
 
 # Relationship gates (mirror cut-offs above; both are monotonic — they can
 # only refuse to auto-keep a stranger / refuse to drop a deep mutual, never
@@ -69,5 +73,5 @@ require_reciprocity_for_keep = false # OFF for this user: the 2026-05-30 labelin
                                      # one-way creator/brand follows (20/20 labeled
                                      # keep) — agreement 34.5% -> 69.0% with it off.
                                      # Non-mutuality is not a drop signal for this
-                                     # following style; real drops go on drop_list.txt.
+                                     # following style; real drops go on droplist.txt.
 deep_mutual_keep_days = 730          # mutual & reciprocal age >= 2y -> keep floor; 0 disables

@@ -215,8 +215,8 @@ fn attribute_line(f: &AccountFeatures) -> String {
     if f.is_favorited {
         parts.push("favorited".to_string());
     }
-    if f.is_keep_allowlisted {
-        parts.push("allowlisted".to_string());
+    if f.is_keeplisted {
+        parts.push("keeplisted".to_string());
     }
     if f.is_restricted {
         parts.push("restricted".to_string());
@@ -307,8 +307,8 @@ mod tests {
             is_removed_suggestion: false,
             recently_unfollowed: false,
             is_mutual: false,
-            is_keep_allowlisted: false,
-            is_drop_listed: false,
+            is_keeplisted: false,
+            is_droplisted: false,
             likes_given: 0,
             comments_given: 0,
             story_interactions_out: 0,

@@ -1,5 +1,5 @@
-//! Load the two per-user handle lists — `config/keep_allowlist.txt`
-//! (never-unfollow) and `config/drop_list.txt` (always-unfollow) — into
+//! Load the two per-user handle lists — `config/keeplist.txt`
+//! (never-unfollow) and `config/droplist.txt` (always-unfollow) — into
 //! in-memory [`HashSet`]s. Both reuse the same [`parse`] rules.
 //!
 //! Format mirrors [`crate::labels`]: one handle per line, `#` introduces a
@@ -9,8 +9,8 @@
 //! token would create a phantom entry that never matches.
 //!
 //! Stored values are ASCII-lowercased on insert so
-//! [`Classifier::is_allowlisted`](crate::features::Classifier::is_allowlisted)
-//! and [`Classifier::is_drop_listed`](crate::features::Classifier::is_drop_listed)
+//! [`Classifier::is_keeplisted`](crate::features::Classifier::is_keeplisted)
+//! and [`Classifier::is_droplisted`](crate::features::Classifier::is_droplisted)
 //! lookups don't re-allocate per query.
 //!
 //! Missing file → empty set. Both lists are opt-in; a fresh install
@@ -25,17 +25,17 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-const DEFAULT_PATH: &str = "config/keep_allowlist.txt";
-const DROP_LIST_PATH: &str = "config/drop_list.txt";
+const DEFAULT_PATH: &str = "config/keeplist.txt";
+const DROP_LIST_PATH: &str = "config/droplist.txt";
 
-/// Load the keep-allowlist from the default path. Missing file → empty set.
+/// Load the keeplist from the default path. Missing file → empty set.
 pub fn load_default() -> Result<HashSet<String>> {
     load_handle_list(Path::new(DEFAULT_PATH))
 }
 
-/// Load the drop-list from the default path. Missing file → empty set.
-/// Exact mirror of [`load_default`] against `config/drop_list.txt`.
-pub fn load_drop_list() -> Result<HashSet<String>> {
+/// Load the droplist from the default path. Missing file → empty set.
+/// Exact mirror of [`load_default`] against `config/droplist.txt`.
+pub fn load_droplist() -> Result<HashSet<String>> {
     load_handle_list(Path::new(DROP_LIST_PATH))
 }
 
@@ -48,7 +48,7 @@ fn load_handle_list(path: &Path) -> Result<HashSet<String>> {
     parse(&body, &path.display().to_string())
 }
 
-/// Bail if any handle appears in both the keep-allowlist and the drop-list.
+/// Bail if any handle appears in both the keeplist and the droplist.
 ///
 /// A both-listed handle is a contradiction (never-unfollow vs. always-
 /// unfollow); resolving it silently would be a lie about user intent.
@@ -69,7 +69,7 @@ pub fn ensure_disjoint(keep: &HashSet<String>, drop: &HashSet<String>) -> Result
     );
 }
 
-/// Parse a newline-separated allowlist body, naming `source` in error
+/// Parse a newline-separated keeplist body, naming `source` in error
 /// messages. Strips `#`-comments and blanks, ASCII-lowercases entries,
 /// and bails on multi-token bare lines (paralleling [`crate::labels::load`]).
 pub fn parse(body: &str, source: &str) -> Result<HashSet<String>> {
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn whitespace_only_lines_are_ignored() {
         // Defends against editor trailing whitespace polluting the set
-        // with empty-string keys — would otherwise allowlist every
+        // with empty-string keys — would otherwise keeplist every
         // followee whose handle is empty.
         let set = parse_ok("   \n\t\n  alice  \n");
         assert_eq!(set.len(), 1);
@@ -188,12 +188,12 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("shared_handle"), "must name the handle: {msg}");
         assert!(
-            msg.contains("config/keep_allowlist.txt"),
-            "must name the keep-allowlist file: {msg}",
+            msg.contains("config/keeplist.txt"),
+            "must name the keeplist file: {msg}",
         );
         assert!(
-            msg.contains("config/drop_list.txt"),
-            "must name the drop-list file: {msg}",
+            msg.contains("config/droplist.txt"),
+            "must name the droplist file: {msg}",
         );
     }
 

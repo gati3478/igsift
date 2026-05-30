@@ -26,7 +26,7 @@ long-standing relationships — is invisible to scoring.
 An Instagram export is **good at confirming keeps** (reciprocity and deep
 shared history are visible) and **bad at confirming unfollows** (disinterest
 leaves no trace). Therefore scoring should own the _keep_ side via monotonic
-gates; the **drop-list** owns the _unfollow_ side. Trying to push "I'm not
+gates; the **droplist** owns the _unfollow_ side. Trying to push "I'm not
 interested anymore" accounts to `unfollow` from signals alone is chasing
 information the export does not contain.
 
@@ -46,7 +46,7 @@ relationship is one-directional consumption — **all** of:
 - no inbound signal: `!inbound_dm_request && dm_reactions_received == 0`
   and not a two-way thread (`dm_balance` is not `Some(b < 1.0)`)
 - not explicitly kept: `!is_favorited && !is_close_friend &&
-!is_keep_allowlisted`
+!is_keeplisted`
 
 Effect: can only move `keep → review`. **Cannot produce an unfollow.** It is
 the exact mirror of the existing brand/favorite _unfollow_ gate.
@@ -68,7 +68,7 @@ follows are real relationships worth keeping even with no recent engagement.
 
 ```
 1. is_restricted              → Review     (unchanged)
-2. is_drop_listed             → Unfollow   (unchanged)
+2. is_droplisted             → Unfollow   (unchanged)
 3. deep-mutual floor fires    → Keep        ← NEW (Rule 2)
 4. keep_prob >= keep_min      → Keep,
      unless reciprocity gate  → Review       ← NEW (Rule 1)
@@ -76,7 +76,7 @@ follows are real relationships worth keeping even with no recent engagement.
 6. else                       → Review     (unchanged)
 ```
 
-The drop-list (rung 2) still outranks the deep-mutual floor — an explicit drop
+The droplist (rung 2) still outranks the deep-mutual floor — an explicit drop
 intent beats a long mutual history. `is_restricted` still outranks everything.
 
 ## Configuration
@@ -127,12 +127,12 @@ Five-account validation sample (decisions known out-of-band):
 | 9.6yr mutual, recent likes               | keep     | **keep** ✅         | —               |
 | 9.6yr mutual, no engagement              | keep     | **keep** ✅ (floor) | —               |
 | 7yr mutual, "I know him"                 | keep     | **keep** ✅ (floor) | label was stale |
-| non-mutual personal, low signal          | unfollow | review              | drop-list       |
-| non-mutual personal, heavy one-way likes | unfollow | review              | drop-list       |
-| 2.4yr mutual, story-driven, uninterested | unfollow | keep                | drop-list       |
+| non-mutual personal, low signal          | unfollow | review              | droplist       |
+| non-mutual personal, heavy one-way likes | unfollow | review              | droplist       |
+| 2.4yr mutual, story-driven, uninterested | unfollow | keep                | droplist       |
 
 The three unfollow-intent accounts cannot be reached by signals (disinterest
-is invisible; a 2.4yr mutual reads as a relationship). They are drop-list
+is invisible; a 2.4yr mutual reads as a relationship). They are droplist
 territory by design.
 
 ## Why gates, not weights
@@ -154,7 +154,7 @@ weights inherit label noise and swing decisions both ways; gates do not.
 ## Out of scope
 
 - Pushing the three unfollow-intent sample accounts to `unfollow` from signals
-  (drop-list territory — explicitly accepted).
+  (droplist territory — explicitly accepted).
 - A full relabel of `config/labels.txt` (separate task; requires the owner's
   per-account IRL knowledge).
 
@@ -164,13 +164,13 @@ weights inherit label noise and swing decisions both ways; gates do not.
 
 1. Reciprocity gate floors a non-mutual personal high-scorer to `review`.
 2. Gate exemptions each keep `keep`: mutual / brand-class / favorited /
-   close-friend / keep-allowlisted / inbound-reaction / two-way DM.
+   close-friend / keeplisted / inbound-reaction / two-way DM.
 3. One-sided thread (`dm_balance == 1.0`) does **not** exempt.
 4. Deep-mutual floor: mutual + age ≥ threshold → `keep` even from a low score.
 5. Floor boundary is inclusive at exactly `deep_mutual_keep_days`.
 6. Floor does not fire for `mutual_age == None`, for non-mutual, or below
    threshold.
-7. Precedence: `is_drop_listed` and `is_restricted` still beat the floor.
+7. Precedence: `is_droplisted` and `is_restricted` still beat the floor.
 8. `require_reciprocity_for_keep = false` and `deep_mutual_keep_days = 0`
    each disable their rule.
 

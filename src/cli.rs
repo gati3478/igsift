@@ -5,7 +5,7 @@
 //! - Default / `run` — score an export and write the audit. The legacy
 //!   form `ig-mgr <export_dir>` is preserved; `ig-mgr run <export_dir>`
 //!   is its explicit alias.
-//! - `init` — scaffold the per-user `config/` files (keep allowlist,
+//! - `init` — scaffold the per-user `config/` files (keep keeplist,
 //!   labels template) for a fresh checkout.
 //! - `check <export_dir>` — validate that an export folder is parseable
 //!   without scoring it. Fast pre-flight for a freshly-extracted export
@@ -121,7 +121,7 @@ pub enum Command {
     /// default invocation).
     Run(RunArgs),
 
-    /// Scaffold per-user config files (`config/keep_allowlist.txt`,
+    /// Scaffold per-user config files (`config/keeplist.txt`,
     /// `config/labels.txt`) from their checked-in templates.
     Init {
         /// Overwrite existing config files. Default: skip existing.
@@ -194,7 +194,7 @@ EXAMPLES:
   # Debug verbosity (or use RUST_LOG=ig_mgr=debug to override)
   ig-mgr ./ig-exported-data -v
 
-  # Scaffold config/keep_allowlist.txt + config/labels.txt from templates
+  # Scaffold config/keeplist.txt + config/labels.txt from templates
   ig-mgr init
 
   # Dry-run: validate the export shape without scoring

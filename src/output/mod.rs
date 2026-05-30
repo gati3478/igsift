@@ -60,7 +60,7 @@ const LONG_STANDING_MUTUAL_HINT_DAYS: u32 = 730;
 /// labels (drift would silently surface different reasons for the
 /// same account across artifacts).
 ///
-/// Order matters: explicit user signals (allowlist, close friend,
+/// Order matters: explicit user signals (keeplist, close friend,
 /// favorited) trump inferred behaviour (DM activity, recent likes),
 /// which in turn trump structural fallbacks (one-sided, brand,
 /// dormant). A regression that reorders these would still pass
@@ -68,19 +68,19 @@ const LONG_STANDING_MUTUAL_HINT_DAYS: u32 = 730;
 /// pins the precedence chain end to end.
 pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str {
     // Most decisive signal: the user explicitly forced Unfollow — but the
-    // drop-list yields to the restricted floor, so guard on `!is_restricted`
+    // droplist yields to the restricted floor, so guard on `!is_restricted`
     // to stay consistent with `assign_bucket` (restricted → Review beats
-    // drop → Unfollow). Without the guard, a restricted + drop-listed
-    // account would sit in Review yet report "explicit drop-list",
+    // drop → Unfollow). Without the guard, a restricted + droplisted
+    // account would sit in Review yet report "explicit droplist",
     // contradicting its own bucket. Placement above the keep-signals is
-    // intentional and safe: it can't co-occur with the allowlist (rejected
-    // at load by ensure_disjoint), and a drop-listed close-friend/favorited
+    // intentional and safe: it can't co-occur with the keeplist (rejected
+    // at load by ensure_disjoint), and a droplisted close-friend/favorited
     // correctly buckets Unfollow, so the drop hint is the honest one there.
-    if f.is_drop_listed && !f.is_restricted {
-        return "explicit drop-list";
+    if f.is_droplisted && !f.is_restricted {
+        return "explicit droplist";
     }
-    if f.is_keep_allowlisted {
-        return "explicit allowlist";
+    if f.is_keeplisted {
+        return "explicit keeplist";
     }
     if f.is_close_friend {
         return "marked close friend";
@@ -202,8 +202,8 @@ mod tests {
             is_removed_suggestion: false,
             recently_unfollowed: false,
             is_mutual: true,
-            is_keep_allowlisted: false,
-            is_drop_listed: false,
+            is_keeplisted: false,
+            is_droplisted: false,
             likes_given: 0,
             comments_given: 0,
             story_interactions_out: 0,
@@ -243,51 +243,51 @@ mod tests {
         }
         let cases = &[
             Case {
-                label: "drop-list beats allowlist",
-                expected: "explicit drop-list",
-                // is_drop_listed + is_keep_allowlisted is load-time-rejected
-                // in production (`allowlist::ensure_disjoint`); the pairing
+                label: "droplist beats keeplist",
+                expected: "explicit droplist",
+                // is_droplisted + is_keeplisted is load-time-rejected
+                // in production (`lists::ensure_disjoint`); the pairing
                 // exists here only to pin the hint's source ordering so a
                 // reorder mutation trips.
                 mutate: |f| {
-                    f.is_drop_listed = true;
-                    f.is_keep_allowlisted = true;
+                    f.is_droplisted = true;
+                    f.is_keeplisted = true;
                 },
                 bucket: Bucket::Unfollow,
             },
             Case {
-                // The drop-list yields to the restricted floor, exactly as
+                // The droplist yields to the restricted floor, exactly as
                 // `assign_bucket` does (restricted → Review beats drop →
                 // Unfollow). The hint must mirror that: a restricted +
-                // drop-listed account sits in Review, so reporting
-                // "explicit drop-list" would contradict its own bucket.
+                // droplisted account sits in Review, so reporting
+                // "explicit droplist" would contradict its own bucket.
                 // This `!is_restricted` guard is the one place the two
                 // precedence chains must agree; pin it.
-                label: "restricted beats drop-list in the hint",
+                label: "restricted beats droplist in the hint",
                 expected: "restricted — kept in Review by floor",
                 mutate: |f| {
-                    f.is_drop_listed = true;
+                    f.is_droplisted = true;
                     f.is_restricted = true;
                 },
                 bucket: Bucket::Review,
             },
             Case {
-                // Drop-list alone (no other flag) → its own hint. Pins that
+                // Droplist alone (no other flag) → its own hint. Pins that
                 // the arm fires without being coupled to any other signal,
-                // and keeps the compound `is_drop_listed && !is_restricted`
+                // and keeps the compound `is_droplisted && !is_restricted`
                 // condition's mutations caught.
-                label: "drop-list alone",
-                expected: "explicit drop-list",
+                label: "droplist alone",
+                expected: "explicit droplist",
                 mutate: |f| {
-                    f.is_drop_listed = true;
+                    f.is_droplisted = true;
                 },
                 bucket: Bucket::Unfollow,
             },
             Case {
-                label: "allowlist beats close_friend",
-                expected: "explicit allowlist",
+                label: "keeplist beats close_friend",
+                expected: "explicit keeplist",
                 mutate: |f| {
-                    f.is_keep_allowlisted = true;
+                    f.is_keeplisted = true;
                     f.is_close_friend = true;
                 },
                 bucket: Bucket::Keep,

@@ -15,19 +15,19 @@
 //!
 //! Status: parser layer, feature aggregation, first-pass scoring, CSV +
 //! Markdown writers, and the brand / public-figure account-class
-//! heuristic (with the user-maintained keep-allowlist override) have all
+//! heuristic (with the user-maintained keeplist override) have all
 //! landed. The pipeline composes a `keep_prob` per account, assigns a
 //! bucket (`keep` / `review` / `unfollow`) via the DESIGN.md formula plus
-//! the restricted / boost / brand / allowlist gates, and writes the
+//! the restricted / boost / brand / keeplist gates, and writes the
 //! CSV + Markdown artifacts next to the export directory.
 
-pub mod allowlist;
 pub mod archive;
 pub mod cli;
 pub mod config;
 pub mod export;
 pub mod features;
 pub mod labels;
+pub mod lists;
 pub mod output;
 pub mod progress;
 pub mod scoring;
@@ -68,8 +68,8 @@ pub fn init_tracing(verbose: u8) {
 pub fn init(force: bool) -> Result<()> {
     use std::fs;
 
-    const KEEP_ALLOWLIST_TEMPLATE: &str = include_str!("../config/keep_allowlist.txt.example");
-    const DROP_LIST_TEMPLATE: &str = include_str!("../config/drop_list.txt.example");
+    const KEEP_ALLOWLIST_TEMPLATE: &str = include_str!("../config/keeplist.txt.example");
+    const DROP_LIST_TEMPLATE: &str = include_str!("../config/droplist.txt.example");
     const LABELS_TEMPLATE: &str = include_str!("../config/labels.txt.example");
 
     let config_dir = PathBuf::from("config");
@@ -77,8 +77,8 @@ pub fn init(force: bool) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("create config/ directory: {e}"))?;
 
     let targets: &[(&str, &str)] = &[
-        ("config/keep_allowlist.txt", KEEP_ALLOWLIST_TEMPLATE),
-        ("config/drop_list.txt", DROP_LIST_TEMPLATE),
+        ("config/keeplist.txt", KEEP_ALLOWLIST_TEMPLATE),
+        ("config/droplist.txt", DROP_LIST_TEMPLATE),
         ("config/labels.txt", LABELS_TEMPLATE),
     ];
 
@@ -97,8 +97,8 @@ pub fn init(force: bool) -> Result<()> {
     }
     println!("\n{wrote} written, {skipped} skipped.");
     if wrote > 0 {
-        println!("Edit config/keep_allowlist.txt to mark accounts that must stay in Keep.");
-        println!("Edit config/drop_list.txt to force accounts into Unfollow.");
+        println!("Edit config/keeplist.txt to mark accounts that must stay in Keep.");
+        println!("Edit config/droplist.txt to force accounts into Unfollow.");
         println!("Edit config/labels.txt with your hand-labels to enable the accuracy report.");
     }
     Ok(())
@@ -107,7 +107,7 @@ pub fn init(force: bool) -> Result<()> {
 /// `ig-mgr check <export>` — validate that an export folder is
 /// parseable without scoring it. Runs the shape pre-flight, then
 /// attempts every parser, surfacing per-source status, and finishes
-/// with a config sanity check (the keep-allowlist and drop-list must
+/// with a config sanity check (the keeplist and droplist must
 /// parse and be disjoint). Exits non-zero (Err) on any failure —
 /// a parse failure, or a both-listed handle that `run` would reject.
 ///
@@ -255,9 +255,9 @@ pub fn check(input: &Path, rebuild_cache: bool) -> Result<()> {
     // separately from `failures` so the summary wording stays accurate: a
     // parse/conflict here is not a "source failed to parse".
     let config_result: Result<(usize, usize)> = (|| {
-        let keep = allowlist::load_default()?;
-        let drop = allowlist::load_drop_list()?;
-        allowlist::ensure_disjoint(&keep, &drop)?;
+        let keep = lists::load_default()?;
+        let drop = lists::load_droplist()?;
+        lists::ensure_disjoint(&keep, &drop)?;
         Ok((keep.len(), drop.len()))
     })();
     let config_ok = config_result.is_ok();
@@ -283,8 +283,7 @@ pub fn check(input: &Path, rebuild_cache: bool) -> Result<()> {
         // Terse + self-contained, mirroring the parser summary above: the
         // offending handle/file is on the stdout `✗` line, so this verdict
         // must not reference "above" (the streams split under redirection).
-        problems
-            .push("keep-allowlist / drop-list invalid (not disjoint or unparseable)".to_owned());
+        problems.push("keeplist / droplist invalid (not disjoint or unparseable)".to_owned());
     }
     anyhow::bail!("{}", problems.join("; "))
 }
@@ -472,14 +471,14 @@ pub fn run(args: RunArgs) -> Result<()> {
 
     progress.phase("Loading scoring config + handle lists");
     let scoring_config = config::read_scoring_config(args.config.as_deref(), args.preset)?;
-    let keep_allowlist = allowlist::load_default()?;
-    let drop_list = allowlist::load_drop_list()?;
+    let keeplist = lists::load_default()?;
+    let droplist = lists::load_droplist()?;
     // A handle on both lists is a keep/drop contradiction — fail before
     // scoring so `assign_bucket` never sees a both-listed handle.
-    allowlist::ensure_disjoint(&keep_allowlist, &drop_list)?;
-    let keep_allowlist_size = keep_allowlist.len();
-    let drop_list_size = drop_list.len();
-    let classifier = features::Classifier::new(keep_allowlist, drop_list);
+    lists::ensure_disjoint(&keeplist, &droplist)?;
+    let keeplist_size = keeplist.len();
+    let droplist_size = droplist.len();
+    let classifier = features::Classifier::new(keeplist, droplist);
 
     progress.phase("Aggregating per-account features");
     let inputs = features::aggregate::AggregateInputs {
@@ -533,25 +532,25 @@ pub fn run(args: RunArgs) -> Result<()> {
         .iter()
         .filter(|f| f.account_class == features::AccountClass::Brand)
         .count();
-    let agg_keep_allowlisted = aggregated.iter().filter(|f| f.is_keep_allowlisted).count();
-    let agg_drop_listed = aggregated.iter().filter(|f| f.is_drop_listed).count();
+    let agg_keeplisted = aggregated.iter().filter(|f| f.is_keeplisted).count();
+    let agg_droplisted = aggregated.iter().filter(|f| f.is_droplisted).count();
 
     if args.verbose > 0 {
         println!("aggregated accounts: {}", aggregated.len());
         println!("aggregated close friends: {agg_close_friends}");
         println!("aggregated favorited: {agg_favorited}");
         println!("aggregated brands: {agg_brands}");
-        // The allowlist file may carry handles that aren't followees (a
+        // The keeplist file may carry handles that aren't followees (a
         // stale entry, or an aspirational keep). The aggregated count
         // reflects only those that intersect the followings set; the
         // file-size line below is the loaded-from-disk count for sanity.
-        println!("aggregated keep-allowlisted: {agg_keep_allowlisted}");
-        println!("keep-allowlist size on disk: {keep_allowlist_size}");
-        // Same file-vs-followee distinction as the allowlist: the on-disk
-        // count includes drop-list handles that aren't (or are no longer)
+        println!("aggregated keeplisted: {agg_keeplisted}");
+        println!("keeplist size on disk: {keeplist_size}");
+        // Same file-vs-followee distinction as the keeplist: the on-disk
+        // count includes droplist handles that aren't (or are no longer)
         // followees.
-        println!("aggregated drop-listed: {agg_drop_listed}");
-        println!("drop-list size on disk: {drop_list_size}");
+        println!("aggregated droplisted: {agg_droplisted}");
+        println!("droplist size on disk: {droplist_size}");
         println!("aggregated with likes_given > 0: {agg_with_likes}");
         println!("aggregated with comments_given > 0: {agg_with_comments}");
         println!("DM-attributed accounts: {agg_dm_attributed}");

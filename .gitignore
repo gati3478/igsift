@@ -29,16 +29,16 @@ recommendations_*.md
 # never committed. `config/labels.txt.example` is the checked-in template.
 /config/labels.txt
 
-# Personal keep-allowlist — handles the user wants protected from Unfollow.
-# Per-user data, never committed. `config/keep_allowlist.txt.example` is the
-# checked-in template; copy to `config/keep_allowlist.txt` to activate.
-/config/keep_allowlist.txt
+# Personal keeplist — handles the user wants protected from Unfollow.
+# Per-user data, never committed. `config/keeplist.txt.example` is the
+# checked-in template; copy to `config/keeplist.txt` to activate.
+/config/keeplist.txt
 
-# Personal drop-list — handles the user wants forced into Unfollow. The exact
-# inverse of the keep-allowlist. Per-user data, never committed.
-# `config/drop_list.txt.example` is the checked-in template; copy to
-# `config/drop_list.txt` to activate.
-/config/drop_list.txt
+# Personal droplist — handles the user wants forced into Unfollow. The exact
+# inverse of the keeplist. Per-user data, never committed.
+# `config/droplist.txt.example` is the checked-in template; copy to
+# `config/droplist.txt` to activate.
+/config/droplist.txt
 
 # cargo-mutants scratch output (regenerated each `cargo mutants` run)
 /mutants.out/

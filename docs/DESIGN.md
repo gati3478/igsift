@@ -4,7 +4,7 @@ The full design for the Instagram following-cleanup CLI. Status, build, and the
 short pitch live in the [README](../README.md); the task list in
 [ROADMAP.md](../ROADMAP.md). Parser layer, feature aggregation, first-pass
 scoring, CSV/Markdown writers, and the brand/public-figure account-class
-heuristic (with user-maintained keep-allowlist override) are all landed today;
+heuristic (with user-maintained keeplist override) are all landed today;
 weight tuning against a labeled set and the run-on-real-export feedback loop
 are the remaining ROADMAP items.
 
@@ -200,8 +200,8 @@ one decision per account.
 | `is_removed_suggestion`  | `removed_suggestions.json`                          | boolean                                                        | very weak negative                        |
 | `recently_unfollowed`    | `recently_unfollowed_profiles.json`                 | boolean                                                        | **excludes from input set**               |
 | `account_class`          | username/name heuristic (below)                     | personal / brand (PublicFigure deferred — see heuristic below) | gates the `unfollow` recommendation       |
-| `is_keep_allowlisted`    | `config/keep_allowlist.txt`                         | boolean                                                        | parallel Unfollow→Review override         |
-| `is_drop_listed`         | `config/drop_list.txt`                              | boolean                                                        | forces → Unfollow (below `is_restricted`) |
+| `is_keeplisted`    | `config/keeplist.txt`                         | boolean                                                        | parallel Unfollow→Review override         |
+| `is_droplisted`         | `config/droplist.txt`                              | boolean                                                        | forces → Unfollow (below `is_restricted`) |
 
 **Decay.** Every interaction count is recency-weighted with exponential decay
 so a 2019 like is worth far less than a 2026 like. τ is configurable; start
@@ -210,7 +210,7 @@ so a 2019 like is worth far less than a 2026 like. τ is configurable; start
 ### Account-class heuristic (gates "suggest unfollow")
 
 Lives in [`src/features/account_class.rs`](../src/features/account_class.rs);
-`Classifier` is built once per run from the user-maintained allowlist and
+`Classifier` is built once per run from the user-maintained keeplist and
 threaded into the aggregator via `AggregateInputs`.
 
 - **Lexicon match.** Username AND display name are case-insensitively
@@ -231,7 +231,7 @@ threaded into the aggregator via `AggregateInputs`.
   pending word-boundary semantics regardless of how clean the FP grep
   looks on the current export. False positives are
   costlier here than false negatives — a missed brand stays Personal and
-  remains eligible for the close_friend / favorited / allowlist gates,
+  remains eligible for the close_friend / favorited / keeplist gates,
   whereas a falsely-flagged brand silently suppresses a real Unfollow
   recommendation. Per-token audit lives in
   [`docs/TUNING.md`](TUNING.md) round 4.
@@ -242,33 +242,33 @@ threaded into the aggregator via `AggregateInputs`.
   surface as Review). Adding a variant the aggregator can't populate would
   be a lie about what it knows; if a future labeled set proves the distinction
   matters, add the variant then.
-- **Keep-allowlist override.** [`config/keep_allowlist.txt`](../config/keep_allowlist.txt)
+- **Keeplist override.** [`config/keeplist.txt`](../config/keeplist.txt)
   is a separate user-maintained list of handles that must never bucket as
   Unfollow — brands the lexicon misses, public figures, and personal accounts
   the export under-represents (sparse signal, out-of-band relationship). The
-  allowlist is **NOT** classification: a personal close-friend the user
-  allowlists stays `Personal` at the `AccountClass` level so the CSV column
+  keeplist is **NOT** classification: a personal close-friend the user
+  keeplists stays `Personal` at the `AccountClass` level so the CSV column
   doesn't misrepresent the profile. The override surfaces as a separate
-  `is_keep_allowlisted: bool` on `AccountFeatures`, parallel to
+  `is_keeplisted: bool` on `AccountFeatures`, parallel to
   `is_close_friend` / `is_favorited`. Scoring's `assign_bucket` folds both
   signals into the Unfollow gate: `account_class != Personal ||
-is_keep_allowlisted` downgrades to Review.
-- **Drop-list override.** [`config/drop_list.txt`](../config/drop_list.txt)
-  is the exact inverse of the keep-allowlist: a user-maintained list of
+is_keeplisted` downgrades to Review.
+- **Droplist override.** [`config/droplist.txt`](../config/droplist.txt)
+  is the exact inverse of the keeplist: a user-maintained list of
   handles forced to `unfollow` regardless of score or keep-signals. It
   exists because keep/drop intent is not separable on the current features
-  (see [`TUNING.md`](TUNING.md) round 5) — the keep-allowlist handles the
-  low-engagement-keep failure mode, the drop-list handles the story-heavy
-  drop that scores into `keep`. Like the allowlist it is **NOT**
-  classification (a drop-listed handle keeps its real `account_class`). It
-  surfaces as `is_drop_listed: bool` on `AccountFeatures`; `assign_bucket`
+  (see [`TUNING.md`](TUNING.md) round 5) — the keeplist handles the
+  low-engagement-keep failure mode, the droplist handles the story-heavy
+  drop that scores into `keep`. Like the keeplist it is **NOT**
+  classification (a droplisted handle keeps its real `account_class`). It
+  surfaces as `is_droplisted: bool` on `AccountFeatures`; `assign_bucket`
   applies it as the rung directly below the `is_restricted` floor (the one
   signal it yields to). A handle on both lists is rejected at load
-  (`allowlist::ensure_disjoint`).
+  (`lists::ensure_disjoint`).
 - **Honest uncertainty.** Follower count cannot be inferred from the export,
-  so the heuristic is limited to name patterns + allowlist. The text-only
+  so the heuristic is limited to name patterns + keeplist. The text-only
   surface is inherently lossy. **If uncertain, never auto-suggest unfollow —
-  the gate fires conservatively (Brand OR allowlisted → Review).**
+  the gate fires conservatively (Brand OR keeplisted → Review).**
 
 ### Scoring composition (initial form, iterate empirically)
 
@@ -348,25 +348,25 @@ lists bracket the inferred score:
 
 ```
 1. is_restricted        → Review     hard floor; the manual "look first" signal
-2. is_drop_listed       → Unfollow   config/drop_list.txt — forces drop
+2. is_droplisted       → Unfollow   config/droplist.txt — forces drop
 3. deep-mutual floor    → Keep        mutual & mutual_age_days ≥ deep_mutual_keep_days
 4. keep_prob ≥ keep_min → Keep        …unless the reciprocity gate fires → Review
 5. keep_prob < unfollow_max:
-     is_close_friend | is_favorited | is_keep_allowlisted | non-Personal → Review
+     is_close_friend | is_favorited | is_keeplisted | non-Personal → Review
      else → Unfollow
 6. otherwise            → Review
 ```
 
 `is_restricted` floors at `review` even when `keep_prob` is below
-`unfollow_max` — and it is the **one** floor the drop-list yields to
+`unfollow_max` — and it is the **one** floor the droplist yields to
 ("restricted" means human attention is required before any drop call, which
-outranks a standing drop intent). The **drop-list**
-([`config/drop_list.txt`](../config/drop_list.txt)) is the exact inverse of
-the keep-allowlist: a listed handle is forced to `unfollow` regardless of
+outranks a standing drop intent). The **droplist**
+([`config/droplist.txt`](../config/droplist.txt)) is the exact inverse of
+the keeplist: a listed handle is forced to `unfollow` regardless of
 score, close-friend/favorited boosts, or brand class. A handle present in
 **both** lists is a contradiction and is rejected at load
-(`allowlist::ensure_disjoint`) before scoring, so rung 2 never competes with
-rung 5's keep-allowlist gate by construction.
+(`lists::ensure_disjoint`) before scoring, so rung 2 never competes with
+rung 5's keeplist gate by construction.
 
 **Two relationship gates bracket the score (rungs 3–4), both monotonic — each
 can only move an account one direction, so neither can manufacture a wrongful

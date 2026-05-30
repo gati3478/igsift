@@ -15,11 +15,11 @@ use predicates::str::contains;
 fn ig_mgr() -> Command {
     // Spawn with cwd = OS temp dir so the binary's cwd-relative config
     // lookups (`config/scoring.toml`, `config/labels.txt`,
-    // `config/keep_allowlist.txt`) miss the per-user files at the repo
+    // `config/keeplist.txt`) miss the per-user files at the repo
     // root. Without this, a developer running `cargo test` after laying
-    // down their own `config/labels.txt` or `config/keep_allowlist.txt`
+    // down their own `config/labels.txt` or `config/keeplist.txt`
     // sees the fixture-count test contaminate itself with real labels
-    // and a non-zero allowlist size. Each spawned command gets its own
+    // and a non-zero keeplist size. Each spawned command gets its own
     // cwd, so parallel test execution is safe.
     let mut cmd = Command::cargo_bin("ig-mgr").expect("binary `ig-mgr` should build");
     cmd.current_dir(std::env::temp_dir());
@@ -100,8 +100,8 @@ fn check_surfaces_both_listed_conflict() {
     let (mut cmd, cwd) = ig_mgr_with_config(
         "check_conflict",
         &[
-            ("config/keep_allowlist.txt", "dup_handle\n"),
-            ("config/drop_list.txt", "dup_handle\n"),
+            ("config/keeplist.txt", "dup_handle\n"),
+            ("config/droplist.txt", "dup_handle\n"),
         ],
     );
     let result = cmd.arg("check").arg(sample_export()).assert().failure();
@@ -116,17 +116,17 @@ fn check_surfaces_both_listed_conflict() {
         "must name the handle:\n{stdout}"
     );
     assert!(
-        stdout.contains("config/keep_allowlist.txt"),
-        "must name the keep-allowlist file:\n{stdout}",
+        stdout.contains("config/keeplist.txt"),
+        "must name the keeplist file:\n{stdout}",
     );
     assert!(
-        stdout.contains("config/drop_list.txt"),
-        "must name the drop-list file:\n{stdout}",
+        stdout.contains("config/droplist.txt"),
+        "must name the droplist file:\n{stdout}",
     );
     // Terse verdict on stderr (no "source failed to parse" — the fixture
     // parsed fine; the config is the sole failure).
     assert!(
-        stderr.contains("keep-allowlist / drop-list invalid"),
+        stderr.contains("keeplist / droplist invalid"),
         "verdict must name the config failure on stderr:\n{stderr}",
     );
     assert!(
@@ -220,12 +220,12 @@ fn init_subcommand_writes_template_files() {
         .arg("init")
         .assert()
         .success()
-        .stdout(contains("wrote: config/keep_allowlist.txt"))
-        .stdout(contains("wrote: config/drop_list.txt"))
+        .stdout(contains("wrote: config/keeplist.txt"))
+        .stdout(contains("wrote: config/droplist.txt"))
         .stdout(contains("wrote: config/labels.txt"));
 
-    assert!(cwd.join("config/keep_allowlist.txt").is_file());
-    assert!(cwd.join("config/drop_list.txt").is_file());
+    assert!(cwd.join("config/keeplist.txt").is_file());
+    assert!(cwd.join("config/droplist.txt").is_file());
     assert!(cwd.join("config/labels.txt").is_file());
 
     // Re-running without --force skips all files.
@@ -234,8 +234,8 @@ fn init_subcommand_writes_template_files() {
         .arg("init")
         .assert()
         .success()
-        .stdout(contains("skipped: config/keep_allowlist.txt"))
-        .stdout(contains("skipped: config/drop_list.txt"))
+        .stdout(contains("skipped: config/keeplist.txt"))
+        .stdout(contains("skipped: config/droplist.txt"))
         .stdout(contains("skipped: config/labels.txt"));
 
     std::fs::remove_dir_all(&cwd).ok();
@@ -247,12 +247,12 @@ fn init_force_overwrites_existing_content() {
     // make plain `init` clobber a user's hand-edited config and
     // `--force` skip. Pin the actual content change: pre-write
     // distinct bytes, run `init --force`, assert the file matches
-    // the embedded template body (the standard keep_allowlist marker
+    // the embedded template body (the standard keeplist marker
     // line is sufficient).
     let cwd = std::env::temp_dir().join(format!("ig-mgr-init-force-{}", std::process::id()));
     std::fs::create_dir_all(cwd.join("config")).expect("mktemp config dir");
-    let allowlist = cwd.join("config/keep_allowlist.txt");
-    std::fs::write(&allowlist, "MY_CUSTOM_HAND_EDITED_HANDLE\n").expect("seed user content");
+    let keeplist = cwd.join("config/keeplist.txt");
+    std::fs::write(&keeplist, "MY_CUSTOM_HAND_EDITED_HANDLE\n").expect("seed user content");
 
     let mut cmd = Command::cargo_bin("ig-mgr").expect("binary");
     cmd.current_dir(&cwd)
@@ -260,15 +260,15 @@ fn init_force_overwrites_existing_content() {
         .arg("--force")
         .assert()
         .success()
-        .stdout(contains("wrote: config/keep_allowlist.txt"));
+        .stdout(contains("wrote: config/keeplist.txt"));
 
-    let body = std::fs::read_to_string(&allowlist).expect("read");
+    let body = std::fs::read_to_string(&keeplist).expect("read");
     assert!(
         !body.contains("MY_CUSTOM_HAND_EDITED_HANDLE"),
         "--force must replace existing content, but it survived: {body}",
     );
     assert!(
-        body.contains("keep_allowlist"),
+        body.contains("keeplist"),
         "post-force content must be the embedded template: {body}",
     );
 
@@ -522,8 +522,8 @@ fn fixture_counts_match_expected() {
         // close_friends ∩ followings = {alice_synth} → 1. favorited ∩
         // followings = {bob_synth, carol_synth} → 2. nytimes_official is
         // Brand by lexicon hit on "official" — exercises the
-        // account-class slice's classifier wire-through; no allowlist
-        // overrides on this fixture so `keep-allowlisted: 0`. None of
+        // account-class slice's classifier wire-through; no keeplist
+        // overrides on this fixture so `keeplisted: 0`. None of
         // the activity targets in the fixture are in followings, so the
         // with-likes / with-comments counts are 0 — the activity-summation
         // path is pinned independently by the structural unit tests in
@@ -532,8 +532,8 @@ fn fixture_counts_match_expected() {
         .stdout(contains("aggregated close friends: 1"))
         .stdout(contains("aggregated favorited: 2"))
         .stdout(contains("aggregated brands: 1"))
-        .stdout(contains("aggregated keep-allowlisted: 0"))
-        .stdout(contains("keep-allowlist size on disk: 0"))
+        .stdout(contains("aggregated keeplisted: 0"))
+        .stdout(contains("keeplist size on disk: 0"))
         .stdout(contains("aggregated with likes_given > 0: 0"))
         .stdout(contains("aggregated with comments_given > 0: 0"))
         // Slice-7B-1 DM aggregator: only `carol_thread` resolves (display
@@ -689,16 +689,16 @@ fn ig_mgr_with_config(test_name: &str, files: &[(&str, &str)]) -> (Command, Path
 
 #[test]
 fn both_listed_handle_aborts_the_run() {
-    // Acceptance criterion 4: a handle in BOTH keep_allowlist.txt and
-    // drop_list.txt is a contradiction. `run` must fail loudly before
+    // Acceptance criterion 4: a handle in BOTH keeplist.txt and
+    // droplist.txt is a contradiction. `run` must fail loudly before
     // scoring, naming the handle and both files. Pins that the run
     // actually wires `ensure_disjoint` in — the unit test only covers
     // the helper in isolation.
     let (mut cmd, cwd) = ig_mgr_with_config(
         "conflict",
         &[
-            ("config/keep_allowlist.txt", "dup_handle\n"),
-            ("config/drop_list.txt", "dup_handle\n"),
+            ("config/keeplist.txt", "dup_handle\n"),
+            ("config/droplist.txt", "dup_handle\n"),
         ],
     );
     let result = cmd.arg(sample_export()).assert().failure();
@@ -709,27 +709,27 @@ fn both_listed_handle_aborts_the_run() {
         "must name the handle:\n{stderr}"
     );
     assert!(
-        stderr.contains("config/keep_allowlist.txt"),
-        "must name the keep-allowlist file:\n{stderr}",
+        stderr.contains("config/keeplist.txt"),
+        "must name the keeplist file:\n{stderr}",
     );
     assert!(
-        stderr.contains("config/drop_list.txt"),
-        "must name the drop-list file:\n{stderr}",
+        stderr.contains("config/droplist.txt"),
+        "must name the droplist file:\n{stderr}",
     );
 }
 
 #[test]
-fn drop_list_forces_a_followee_to_unfollow() {
-    // End-to-end wire-through for the drop-list: `bob_synth` is a Keep
-    // account in the fixture (no drop signal on its own). A drop_list.txt
+fn droplist_forces_a_followee_to_unfollow() {
+    // End-to-end wire-through for the droplist: `bob_synth` is a Keep
+    // account in the fixture (no drop signal on its own). A droplist.txt
     // entry must flip it to Unfollow in the CSV. Protects the run-level
-    // chain (load_drop_list -> Classifier -> aggregate -> assign_bucket)
+    // chain (load_droplist -> Classifier -> aggregate -> assign_bucket)
     // whose endpoints sit in the mutation-skip-listed `run` orchestration.
-    let stem = out_stem("drop_list_wire");
+    let stem = out_stem("droplist_wire");
     let csv_path = stem.with_extension("csv");
     let _ = std::fs::remove_file(&csv_path);
 
-    let (mut cmd, cwd) = ig_mgr_with_config("droplist", &[("config/drop_list.txt", "bob_synth\n")]);
+    let (mut cmd, cwd) = ig_mgr_with_config("droplist", &[("config/droplist.txt", "bob_synth\n")]);
     cmd.arg(sample_export())
         .arg("--out")
         .arg(&stem)
@@ -748,6 +748,6 @@ fn drop_list_forces_a_followee_to_unfollow() {
     assert_eq!(
         bob_row.split(',').nth(3),
         Some("unfollow"),
-        "drop-listed bob_synth must bucket Unfollow: {bob_row}",
+        "droplisted bob_synth must bucket Unfollow: {bob_row}",
     );
 }

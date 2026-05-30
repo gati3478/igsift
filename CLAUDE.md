@@ -25,7 +25,7 @@ input ──▶ archive::resolve  (dir / .zip / multipart .zip → extracted dir
 **Three subcommands** (legacy `ig-mgr <export>` still works as implicit Run):
 `run` (score + write audit), `init` (scaffold per-user config files from
 embedded templates), `check` (parser dry-run with per-source pass/fail,
-plus a config sanity check that the keep-allowlist + drop-list parse and
+plus a config sanity check that the keeplist + droplist parse and
 are disjoint).
 
 **Scoring & calibration.** `keep_prob` is a sigmoid over weighted signals;
@@ -38,8 +38,8 @@ agreement is **feature-ceilinged (~30–36%), not a tuning bug** — keep/drop
 intent is largely _non-separable_ on the current features (DM is the only clean
 keep signal; `story_out` is a coin flip; many keep-labels are low-engagement
 follows only `tenure` carries), so chasing it with weights trades keep-recall
-for drop-precision ~1:1. The escape hatch is the **drop-list**
-(`config/drop_list.txt`, the mirror of `keep_allowlist`): a hand-flagged handle
+for drop-precision ~1:1. The escape hatch is the **droplist**
+(`config/droplist.txt`, the mirror of `keeplist`): a hand-flagged handle
 is forced to `Unfollow` regardless of score. The current measured bucket split
 and label agreement live in [`docs/TUNING.md`](docs/TUNING.md) — the SSOT for
 tuning results; don't restate the numbers here.
@@ -94,7 +94,7 @@ src/
   archive.rs                    # input detect + zip extract + cache (.ig-mgr-extracted*/)
   config.rs                     # scoring.toml deserialization; preset resolution chain
   export.rs                     # IG export JSON parsers + validate_shape pre-flight
-  allowlist.rs                  # config/{keep_allowlist,drop_list}.txt loaders + ensure_disjoint
+  lists.rs                  # config/{keeplist,droplist}.txt loaders + ensure_disjoint
   labels.rs                     # config/labels.txt loader + confusion-matrix report
   progress.rs                   # indicatif spinner wrapper (auto-hide on -v or off-TTY)
   text.rs                       # fix_mojibake — repairs IG's UTF-8-as-Latin-1 export bug
@@ -102,7 +102,7 @@ src/
     mod.rs                      # re-exports
     aggregate.rs                # per-account features: raw + decayed + windowed + is_mutual
     name_resolution.rs          # display_name → handle bridge for DM attribution
-    account_class.rs            # brand-detection (aho-corasick lexicon) + keep-allowlist / drop-list gates
+    account_class.rs            # brand-detection (aho-corasick lexicon) + keeplist / droplist gates
   scoring.rs                    # score_raw composition, sigmoid, bucket assignment, top_terms
   output/
     mod.rs                      # write() dispatcher (CSV+MD+HTML) + shared decision_hint SSOT
@@ -114,8 +114,8 @@ tests/
   fixtures/sample_export/ # sanitized synthetic export
 config/
   scoring.toml                 # Gati's tuned weights + decay constants
-  keep_allowlist.txt.example   # per-user keep-allowlist template (real .txt gitignored)
-  drop_list.txt.example        # per-user drop-list template — forces Unfollow (real .txt gitignored)
+  keeplist.txt.example   # per-user keeplist template (real .txt gitignored)
+  droplist.txt.example        # per-user droplist template — forces Unfollow (real .txt gitignored)
   labels.txt.example           # per-user labels template (real .txt gitignored)
   presets/
     balanced.toml              # default preset — mirror of config/scoring.toml; compiled-in fallback
@@ -170,16 +170,16 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   `src/output/mod.rs::decision_hint`. The 13-row precedence-chain test
   is the contract; both writers call the shared function. Adding new
   rules: insert at the right precedence, extend the table-driven test.
-- **Keep-allowlist / drop-list are mirror overrides.** Two per-user
-  handle lists bracket the score: `config/keep_allowlist.txt` floors
-  `Unfollow → Review`, `config/drop_list.txt` forces `→ Unfollow`. Both
-  load through the shared `allowlist::parse` (case-insensitive
-  `HashSet<String>`), surface as `is_keep_allowlisted` / `is_drop_listed`
+- **Keeplist / droplist are mirror overrides.** Two per-user
+  handle lists bracket the score: `config/keeplist.txt` floors
+  `Unfollow → Review`, `config/droplist.txt` forces `→ Unfollow`. Both
+  load through the shared `lists::parse` (case-insensitive
+  `HashSet<String>`), surface as `is_keeplisted` / `is_droplisted`
   on `AccountFeatures`, and gate in `scoring::assign_bucket`. Precedence
-  (top wins): `is_restricted` (Review floor) → `is_drop_listed` (Unfollow)
+  (top wins): `is_restricted` (Review floor) → `is_droplisted` (Unfollow)
   → deep-mutual floor (Keep) → `keep_min` + reciprocity gate → keep-gates.
-  `is_restricted` is the one floor the drop-list yields to. A handle on
-  **both** lists is a contradiction — `allowlist::ensure_disjoint` rejects
+  `is_restricted` is the one floor the droplist yields to. A handle on
+  **both** lists is a contradiction — `lists::ensure_disjoint` rejects
   it loudly at load (in `run`), before scoring, so the two rungs never
   compete by construction. When adding a new override, mirror this end to
   end (loader → `Classifier` field + lookup → `AccountFeatures` field →
@@ -217,7 +217,7 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   entries. The `ig_mgr()` test helper spawns the binary with
   `cwd = std::env::temp_dir()` so the cwd-relative `config/*` loaders miss
   any per-user files at the repo root — without this, a developer with
-  their own `config/labels.txt` or `config/keep_allowlist.txt` sees
+  their own `config/labels.txt` or `config/keeplist.txt` sees
   fixture counts contaminate. Don't undo the cwd override.
 - `unsafe` is forbidden (`[lints.rust] unsafe_code = "forbid"`).
 

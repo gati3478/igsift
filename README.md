@@ -72,8 +72,8 @@ ig-mgr init             # scaffold the optional config files (see Customizing)
 
 Run `ig-mgr init` to scaffold three optional files under `config/`:
 
-- **`keep_allowlist.txt`** — accounts you'll **never** unfollow (floored to _review_ at worst).
-- **`drop_list.txt`** — accounts to **always** force into _unfollow_, whatever the score (the exact mirror of the allowlist). A handle can't be on both lists.
+- **`keeplist.txt`** — accounts you'll **never** unfollow (floored to _review_ at worst).
+- **`droplist.txt`** — accounts to **always** force into _unfollow_, whatever the score (the exact mirror of the keeplist). A handle can't be on both lists.
 - **`labels.txt`** — hand-label 20–30 accounts as keep/drop; `ig-mgr` reports how well its scores agree with you after each run.
 
 To tune the scoring weights yourself, copy a preset to `config/scoring.toml` and
@@ -85,12 +85,12 @@ For each account you follow, `ig-mgr` aggregates the signals in your export — 
 likes, comments, story interactions, how long you've followed, whether they
 follow you back — into a `keep_probability`, then buckets it into keep / review /
 unfollow. A few hard rules override the score: _restricted_ accounts never drop
-below review, allowlisted accounts are never unfollowed, and drop-listed accounts
+below review, keeplisted accounts are never unfollowed, and droplisted accounts
 are always unfollowed. Display names mangled by Instagram's exporter are repaired
 on the way in.
 
 Score-vs-intent agreement is **feature-ceilinged** — the export simply doesn't
-separate every keep from every drop, which is what the allowlist and drop-list
+separate every keep from every drop, which is what the keeplist and droplist
 are for, not a bug to tune away. The algorithm is in
 [`docs/DESIGN.md`](docs/DESIGN.md); the tuning journal and current measured
 results are in [`docs/TUNING.md`](docs/TUNING.md).

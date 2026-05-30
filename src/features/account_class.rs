@@ -1,4 +1,4 @@
-//! Brand-detection heuristic + keep-allowlist gate.
+//! Brand-detection heuristic + keeplist gate.
 //!
 //! DESIGN.md "Account-class heuristic" gates the `unfollow` recommendation
 //! on `account_class == Personal`. This module owns the username /
@@ -22,23 +22,23 @@
 //! structural matcher change not justified by the marginal recall gain
 //! at current scale. False positives are costlier than false negatives
 //! here — a missed brand stays `Personal` and remains eligible for the
-//! close_friend / favorited / allowlist gates, whereas a falsely-flagged
+//! close_friend / favorited / keeplist gates, whereas a falsely-flagged
 //! personal handle silently suppresses a real Unfollow recommendation.
 //! Lexicon entries are checked against both `username` and
 //! `display_name`: brands sometimes ship a personal-looking handle
 //! (`bobsmith`) but a brand display name (`Studio Ghibli`), and vice
 //! versa.
 //!
-//! ## Allowlist
+//! ## Keeplist
 //!
-//! `config/keep_allowlist.txt` is the user-maintained list of handles that
+//! `config/keeplist.txt` is the user-maintained list of handles that
 //! must never bucket as Unfollow regardless of engagement — brands the
 //! heuristic misses, public figures, and personal accounts the export
 //! under-represents (sparse signal, out-of-band relationship). It is NOT a
-//! classification source: allowlisted handles stay `Personal` at the
+//! classification source: keeplisted handles stay `Personal` at the
 //! [`AccountClass`] level so the column doesn't misrepresent a close
 //! friend's profile. The override surfaces as
-//! [`AccountFeatures::is_keep_allowlisted`](crate::features::AccountFeatures)
+//! [`AccountFeatures::is_keeplisted`](crate::features::AccountFeatures)
 //! parallel to `is_close_friend` / `is_favorited`; the scoring layer's
 //! [`assign_bucket`](crate::scoring) folds it into the Unfollow-gate check.
 
@@ -65,34 +65,34 @@ const BRAND_LEXICON: &[&str] = &[
 ];
 
 /// Bundle of the brand-detection automaton + the two user-maintained
-/// handle lists (keep-allowlist + drop-list). Built once per run (in
+/// handle lists (keeplist + droplist). Built once per run (in
 /// `lib::run`) and threaded into
 /// [`aggregate`](crate::features::aggregate) via `AggregateInputs`.
 #[derive(Debug)]
 pub struct Classifier {
     matcher: AhoCorasick,
-    /// Allowlist entries are pre-lowercased on insert so lookup just does
+    /// Keeplist entries are pre-lowercased on insert so lookup just does
     /// a single `to_ascii_lowercase` on the query handle.
-    allowlist: HashSet<String>,
-    /// Drop-list entries, same lowercased-on-insert convention as
-    /// `allowlist`. The exact inverse signal: forces Unfollow.
-    drop_list: HashSet<String>,
+    keeplist: HashSet<String>,
+    /// Droplist entries, same lowercased-on-insert convention as
+    /// `keeplist`. The exact inverse signal: forces Unfollow.
+    droplist: HashSet<String>,
 }
 
 impl Classifier {
     /// Build a classifier wrapping the production [`BRAND_LEXICON`] and
     /// the (already-lowercased) handle lists from
-    /// [`crate::allowlist::load_default`] (keep) and
-    /// [`crate::allowlist::load_drop_list`] (drop).
-    pub fn new(allowlist: HashSet<String>, drop_list: HashSet<String>) -> Self {
+    /// [`crate::lists::load_default`] (keep) and
+    /// [`crate::lists::load_droplist`] (drop).
+    pub fn new(keeplist: HashSet<String>, droplist: HashSet<String>) -> Self {
         let matcher = AhoCorasick::builder()
             .ascii_case_insensitive(true)
             .build(BRAND_LEXICON)
             .expect("BRAND_LEXICON is non-empty ASCII");
         Self {
             matcher,
-            allowlist,
-            drop_list,
+            keeplist,
+            droplist,
         }
     }
 
@@ -111,17 +111,17 @@ impl Classifier {
         AccountClass::Personal
     }
 
-    /// Check the keep-allowlist. Case-insensitive; cheap on real handles
+    /// Check the keeplist. Case-insensitive; cheap on real handles
     /// (Instagram disallows non-ASCII / uppercase, so the lowercase form
     /// equals the input).
-    pub fn is_allowlisted(&self, username: &str) -> bool {
-        self.allowlist.contains(&username.to_ascii_lowercase())
+    pub fn is_keeplisted(&self, username: &str) -> bool {
+        self.keeplist.contains(&username.to_ascii_lowercase())
     }
 
-    /// Check the drop-list. Mirror of [`is_allowlisted`](Self::is_allowlisted)
+    /// Check the droplist. Mirror of [`is_keeplisted`](Self::is_keeplisted)
     /// against the inverse-signal set.
-    pub fn is_drop_listed(&self, username: &str) -> bool {
-        self.drop_list.contains(&username.to_ascii_lowercase())
+    pub fn is_droplisted(&self, username: &str) -> bool {
+        self.droplist.contains(&username.to_ascii_lowercase())
     }
 }
 
@@ -273,70 +273,70 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_lookup_is_case_insensitive() {
+    fn keeplist_lookup_is_case_insensitive() {
         let mut list = HashSet::new();
         list.insert("special_friend".to_owned());
         let c = Classifier::new(list, HashSet::new());
-        assert!(c.is_allowlisted("special_friend"));
-        assert!(c.is_allowlisted("SPECIAL_FRIEND"));
-        assert!(c.is_allowlisted("Special_Friend"));
-        assert!(!c.is_allowlisted("other_handle"));
+        assert!(c.is_keeplisted("special_friend"));
+        assert!(c.is_keeplisted("SPECIAL_FRIEND"));
+        assert!(c.is_keeplisted("Special_Friend"));
+        assert!(!c.is_keeplisted("other_handle"));
     }
 
     #[test]
-    fn allowlist_membership_does_not_change_class() {
-        // The allowlist is a separate signal — `is_allowlisted` returns
+    fn keeplist_membership_does_not_change_class() {
+        // The keeplist is a separate signal — `is_keeplisted` returns
         // `true` but `classify` keeps returning `Personal` unless the
-        // lexicon also fires. A personal close-friend on the allowlist
+        // lexicon also fires. A personal close-friend on the keeplist
         // must not be misrepresented as a Brand in the CSV.
         let mut list = HashSet::new();
         list.insert("special_friend".to_owned());
         let c = Classifier::new(list, HashSet::new());
         assert_eq!(c.classify("special_friend", None), AccountClass::Personal);
-        assert!(c.is_allowlisted("special_friend"));
+        assert!(c.is_keeplisted("special_friend"));
     }
 
     #[test]
-    fn allowlist_and_brand_coexist() {
-        // A brand handle the user also allowlists: classifier stamps
-        // Brand AND reports allowlisted. Both signals fire independently
+    fn keeplist_and_brand_coexist() {
+        // A brand handle the user also keeplists: classifier stamps
+        // Brand AND reports keeplisted. Both signals fire independently
         // — scoring's Unfollow gate is satisfied to bump to Review by
         // either one alone, so the redundancy is harmless.
         let mut list = HashSet::new();
         list.insert("nytimes_official".to_owned());
         let c = Classifier::new(list, HashSet::new());
         assert_eq!(c.classify("nytimes_official", None), AccountClass::Brand,);
-        assert!(c.is_allowlisted("nytimes_official"));
+        assert!(c.is_keeplisted("nytimes_official"));
     }
 
-    fn with_drop_list(handles: &[&str]) -> Classifier {
+    fn with_droplist(handles: &[&str]) -> Classifier {
         let drop = handles.iter().map(|h| (*h).to_owned()).collect();
         Classifier::new(HashSet::new(), drop)
     }
 
     #[test]
-    fn drop_list_lookup_is_case_insensitive() {
-        // Mirror of `allowlist_lookup_is_case_insensitive` — the drop-list
+    fn droplist_lookup_is_case_insensitive() {
+        // Mirror of `keeplist_lookup_is_case_insensitive` — the droplist
         // is stored ASCII-lowercased, so lookups normalize the query.
-        let c = with_drop_list(&["meaning_to_drop"]);
-        assert!(c.is_drop_listed("meaning_to_drop"));
-        assert!(c.is_drop_listed("MEANING_TO_DROP"));
-        assert!(c.is_drop_listed("Meaning_To_Drop"));
-        assert!(!c.is_drop_listed("other_handle"));
+        let c = with_droplist(&["meaning_to_drop"]);
+        assert!(c.is_droplisted("meaning_to_drop"));
+        assert!(c.is_droplisted("MEANING_TO_DROP"));
+        assert!(c.is_droplisted("Meaning_To_Drop"));
+        assert!(!c.is_droplisted("other_handle"));
     }
 
     #[test]
-    fn drop_list_membership_does_not_change_class() {
-        // The drop-list is a scoring-gate signal, not a classification
-        // source — `is_drop_listed` returns true but `classify` keeps
+    fn droplist_membership_does_not_change_class() {
+        // The droplist is a scoring-gate signal, not a classification
+        // source — `is_droplisted` returns true but `classify` keeps
         // returning Personal unless the lexicon fires independently.
-        let c = with_drop_list(&["meaning_to_drop"]);
+        let c = with_droplist(&["meaning_to_drop"]);
         assert_eq!(c.classify("meaning_to_drop", None), AccountClass::Personal);
-        assert!(c.is_drop_listed("meaning_to_drop"));
+        assert!(c.is_droplisted("meaning_to_drop"));
     }
 
     #[test]
-    fn keep_and_drop_lists_are_independent() {
+    fn keep_and_droplists_are_independent() {
         // A classifier carrying both lists answers each lookup against its
         // own set — no cross-contamination between the two HashSets.
         let mut keep = HashSet::new();
@@ -344,9 +344,9 @@ mod tests {
         let mut drop = HashSet::new();
         drop.insert("doomed".to_owned());
         let c = Classifier::new(keep, drop);
-        assert!(c.is_allowlisted("protected"));
-        assert!(!c.is_allowlisted("doomed"));
-        assert!(c.is_drop_listed("doomed"));
-        assert!(!c.is_drop_listed("protected"));
+        assert!(c.is_keeplisted("protected"));
+        assert!(!c.is_keeplisted("doomed"));
+        assert!(c.is_droplisted("doomed"));
+        assert!(!c.is_droplisted("protected"));
     }
 }

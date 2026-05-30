@@ -128,21 +128,21 @@ pub struct AccountFeatures {
     /// neutrally. The CLAUDE.md "one_sided_them_is_not_a_penalty"
     /// scoring test pins that policy.
     pub is_mutual: bool,
-    /// Handle is in `config/keep_allowlist.txt` — user-maintained
+    /// Handle is in `config/keeplist.txt` — user-maintained
     /// never-unfollow override. Parallel signal to `is_close_friend` /
     /// `is_favorited`, gated at [`crate::scoring::assign_bucket`] to floor
     /// the bucket at Review. NOT classification — a personal close friend
-    /// the user has allowlisted stays `account_class == Personal` so the
+    /// the user has keeplisted stays `account_class == Personal` so the
     /// column doesn't misrepresent their profile.
-    pub is_keep_allowlisted: bool,
-    /// Handle is in `config/drop_list.txt` — user-maintained always-
-    /// unfollow override, the exact inverse of `is_keep_allowlisted`.
+    pub is_keeplisted: bool,
+    /// Handle is in `config/droplist.txt` — user-maintained always-
+    /// unfollow override, the exact inverse of `is_keeplisted`.
     /// Forces [`crate::scoring::assign_bucket`] to Unfollow regardless of
     /// score or keep-signals (the one exception: `is_restricted` still
-    /// floors at Review). Cannot co-occur with `is_keep_allowlisted` —
-    /// [`crate::allowlist::ensure_disjoint`] rejects a both-listed handle
-    /// at load. Like the allowlist, NOT classification.
-    pub is_drop_listed: bool,
+    /// floors at Review). Cannot co-occur with `is_keeplisted` —
+    /// [`crate::lists::ensure_disjoint`] rejects a both-listed handle
+    /// at load. Like the keeplist, NOT classification.
+    pub is_droplisted: bool,
 
     pub likes_given: u32,
     pub comments_given: u32,
@@ -294,8 +294,8 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
             is_removed_suggestion: removed_suggestion.contains(handle),
             recently_unfollowed: false,
             is_mutual: follower_handles.contains(handle),
-            is_keep_allowlisted: inputs.classifier.is_allowlisted(handle),
-            is_drop_listed: inputs.classifier.is_drop_listed(handle),
+            is_keeplisted: inputs.classifier.is_keeplisted(handle),
+            is_droplisted: inputs.classifier.is_droplisted(handle),
             likes_given: 0,
             comments_given: 0,
             story_interactions_out: 0,
@@ -774,9 +774,9 @@ mod tests {
         }
     }
 
-    /// Build a synthetic [`Classifier`] with no allowlist entries. Tests
+    /// Build a synthetic [`Classifier`] with no keeplist entries. Tests
     /// that only exercise the existing flag/activity paths use this; tests
-    /// that exercise allowlist behaviour build their own.
+    /// that exercise keeplist behaviour build their own.
     fn synth_classifier() -> Classifier {
         Classifier::new(HashSet::new(), HashSet::new())
     }
@@ -1613,14 +1613,14 @@ mod tests {
     }
 
     #[test]
-    fn classifier_stamps_keep_allowlisted_independently_of_class() {
-        // The allowlist is a parallel signal — a personal-handled close
-        // friend on the allowlist stays `Personal` but flips
-        // `is_keep_allowlisted = true`. Scoring will gate Unfollow on
+    fn classifier_stamps_keeplisted_independently_of_class() {
+        // The keeplist is a parallel signal — a personal-handled close
+        // friend on the keeplist stays `Personal` but flips
+        // `is_keeplisted = true`. Scoring will gate Unfollow on
         // BOTH, but classification stays honest.
-        let mut allowlist = HashSet::new();
-        allowlist.insert("alice".to_owned());
-        let classifier = Classifier::new(allowlist, HashSet::new());
+        let mut keeplist = HashSet::new();
+        keeplist.insert("alice".to_owned());
+        let classifier = Classifier::new(keeplist, HashSet::new());
 
         let followings = vec![following("alice", None), following("bob", None)];
         let hide = empty_hide_entry();
@@ -1630,16 +1630,16 @@ mod tests {
         let inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
 
         let by = by_username(aggregate(&inputs, fixed_now()));
-        assert!(by["alice"].is_keep_allowlisted);
+        assert!(by["alice"].is_keeplisted);
         assert_eq!(by["alice"].account_class, AccountClass::Personal);
-        assert!(!by["bob"].is_keep_allowlisted);
+        assert!(!by["bob"].is_keeplisted);
     }
 
     #[test]
-    fn classifier_stamps_drop_listed_and_ignores_non_followees() {
-        // Mirror of the allowlist case for the inverse signal. A drop-listed
-        // followee surfaces `is_drop_listed = true`; a non-followee handle
-        // in the drop-list creates no output row (acceptance criterion 8).
+    fn classifier_stamps_droplisted_and_ignores_non_followees() {
+        // Mirror of the keeplist case for the inverse signal. A droplisted
+        // followee surfaces `is_droplisted = true`; a non-followee handle
+        // in the droplist creates no output row (acceptance criterion 8).
         let mut drop = HashSet::new();
         drop.insert("alice".to_owned());
         drop.insert("ghost_not_followed".to_owned());
@@ -1654,12 +1654,12 @@ mod tests {
 
         let out = aggregate(&inputs, fixed_now());
         let by = by_username(out);
-        assert!(by["alice"].is_drop_listed);
+        assert!(by["alice"].is_droplisted);
         assert_eq!(by["alice"].account_class, AccountClass::Personal);
-        assert!(!by["bob"].is_drop_listed);
+        assert!(!by["bob"].is_droplisted);
         assert!(
             !by.contains_key("ghost_not_followed"),
-            "a drop-list handle that isn't a followee must not anchor a row",
+            "a droplist handle that isn't a followee must not anchor a row",
         );
     }
 

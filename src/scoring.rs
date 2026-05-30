@@ -23,14 +23,14 @@
 //! the same ratio over 1000 messages is — gating on volume here keeps the
 //! ratio honest at the source.
 //!
-//! ## Account-class + allowlist gates
+//! ## Account-class + keeplist gates
 //!
 //! DESIGN.md's `Unfollow` bucket requires `account_class == Personal` AND
 //! not `is_close_friend`/`is_favorited`/`is_restricted`. Brand accounts
 //! detected by [`crate::features::account_class::Classifier`] downgrade
 //! Unfollow → Review in [`assign_bucket`]. The user-maintained keep-
-//! allowlist (`config/keep_allowlist.txt`) surfaces on
-//! [`AccountFeatures::is_keep_allowlisted`] and applies the same
+//! keeplist (`config/keeplist.txt`) surfaces on
+//! [`AccountFeatures::is_keeplisted`] and applies the same
 //! Unfollow → Review override — a parallel signal to `is_close_friend` /
 //! `is_favorited`, kept separate so the CSV `account_class` column
 //! doesn't lie about a personal close-friend's profile.
@@ -280,7 +280,7 @@ fn is_parasocial(f: &AccountFeatures) -> bool {
         && !f.is_mutual
         && !f.is_favorited
         && !f.is_close_friend
-        && !f.is_keep_allowlisted
+        && !f.is_keeplisted
         && !has_inbound_signal(f)
 }
 
@@ -297,24 +297,24 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
     // Restricted floors the bucket at `review`, regardless of `keep_prob`
     // — DESIGN.md treats "restricted" as a manual signal that the
     // account warrants human attention before any automated drop call.
-    // This is the one floor the drop-list yields to.
+    // This is the one floor the droplist yields to.
     if f.is_restricted {
         return Bucket::Review;
     }
-    // Drop-list (`config/drop_list.txt`) is the user-maintained always-
-    // unfollow override — the inverse of the keep-allowlist. It beats
+    // Droplist (`config/droplist.txt`) is the user-maintained always-
+    // unfollow override — the inverse of the keeplist. It beats
     // `keep_min` and every keep-gate below; only the restricted floor
     // above outranks it. A both-listed handle can't reach here:
-    // `allowlist::ensure_disjoint` rejects it at load. The presentation
+    // `lists::ensure_disjoint` rejects it at load. The presentation
     // mirror of this ordering lives in `output::decision_hint` (its
-    // drop-list rule is guarded on `!is_restricted`); keep the two in sync.
-    if f.is_drop_listed {
+    // droplist rule is guarded on `!is_restricted`); keep the two in sync.
+    if f.is_droplisted {
         return Bucket::Unfollow;
     }
     // Deep-mutual keep-floor: a long reciprocal history is a real
     // relationship worth keeping even with no recent engagement. Floors to
     // Keep from any score. `deep_mutual_keep_days == 0` disables it. Sits
-    // below the drop-list (an explicit drop intent beats a long history) and
+    // below the droplist (an explicit drop intent beats a long history) and
     // below `is_restricted` (manual-attention floor wins). Only ever moves an
     // account UP to Keep — it cannot produce an Unfollow.
     if p.deep_mutual_keep_days > 0
@@ -339,13 +339,13 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
         // DESIGN.md gates `unfollow` on `account_class == Personal` AND
         // `!is_close_friend && !is_favorited && !is_restricted`. Restricted
         // is handled above; the remaining gates fold in here. The keep-
-        // allowlist (`config/keep_allowlist.txt`) is the user-maintained
+        // keeplist (`config/keeplist.txt`) is the user-maintained
         // override for accounts the lexicon can't be trusted on —
         // brands / public figures the heuristic missed, or personal
         // accounts the export under-represents.
         if f.is_close_friend
             || f.is_favorited
-            || f.is_keep_allowlisted
+            || f.is_keeplisted
             || f.account_class != AccountClass::Personal
         {
             return Bucket::Review;
@@ -381,8 +381,8 @@ mod tests {
             is_removed_suggestion: false,
             recently_unfollowed: false,
             is_mutual: false,
-            is_keep_allowlisted: false,
-            is_drop_listed: false,
+            is_keeplisted: false,
+            is_droplisted: false,
             likes_given: 0,
             comments_given: 0,
             story_interactions_out: 0,
@@ -696,63 +696,63 @@ mod tests {
     }
 
     #[test]
-    fn keep_allowlisted_gates_unfollow_to_review() {
-        // A personal-classed account on the keep-allowlist must downgrade
+    fn keeplisted_gates_unfollow_to_review() {
+        // A personal-classed account on the keeplist must downgrade
         // Unfollow → Review without touching `account_class`. The two
         // gates are parallel signals.
         let mut cfg = baseline_cfg();
         cfg.weights.removed_suggestion_penalty = 10.0;
         let mut acct = baseline_account("sparse_friend");
-        acct.is_keep_allowlisted = true;
+        acct.is_keeplisted = true;
         acct.is_hide_story_from = true;
         acct.is_removed_suggestion = true;
         let scored = score(std::slice::from_ref(&acct), &cfg);
         assert!(scored[0].keep_prob < cfg.scoring.unfollow_max);
         assert_eq!(scored[0].bucket, Bucket::Review);
-        // Class stayed Personal — allowlist is NOT classification.
+        // Class stayed Personal — keeplist is NOT classification.
         assert_eq!(scored[0].features.account_class, AccountClass::Personal);
     }
 
     #[test]
-    fn drop_listed_forces_unfollow_over_keep_signals() {
-        // Acceptance test 1: a drop-listed account with close-friend boost
-        // and keep_prob ≈ 1.0 must still bucket Unfollow — the drop-list
+    fn droplisted_forces_unfollow_over_keep_signals() {
+        // Acceptance test 1: a droplisted account with close-friend boost
+        // and keep_prob ≈ 1.0 must still bucket Unfollow — the droplist
         // beats keep_min and every keep-gate.
         let cfg = baseline_cfg();
         let mut acct = baseline_account("doomed");
-        acct.is_drop_listed = true;
+        acct.is_droplisted = true;
         acct.is_close_friend = true; // would drive keep_prob ≈ 0.993
         let scored = score(std::slice::from_ref(&acct), &cfg);
         assert!(
             scored[0].keep_prob > 0.99,
-            "keep_prob {} should be high to prove the drop-list overrides it",
+            "keep_prob {} should be high to prove the droplist overrides it",
             scored[0].keep_prob,
         );
         assert_eq!(scored[0].bucket, Bucket::Unfollow);
     }
 
     #[test]
-    fn drop_listed_forces_unfollow_over_brand_gate() {
+    fn droplisted_forces_unfollow_over_brand_gate() {
         // Acceptance test 2: a Brand account would normally floor at Review
-        // (the Unfollow gate blocks non-Personal). The drop-list overrides
+        // (the Unfollow gate blocks non-Personal). The droplist overrides
         // that gate and forces Unfollow.
         let cfg = baseline_cfg();
         let mut acct = baseline_account("brand_to_drop");
         acct.account_class = AccountClass::Brand;
-        acct.is_drop_listed = true;
+        acct.is_droplisted = true;
         let scored = score(std::slice::from_ref(&acct), &cfg);
         assert_eq!(scored[0].bucket, Bucket::Unfollow);
     }
 
     #[test]
-    fn restricted_beats_drop_list() {
+    fn restricted_beats_droplist() {
         // Acceptance test 3: the one exception. `is_restricted` is a hard
-        // Review floor that the drop-list yields to — restricted means
+        // Review floor that the droplist yields to — restricted means
         // "look at this before any drop call", which outranks a standing
         // drop intent.
         let cfg = baseline_cfg();
         let mut acct = baseline_account("watch_then_maybe_drop");
-        acct.is_drop_listed = true;
+        acct.is_droplisted = true;
         acct.is_restricted = true;
         let scored = score(std::slice::from_ref(&acct), &cfg);
         assert_eq!(scored[0].bucket, Bucket::Review);
@@ -905,7 +905,7 @@ mod tests {
     fn parasocial_keeper(handle: &str) -> AccountFeatures {
         let mut a = baseline_account(handle);
         a.likes_given_decayed = 5.0; // score_raw 5 → keep_prob ≈ 0.993 → keep
-        a // Personal, !mutual, no inbound, not favorited/close/allowlisted
+        a // Personal, !mutual, no inbound, not favorited/close/keeplisted
     }
 
     #[test]
@@ -954,9 +954,9 @@ mod tests {
             "close_friend",
         );
         assert_eq!(
-            parasocial_keeper_bucket(|a| a.is_keep_allowlisted = true),
+            parasocial_keeper_bucket(|a| a.is_keeplisted = true),
             Keep,
-            "keep_allowlisted",
+            "keeplisted",
         );
         assert_eq!(
             parasocial_keeper_bucket(|a| a.dm_reactions_received = 1),
@@ -1068,10 +1068,10 @@ mod tests {
     }
 
     #[test]
-    fn drop_list_beats_deep_mutual_floor() {
+    fn droplist_beats_deep_mutual_floor() {
         let cfg = baseline_cfg();
         let mut acct = old_mutual("doomed", Some(5000));
-        acct.is_drop_listed = true;
+        acct.is_droplisted = true;
         let scored = score(std::slice::from_ref(&acct), &cfg);
         assert_eq!(scored[0].bucket, Bucket::Unfollow);
     }

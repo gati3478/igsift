@@ -212,46 +212,46 @@ behind each item.
       jumped 21.4 % → 25.0 %. `tenure 0.15 → 0.10` considered and rejected
       (would have introduced a new hard mismatch on a long-tenure
       labeled-keep). `moonrisecrystals` resolved post-commit via
-      `keep_allowlist.txt`, shifting the working state to 481 / 155 / 7
+      `keeplist.txt`, shifting the working state to 481 / 155 / 7
       with 0 hard mismatches. Full notes in TUNING.md round 3.
-- [x] **Brand / public-figure heuristic** + user-maintained allowlist
+- [x] **Brand / public-figure heuristic** + user-maintained keeplist
       (2026-05-27) — added `aho-corasick` and `src/features/account_class.rs`:
       `Classifier` wraps a case-insensitive aho-corasick automaton over the
       curated `BRAND_LEXICON` (8 high-precision tokens: `official`, `studio`,
       `magazine`, `records`, `gallery`, `news`, `media`, `agency` — all ≥ 5
       chars to keep false-positive risk against personal handles low) plus a
-      `HashSet<String>` keep-allowlist loaded from `config/keep_allowlist.txt`
-      by the new `src/allowlist.rs` module. The classifier exposes
+      `HashSet<String>` keeplist loaded from `config/keeplist.txt`
+      by the new `src/lists.rs` module. The classifier exposes
       `classify(username, display_name) -> AccountClass` (lexicon hit on
-      either surface promotes to `Brand`) and `is_allowlisted(handle) -> bool`
+      either surface promotes to `Brand`) and `is_keeplisted(handle) -> bool`
       (ASCII-case-insensitive). `AccountClass::Brand` lands as a real variant;
       `PublicFigure` is deliberately omitted because the text-only heuristic
       can't reliably tell brand from public_figure and the downstream gate is
       identical. The classifier threads through `AggregateInputs` and stamps
-      both `account_class` and a new `is_keep_allowlisted: bool` flag onto
+      both `account_class` and a new `is_keeplisted: bool` flag onto
       every `AccountFeatures`. Scoring's `assign_bucket` Unfollow→Review
-      override fires when `account_class != Personal || is_keep_allowlisted`
+      override fires when `account_class != Personal || is_keeplisted`
       (parallel to the existing close_friend / favorited gates). Validated
       against the 2026-05-11 export: 19 followings classified as `Brand`,
       bucket split shifted 481 / 159 / 3 → 481 / 160 / 2 (one account
       `butt_news` moved from Unfollow to Review on the `"news"` substring —
-      acceptable false positive, the allowlist is the user-side override).
+      acceptable false positive, the keeplist is the user-side override).
 - [x] **Brand-lexicon expansion (round 4)** (2026-05-27) — extended
       `BRAND_LEXICON` 8 → 16 tokens: added `books`, `press`, `games`,
       `store`, `comics` (5+ chars) and `zine`, `shop`, `cafe` (4 chars;
       floor relaxed from ≥ 5 chars with a per-token empirical FP audit
       against the real 643-followee export). Brand count 19 → 44; bucket
-      split unchanged from the post-allowlist 481 / 155 / 7 anchor
+      split unchanged from the post-keeplist 481 / 155 / 7 anchor
       because all newly-classified brands already sit above
       `unfollow_max = 0.35`, so the gate has no work to do at current
       weights — value is forward-looking robustness (future Unfollow
       widening can't accidentally swallow these accounts). `design`
       deliberately held out (ambiguous between brand and personal-
-      designer portfolios; `keep_allowlist.txt` is the right venue
+      designer portfolios; `keeplist.txt` is the right venue
       case-by-case). `bar` / `art` deferred pending word-boundary
       matcher semantics. Same slice also tightened test isolation in
       `tests/cli.rs` (spawned binary's cwd is `temp_dir()` so per-user
-      `config/labels.txt` / `keep_allowlist.txt` at the repo root no
+      `config/labels.txt` / `keeplist.txt` at the repo root no
       longer contaminate the fixture-count test). Full notes in
       [`docs/TUNING.md`](docs/TUNING.md) round 4.
 - [x] **CSV + Markdown output writers** (2026-05-27) — `src/output/` with
