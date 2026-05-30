@@ -22,7 +22,8 @@ input ──▶ archive::resolve  (dir / .zip / multipart .zip → extracted dir
       ──▶ output::*          (CSV + Markdown + HTML writers)
 ```
 
-**Three subcommands** (legacy `igsift <export>` still works as implicit Run):
+**Three subcommands** (the bare `igsift <export>` form is the default,
+equivalent to `igsift run <export>`):
 `run` (score + write audit), `init` (scaffold per-user config files from
 embedded templates), `check` (parser dry-run with per-source pass/fail,
 plus a config sanity check that the keeplist + droplist parse and
@@ -31,14 +32,14 @@ are disjoint).
 **Scoring & calibration.** `keep_prob` is a sigmoid over weighted signals;
 weights/decay/thresholds live in `config/scoring.toml`. Three presets
 (`balanced` / `engagement` / `tenure`) ship embedded via `--preset`; `balanced`
-mirrors the committed `scoring.toml` and is the compiled-in fallback when
-neither `--preset`/`--config` nor a cwd `config/scoring.toml` resolves (so a
-binary-only install never inherits the owner's calibration bias). Label
-agreement is **feature-ceilinged (~30–36%), not a tuning bug** — keep/drop
-intent is largely _non-separable_ on the current features (DM is the only clean
-keep signal; `story_out` is a coin flip; many keep-labels are low-engagement
-follows only `tenure` carries), so chasing it with weights trades keep-recall
-for drop-precision ~1:1. The escape hatch is the **droplist**
+is the default preset and the compiled-in fallback when neither
+`--preset`/`--config` nor a cwd `config/scoring.toml` resolves — so a
+binary-only install always gets a known preset, never the owner's personal
+`config/scoring.toml`. Label agreement is **feature-ceilinged, not a tuning
+bug** — keep/drop intent is largely _non-separable_ on the current features (DM
+is the only clean keep signal; `story_out` is a coin flip; many keep-labels are
+low-engagement follows only `tenure` carries), so chasing it with weights
+trades keep-recall for drop-precision ~1:1. The escape hatch is the **droplist**
 (`config/droplist.txt`, the mirror of `keeplist`): a hand-flagged handle
 is forced to `Unfollow` regardless of score. The current measured bucket split
 and label agreement live in [`docs/TUNING.md`](docs/TUNING.md) — the SSOT for
@@ -118,7 +119,7 @@ config/
   droplist.txt.example        # per-user droplist template — forces Unfollow (real .txt gitignored)
   labels.txt.example           # per-user labels template (real .txt gitignored)
   presets/
-    balanced.toml              # default preset — mirror of config/scoring.toml; compiled-in fallback
+    balanced.toml              # default preset; compiled-in fallback when no config/preset resolves
     engagement.toml            # engagement-weighted preset
     tenure.toml                # tenure-weighted preset
 scripts/
