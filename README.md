@@ -146,12 +146,11 @@ cargo build --all-targets        # compile lib, bin, and tests
 cargo fmt --all                  # format
 cargo clippy --all-targets -- -D warnings
 cargo nextest run                # tests (or: cargo test)
-cargo insta review               # review snapshot changes (once snapshots exist)
 ```
 
-`cargo-nextest` and `cargo-insta` are optional local tools:
-`cargo install --locked cargo-nextest && cargo install cargo-insta`
-(nextest only installs with `--locked`). CI uses nextest.
+`cargo-nextest` is an optional local tool:
+`cargo install --locked cargo-nextest` (only installs with `--locked`).
+CI uses nextest; `cargo test` works without it.
 
 Local git hooks are managed by [Lefthook](https://github.com/evilmartians/lefthook)
 ([`lefthook.yml`](lefthook.yml)): `pre-commit` runs `cargo fmt --check` (fast
@@ -163,11 +162,11 @@ gate), `pre-push` runs `cargo clippy -D warnings` and `cargo nextest run`
 Rust (edition 2024, stable) — single static binary, no async, no network, no
 database. `clap` (CLI + subcommands) · `serde` / `serde_json` +
 `serde_path_to_error` (schema-drift-survivable parsing) · `jiff` (time) ·
-`rayon` (parallel scoring) · `aho-corasick` (brand-suffix lexicon,
+`aho-corasick` (brand-suffix lexicon,
 single-pass automaton) · `zip` (archive extraction, pure-Rust, deflate-only)
 · `indicatif` (progress spinner + bytes bar) · `csv` (output) · `tracing`
-(logs) · `anyhow` + `thiserror` (errors). Tests: `insta` snapshots +
-`assert_cmd` + `cargo-nextest`. The HTML report is hand-rolled markup —
+(logs) · `anyhow` (errors). Tests: `assert_cmd` + `predicates` +
+`cargo-nextest`. The HTML report is hand-rolled markup —
 no template engine. Rationale and the deliberately-not-used list are in
 [`docs/DESIGN.md`](docs/DESIGN.md).
 

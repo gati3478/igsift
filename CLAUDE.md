@@ -76,7 +76,6 @@ cargo run -- init [--force]                        # scaffold config/ files
 cargo fmt --all                                    # format (rustfmt.toml: edition 2024)
 cargo clippy --all-targets -- -D warnings          # lint; CI treats warnings as errors
 cargo nextest run                                  # tests (cargo test also works)
-cargo insta review                                 # accept/reject snapshot changes
 ```
 
 Run flags: `--out PATH` (output stem), `--preset balanced|engagement|tenure`
@@ -90,7 +89,7 @@ into `.ig-mgr-extracted*/` next to the input, with cache reuse keyed on
 a `{count}\n{total_bytes}` fingerprint (mtime-immune to `cp -p` and
 `rsync --times`).
 
-Set up once per clone: `brew install lefthook && lefthook install` (pre-commit fmt + pre-push clippy/test mirror CI — see `lefthook.yml`). Optional CI tools: `cargo install --locked cargo-nextest && cargo install cargo-insta` (nextest only installs with `--locked`).
+Set up once per clone: `brew install lefthook && lefthook install` (pre-commit fmt + pre-push clippy/test mirror CI — see `lefthook.yml`). Optional CI tool: `cargo install --locked cargo-nextest` (only installs with `--locked`).
 
 ## Layout
 

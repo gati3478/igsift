@@ -424,20 +424,18 @@ shape as `ripgrep` / `fd`; ships a single static binary.
 
 ### Core crates
 
-| Concern        | Pick                                           | Why over the obvious alternative                                                        |
-| -------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------- |
-| CLI parsing    | `clap` v4 (derive)                             | Universal standard; `bpaf` more elegant but smaller ecosystem.                          |
-| JSON parsing   | `serde` + `serde_json` + `serde_path_to_error` | Schema-drift survival: `#[serde(default)]` + `Option<T>` + named path on parse failure. |
-| Config         | `toml` (`config/scoring.toml`)                 | Weights/τ tunable without rebuilds — neutralizes Rust's data-tuning ergonomic gap.      |
-| Date/time      | `jiff`                                         | Correct-by-default vs. `chrono`'s timezone footguns.                                    |
-| CSV output     | `csv`                                          | Serializes directly from `#[derive(Serialize)]` structs.                                |
-| Errors         | `anyhow` + `thiserror`                         | `anyhow` in `main`/orchestration; `thiserror` enums in parser modules.                  |
-| Parallelism    | `rayon`                                        | Scoring is embarrassingly parallel — `par_iter()`, no async needed.                     |
-| Logging        | `tracing` + `tracing-subscriber`               | Structured logs; `--verbose` wiring trivial.                                            |
-| Progress UX    | `indicatif` + `owo-colors`                     | Parse-phase progress bar + colored summary table.                                       |
-| Snapshot tests | `insta` (`json` + `redactions`)                | Commit a fixture export; parser changes become reviewable diffs; drift fails loudly.    |
-| E2E tests      | `assert_cmd` + `predicates`                    | Run the binary against fixtures, assert on stdout + emitted CSV.                        |
-| Test runner    | `cargo-nextest`                                | Faster + better output than `cargo test`.                                               |
+| Concern      | Pick                                           | Why over the obvious alternative                                                                              |
+| ------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| CLI parsing  | `clap` v4 (derive)                             | Universal standard; `bpaf` more elegant but smaller ecosystem.                                                |
+| JSON parsing | `serde` + `serde_json` + `serde_path_to_error` | Schema-drift survival: `#[serde(default)]` + `Option<T>` + named path on parse failure.                       |
+| Config       | `toml` (`config/scoring.toml`)                 | Weights/τ tunable without rebuilds — neutralizes Rust's data-tuning ergonomic gap.                            |
+| Date/time    | `jiff`                                         | Correct-by-default vs. `chrono`'s timezone footguns.                                                          |
+| CSV output   | `csv`                                          | Serializes directly from `#[derive(Serialize)]` structs.                                                      |
+| Errors       | `anyhow`                                       | `anyhow::Result` throughout; `.context()` / `serde_path_to_error` carry the offending path on parse failures. |
+| Logging      | `tracing` + `tracing-subscriber`               | Structured logs; `--verbose` wiring trivial.                                                                  |
+| Progress UX  | `indicatif`                                    | Parse-phase progress bar + bytes bar.                                                                         |
+| E2E tests    | `assert_cmd` + `predicates`                    | Run the binary against fixtures, assert on stdout + emitted CSV.                                              |
+| Test runner  | `cargo-nextest`                                | Faster + better output than `cargo test`.                                                                     |
 
 ### Schema-drift survival
 
@@ -446,7 +444,10 @@ with the exact JSON path. The four shape groups (A/B/C/D in "Parsing notes")
 get distinct deserializer types; `#[serde(default)]` + `Option<T>` cover
 optional fields. Every release of Instagram's export schema is re-validated by
 running [`scripts/walk_export_schema.sh`](../scripts/walk_export_schema.sh)
-against the fresh dump — diff its output against the last-known-good snapshot.
+against the fresh dump — diff its output against the last-known-good run. The
+test-side drift guard is `tests/cli.rs::fixture_counts_match_expected` (~40
+exact-count assertions) paired with the structural field-pinning unit tests in
+`src/export.rs`, so a parser that silently drops or defaults data fails loudly.
 
 ### Cutting-edge calls (flagged deliberately)
 
