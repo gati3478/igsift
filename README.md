@@ -3,11 +3,13 @@
 [![CI](https://github.com/gati3478/ig-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/gati3478/ig-manager/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Local-first CLI that reads an Instagram personal data export and produces a
-ranked audit — who to unfollow (and remove from followers) versus who to keep,
-with a `keep_probability` per account derived from the full breadth of
-exported interactions. No UI, no API automation, no network — I act on the
-output manually inside Instagram.
+**Decide who to unfollow on Instagram — from your own data, fully offline.**
+
+`ig-mgr` reads your Instagram data export, scores every account you follow by a
+`keep_probability`, and sorts them into **keep / review / unfollow**. It writes a
+CSV, a Markdown summary, and a self-contained HTML report you can sort and filter
+in your browser. No login, no API, no automation — you make the actual unfollows
+by hand.
 
 ```
 ┌──────────────────────────┐     ┌─────────────────┐     ┌────────────────────┐
@@ -16,177 +18,110 @@ output manually inside Instagram.
 └──────────────────────────┘     └─────────────────┘     └────────────────────┘
 ```
 
-One invocation, three artifacts: CSV for spreadsheet triage, Markdown for
-skim-review, HTML for browser-based filterable triage. I review the output
-and do the unfollows by hand.
+## Quickstart
 
-## Status
+1. **Get your data.** In Instagram, request a **Download Your Information**
+   export in **JSON** format and download the `.zip`(s) once they're ready.
+2. **Build the tool.** Needs a stable Rust toolchain.
+    ```bash
+    cargo build --release          # binary lands at target/release/ig-mgr
+    ```
+3. **Run it** against the export — a folder, a single `.zip`, or the folder of
+   multipart `.zip` parts Instagram ships for large accounts:
+    ```bash
+    ig-mgr ./instagram-export       # or, without installing: cargo run -- ./instagram-export
+    ```
+4. **Read the report.** Three files appear next to your input as
+   `following-audit_<date>.{csv,md,html}`. Open the **HTML** in a browser — a
+   sortable, filterable table — then do the unfollows by hand in Instagram.
 
-**Active — end-to-end pipeline landed, six refinement phases shipped.** The
-binary accepts a directory or a `.zip` (single or multipart, transparently
-extracted and cached), runs a progress-bar pipeline through parser →
-feature aggregation (raw + decay-weighted + 90d/180d windowed counts +
-mutual-follower flag) → scoring (`keep_prob` + `keep`/`review`/`unfollow`
-bucket gated by the restricted floor, the brand/keep-allowlist gates, and
-the drop-list force-Unfollow override) → three writers (CSV,
-decision-oriented Markdown with per-bucket cards, self-contained HTML with
-sortable+filterable tables). Three subcommands (`run`, `init`, `check`),
-three shipped scoring presets (`balanced`/`engagement`/`tenure`), and an
-optional held-out labeled-set confusion-matrix report (`config/labels.txt`)
-that quantifies agreement after every run.
+No config files are required; `ig-mgr` ships with sensible defaults.
 
-Display names are mojibake-repaired at parse time (IG's exporter ships
-UTF-8 bytes as Latin-1, so `HÃ¼seyin` becomes `Hüseyin` and Arabic /
-Georgian / emoji surface correctly). On the maintainer's real 649-account
-export the current bucket split is `510 / 130 / 9` (keep / review / unfollow)
-at 28.6% labeled-set agreement, measured with the `story_out = 0.5` weight
-after `story_likes.json` was folded into `story_interactions_out`. Agreement
-is feature-ceilinged rather than a tuning bug — see
-[`docs/TUNING.md`](docs/TUNING.md) for why, [`docs/DESIGN.md`](docs/DESIGN.md)
-for the algorithm, and [`ROADMAP.md`](ROADMAP.md) for build order.
+## Usage
 
-> A previous SvelteKit web-app prototype (card-deck review UI, SQLite/Drizzle)
-> was retired — the interactive direction is friction I don't need for a
-> one-shot periodic cleanup. This repo is a clean restart as a Rust CLI.
+**Input** — an already-extracted directory, a single `.zip`, or a directory of
+the multipart `*.zip` parts. Archives are extracted and cached next to the input;
+`--rebuild-cache` forces a fresh extract.
 
-## Build & run
+**Scoring presets** — pick the lens that matches how you decide (`--preset`):
 
-```bash
-cargo build --release                                # binary at target/release/ig-mgr
-cargo run -- /path/to/export                         # extracted folder
-cargo run -- /path/to/export.zip                     # single .zip (auto-extract + cache)
-cargo run -- /path/to/parts/                         # directory of multipart .zip parts
-cargo run -- /path/to/export --out ~/cleanup -v
-```
+| Preset                 | Keeps the accounts that…                                             |
+| ---------------------- | -------------------------------------------------------------------- |
+| `balanced` _(default)_ | …score well across all signals — no single one dominates             |
+| `engagement`           | …you actually talk to and interact with; drops dormant follows       |
+| `tenure`               | …you've followed for a long time, even if interaction has tailed off |
 
-Three input shapes are accepted transparently: an already-extracted
-directory, a single `.zip` file, or a directory of multipart `*.zip`
-parts that IG ships for large exports. Archives extract to
-`.ig-mgr-extracted*/` next to the input and are cached across re-runs
-(cache fingerprint is `{count}\n{total_bytes}`, so `cp -p` /
-`rsync --times` replacements don't slip past as "fresh"). Use
-`--rebuild-cache` to force a fresh extract.
-
-### Subcommands
+**Subcommands**
 
 ```bash
-ig-mgr <input>                       # implicit Run (legacy form)
-ig-mgr run <input>                   # explicit form of the above
-ig-mgr check <input>                 # parser dry-run (per-source ✓/✗) + config sanity
-ig-mgr init [--force]                # scaffold config/{keep_allowlist,drop_list}.txt + labels.txt
+ig-mgr <input>          # score + write the audit (default; `run` is the explicit form)
+ig-mgr check <input>    # dry-run: parse every source (✓/✗) and sanity-check your config
+ig-mgr init             # scaffold the optional config files (see Customizing)
 ```
 
-`check` runs the same parser stack as `run` without aggregation /
-scoring / writing, reporting each source individually, then a config
-sanity check: it loads the keep-allowlist and drop-list and verifies
-they're disjoint, so a both-listed handle (which `run` rejects at load)
-is caught in the dry-run. Fast pre-flight when you're not sure a fresh
-export extracted cleanly or your config is consistent.
+**Options**
 
-### Options
+- `--out <PATH>` — output stem (default: `following-audit_<date>` next to the input)
+- `--preset <name>` — `balanced` | `engagement` | `tenure` (mutually exclusive with `--config`)
+- `--config <PATH>` — use your own scoring-weights TOML instead of a preset
+- `--rebuild-cache` — re-extract the archive even if a cache exists
+- `--trace <handle>` — print the full per-signal score breakdown for one account
+- `-v` / `-vv` — more logging (also hides the progress spinner)
 
-- `--out <PATH>` — output stem; defaults to `following-audit_<DATE>.{csv,md,html}`
-  next to the input.
-- `--preset <NAME>` — pick a shipped scoring shape (`balanced`,
-  `engagement`, `tenure`). Mutually exclusive with `--config`. See
-  Quickstart below.
-- `--config <PATH>` — scoring weights TOML; when omitted, resolved as
-  `./config/scoring.toml` in the cwd, then the compiled-in fallback
-  (= the `balanced` preset). A platform config dir
-  (`~/.config/ig-mgr/`) is not yet wired.
-- `--rebuild-cache` — force a fresh extract of an archive input.
-- `--trace <HANDLE>` — print the full per-term scoring breakdown for one
-  followee handle. Errors if the handle isn't in the followings set after
-  blocked / recently-unfollowed exclusions. Use during tuning to answer
-  "why did this account rank where it did?".
-- `-v` / `-vv` — debug / trace log verbosity. Also disables the
-  progress spinner so log lines don't interleave. `RUST_LOG` overrides
-  when set.
+## Customizing the results
 
-## Quickstart for first-time users
+Run `ig-mgr init` to scaffold three optional files under `config/`:
 
-You don't need to write any config files to get useful output. The
-binary ships three weight presets and picks `balanced` by default:
+- **`keep_allowlist.txt`** — accounts you'll **never** unfollow (floored to _review_ at worst).
+- **`drop_list.txt`** — accounts to **always** force into _unfollow_, whatever the score (the exact mirror of the allowlist). A handle can't be on both lists.
+- **`labels.txt`** — hand-label 20–30 accounts as keep/drop; `ig-mgr` reports how well its scores agree with you after each run.
 
-```bash
-ig-mgr ./instagram-export-folder              # uses balanced preset
-ig-mgr ./instagram-export-folder --preset engagement
-ig-mgr ./instagram-export-folder --preset tenure
-```
+To tune the scoring weights yourself, copy a preset to `config/scoring.toml` and
+edit it — see [`docs/TUNING.md`](docs/TUNING.md).
 
-- **balanced** — sensible middle ground; no signal type dominates.
-- **engagement** — surfaces "who do I actually talk to / engage with?";
-  demotes dormant tenure-only follows.
-- **tenure** — preserves long-standing follows even when interaction
-  has tailed off; softens engagement signals.
+## How it works
 
-Iterate from here by:
+For each account you follow, `ig-mgr` aggregates the signals in your export — DMs,
+likes, comments, story interactions, how long you've followed, whether they
+follow you back — into a `keep_probability`, then buckets it into keep / review /
+unfollow. A few hard rules override the score: _restricted_ accounts never drop
+below review, allowlisted accounts are never unfollowed, and drop-listed accounts
+are always unfollowed. Display names mangled by Instagram's exporter are repaired
+on the way in.
 
-1. `ig-mgr init` to scaffold `config/keep_allowlist.txt`,
-   `config/drop_list.txt`, and `config/labels.txt`.
-2. Append accounts you want to **never** unfollow to
-   `config/keep_allowlist.txt`; append accounts you want **always**
-   forced into Unfollow to `config/drop_list.txt` (the exact inverse —
-   it overrides the score and every keep-signal). A handle on both
-   lists is a contradiction and errors loudly at load. The drop-list is
-   the escape hatch for accounts the score can't separate (a story-heavy
-   follow you've decided to drop, say); a `restricted` account still
-   stays in Review even if drop-listed.
-3. Hand-label 20–30 followees in `config/labels.txt` (format in the
-   template). The binary prints a confusion-matrix report against
-   your labels at the end of every run.
-4. Copy a preset to `config/scoring.toml` (e.g.
-   `cp config/presets/engagement.toml config/scoring.toml`) and edit
-   weights to chase higher label agreement. See
-   [`docs/TUNING.md`](docs/TUNING.md) for the journal of how the
-   committed `config/scoring.toml` was tuned against a hand-labeled
-   subset (~28 accounts) of the maintainer's 649-account export.
+Score-vs-intent agreement is **feature-ceilinged** — the export simply doesn't
+separate every keep from every drop, which is what the allowlist and drop-list
+are for, not a bug to tune away. The algorithm is in
+[`docs/DESIGN.md`](docs/DESIGN.md); the tuning journal and current measured
+results are in [`docs/TUNING.md`](docs/TUNING.md).
 
 ## Development
 
 ```bash
-cargo build --all-targets             # compile lib, bin, and tests
-cargo fmt --all                       # format
+cargo build --all-targets
+cargo fmt --all
 cargo clippy --all-targets -- -D warnings
-cargo nextest run                     # tests (or: cargo test)
-cargo deny check advisories bans sources   # supply-chain gate (CI runs this too)
+cargo nextest run                          # or: cargo test
+cargo deny check advisories bans sources
 ```
 
-The two local tools the hooks expect (CI runs the same checks):
-`cargo install --locked cargo-nextest cargo-deny` (both install with `--locked`).
-`cargo test` works without nextest.
-
-Local git hooks are managed by [Lefthook](https://github.com/evilmartians/lefthook)
-([`lefthook.yml`](lefthook.yml)): `pre-commit` runs `cargo fmt --check` (fast
-gate), `pre-push` runs `cargo clippy -D warnings`, `cargo nextest run`, and
-`cargo deny` — the same lanes CI runs (CI's `build` step is subsumed by
-`clippy --all-targets`). The pre-push hook is file-scoped, so CI re-runs every
-lane unconditionally on each push/PR as the authoritative gate. Set up once per
-clone: `brew install lefthook && lefthook install`.
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for conventions and
-[`SECURITY.md`](SECURITY.md) for reporting privacy/security issues.
+Local [Lefthook](https://github.com/evilmartians/lefthook) hooks mirror these on
+commit/push; CI runs them as the authoritative gate. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) to contribute and
+[`SECURITY.md`](SECURITY.md) to report a privacy/security issue.
 
 ## Tech stack
 
-Rust (edition 2024, stable) — single static binary, no async, no network, no
-database. `clap` (CLI + subcommands) · `serde` / `serde_json` +
-`serde_path_to_error` (schema-drift-survivable parsing) · `jiff` (time) ·
-`aho-corasick` (brand-suffix lexicon,
-single-pass automaton) · `zip` (archive extraction, pure-Rust, deflate-only)
-· `indicatif` (progress spinner + bytes bar) · `csv` (output) · `tracing`
-(logs) · `anyhow` (errors). Tests: `assert_cmd` + `predicates` +
-`cargo-nextest`. The HTML report is hand-rolled markup —
-no template engine. Rationale and the deliberately-not-used list are in
-[`docs/DESIGN.md`](docs/DESIGN.md).
+Rust (edition 2024) — one static binary, no async, network, or database.
+`clap`, `serde` + `serde_path_to_error` (drift-tolerant parsing), `jiff`,
+`aho-corasick`, `zip`, `indicatif`, `csv`, `tracing`, `anyhow`. The HTML report
+is hand-rolled markup — no template engine. Full rationale and the
+deliberately-not-used list are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Non-goals
 
-- No web UI, card deck, or swipe interface.
-- No Instagram API calls, scraping, or automated unfollow.
-- No background daemon — one-shot run, exits when done.
-- No persistent DB — the export is the source of truth; history = old output files.
-- No login or credentials handling.
+No web/swipe UI, no Instagram API / scraping / automated unfollow, no daemon, no
+database, no login. The export is the source of truth; the run is one-shot.
 
 ## License
 

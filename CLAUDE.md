@@ -28,29 +28,21 @@ embedded templates), `check` (parser dry-run with per-source pass/fail,
 plus a config sanity check that the keep-allowlist + drop-list parse and
 are disjoint).
 
-**Current bucket split on the real export:** `510 / 130 / 9`
-(keep / review / unfollow) at `28.6%` labeled-set agreement (8/28 matched
-labels), 1 hard mismatch. Measured 2026-05-29 with `story_out = 0.5`
-(halved after `story_likes.json`, ~28k events, folded into
-`story_interactions_out` and ~doubled its volume).
-
-**Agreement is feature-ceilinged (~30–36%), not a tuning bug.** The labeled
-set shows keep/drop intent is largely _non-separable_ on the current
-features: DM is the only clean keep signal (every DM-dominated label is
-keep), while `story_out` is a coin flip (it dominates an equal mix of
-keep- and drop-labeled accounts) and ~12 keep-labels are low-engagement
-brand/local follows that only `tenure` carries — raising them would also
-raise drop-intent old follows. The remaining hard mismatch is a
-story-heavy drop indistinguishable from story-heavy keeps. The fix is a
-**drop-list** (`config/drop_list.txt`, the mirror of `keep_allowlist`) —
-**implemented**: a hand-flagged handle is forced to `Unfollow` regardless
-of score, closing the hard mismatch that weight-tuning structurally can't
-(tuning here trades keep-recall for drop-precision ~1:1). See
-[`docs/TUNING.md`](docs/TUNING.md). Scoring weights live in
-`config/scoring.toml`; three presets (`balanced` / `engagement` /
-`tenure`) ship embedded via `--preset`. `balanced` mirrors the committed
-`scoring.toml` (both carry the `story_out = 0.5` correction) and is the
-compiled-in fallback when no flag and no cwd file resolve.
+**Scoring & calibration.** `keep_prob` is a sigmoid over weighted signals;
+weights/decay/thresholds live in `config/scoring.toml`. Three presets
+(`balanced` / `engagement` / `tenure`) ship embedded via `--preset`; `balanced`
+mirrors the committed `scoring.toml` and is the compiled-in fallback when
+neither `--preset`/`--config` nor a cwd `config/scoring.toml` resolves (so a
+binary-only install never inherits the owner's calibration bias). Label
+agreement is **feature-ceilinged (~30–36%), not a tuning bug** — keep/drop
+intent is largely _non-separable_ on the current features (DM is the only clean
+keep signal; `story_out` is a coin flip; many keep-labels are low-engagement
+follows only `tenure` carries), so chasing it with weights trades keep-recall
+for drop-precision ~1:1. The escape hatch is the **drop-list**
+(`config/drop_list.txt`, the mirror of `keep_allowlist`): a hand-flagged handle
+is forced to `Unfollow` regardless of score. The current measured bucket split
+and label agreement live in [`docs/TUNING.md`](docs/TUNING.md) — the SSOT for
+tuning results; don't restate the numbers here.
 
 ## Tech stack
 
@@ -139,9 +131,8 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
 - **Privacy first.** A real export contains personal data; never commit one.
   Exports live in `ig-exported-data/` (gitignored); the binary's positional
   path can point anywhere — inside or outside the repo. `.gitignore` is the
-  safety net but a fragile one: only the names listed there
-  (`/ig-exported-data/`, `/ig_data/`, `/export/`, `/exports/`, `*.zip`) are
-  matched. An export dropped at any other name **will** be tracked. Test
+  safety net but a fragile one: only the names it lists are matched, so an
+  export dropped at any other name **will** be tracked. Test
   fixtures must be sanitized synthetic data. The same posture extends to
   **committed docs**: personal followee handles paired with the user's
   explicit `keep` / `drop` intent are the same disclosure as the gitignored
