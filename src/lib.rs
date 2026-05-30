@@ -7,19 +7,19 @@
 //! Pipeline shape (see `docs/DESIGN.md` for the full design):
 //!
 //! ```text
-//! export dir ──▶ export::*  (parse JSON)
-//!            ──▶ features    (per-account feature aggregation)
-//!            ──▶ scoring     (keep-probability + bucketing)
-//!            ──▶ output::*   (CSV + Markdown writers)
+//! input ──▶ archive::resolve  (dir / .zip / multipart .zip → extracted dir)
+//!       ──▶ export::*          (parse JSON, schema-drift survivable)
+//!       ──▶ features           (per-account feature aggregation)
+//!       ──▶ scoring            (keep-probability + bucketing)
+//!       ──▶ output::*          (CSV + Markdown + HTML writers)
 //! ```
 //!
-//! Status: parser layer, feature aggregation, first-pass scoring, CSV +
-//! Markdown writers, and the brand / public-figure account-class
-//! heuristic (with the user-maintained keeplist override) have all
-//! landed. The pipeline composes a `keep_prob` per account, assigns a
-//! bucket (`keep` / `review` / `unfollow`) via the DESIGN.md formula plus
-//! the restricted / boost / brand / keeplist gates, and writes the
-//! CSV + Markdown artifacts next to the export directory.
+//! The pipeline composes a `keep_prob` per account, assigns a bucket
+//! (`keep` / `review` / `unfollow`) via the DESIGN.md formula plus the
+//! bucket gates (restricted floor, droplist, deep-mutual keep-floor,
+//! reciprocity keep-ceiling, and the boost / brand / keeplist
+//! Unfollow→Review gates), and writes the CSV + Markdown + HTML audit next
+//! to the export directory.
 
 pub mod archive;
 pub mod cli;
