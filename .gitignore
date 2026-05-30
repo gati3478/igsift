@@ -40,10 +40,6 @@ recommendations_*.md
 # `config/drop_list.txt` to activate.
 /config/drop_list.txt
 
-# insta: uncommitted pending snapshots (review then accept with `cargo insta`)
-*.snap.new
-*.pending-snap
-
 # cargo-mutants scratch output (regenerated each `cargo mutants` run)
 /mutants.out/
 /mutants.out.old/

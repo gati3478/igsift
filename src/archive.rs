@@ -490,4 +490,64 @@ mod tests {
         assert_eq!(body, format!("1\n{expected_size}\n"));
         let _ = fs::remove_file(&zip_path);
     }
+
+    #[test]
+    fn zip_slip_entries_are_rejected_benign_still_extracts() {
+        // The `enclosed_name()` guard is the only thing between an
+        // untrusted third-party export and arbitrary filesystem writes.
+        // It is correct today, but a refactor to the traversal-vulnerable
+        // `name()` / `mangled_name()` APIs would silently reintroduce
+        // zip-slip with a green suite. Build a hostile zip carrying a
+        // `../` traversal entry and an absolute-path entry, extract it,
+        // and prove neither escapes the cache dir while a benign sibling
+        // still lands. This test FAILS if the guard is weakened.
+        let dir = std::env::temp_dir().join(format!(
+            "ig-mgr-zipslip-{}-{}",
+            std::process::id(),
+            jiff::Timestamp::now().as_nanosecond(),
+        ));
+        let cache = dir.join("cache");
+        fs::create_dir_all(&cache).expect("mktemp cache");
+
+        // Absolute-path entry target, kept unique to avoid cross-run
+        // collisions; if the guard fails, the file appears here.
+        let abs_escape = dir.join("abs-escape-target.txt");
+
+        let zip_path = dir.join("hostile.zip");
+        {
+            let file = fs::File::create(&zip_path).expect("create hostile zip");
+            let mut writer = zip::ZipWriter::new(file);
+            let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default();
+            // `../escape-rel.txt` would land in `dir/` (cache's parent)
+            // if the entry name were joined onto the cache dir raw.
+            writer
+                .start_file("../escape-rel.txt", opts)
+                .expect("rel traversal entry");
+            writer.write_all(b"pwned").expect("write rel");
+            writer
+                .start_file(abs_escape.to_string_lossy(), opts)
+                .expect("absolute-path entry");
+            writer.write_all(b"pwned").expect("write abs");
+            writer.start_file("safe.txt", opts).expect("benign entry");
+            writer.write_all(b"ok").expect("write safe");
+            writer.finish().expect("finalize hostile zip");
+        }
+
+        extract_one(&zip_path, &cache).expect("extraction must not error");
+
+        assert!(
+            !dir.join("escape-rel.txt").exists(),
+            "zip-slip: `../` entry escaped the cache into its parent dir",
+        );
+        assert!(
+            !abs_escape.exists(),
+            "zip-slip: absolute-path entry escaped the cache dir",
+        );
+        assert!(
+            cache.join("safe.txt").is_file(),
+            "benign entry must still extract after hostile entries are skipped",
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

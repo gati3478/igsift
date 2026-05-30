@@ -1276,14 +1276,17 @@ mod tests {
     }
 
     #[test]
-    fn read_inbox_repairs_mojibake_on_reaction_actor() {
-        // The reaction `actor` is a display name joined against the
-        // mojibake-fixed `me.name` to classify given-vs-received. If the
-        // parser leaves `actor` un-repaired, a user whose own display name
-        // carries non-ASCII bytes has their own reactions misclassified as
-        // received. "HÃ¼seyin" is the Latin-1-misread form of "Hüseyin".
+    fn read_inbox_repairs_mojibake_on_dm_display_surfaces() {
+        // CLAUDE.md pins the mojibake fix to EVERY DM-side display
+        // surface — participants, sender_name, and the reaction actor —
+        // because each is joined against the mojibake-fixed `me.name` /
+        // resolver to attribute DMs. Dropping the repair from any one of
+        // these (e.g. participants but not actor) silently breaks the
+        // cross-side join with a green suite, so assert all three on data
+        // the same thread file parses. "HÃ¼seyin" is the Latin-1-misread
+        // form of "Hüseyin".
         let base = std::env::temp_dir().join(format!(
-            "ig-mgr-actor-mojibake-{}-{}",
+            "ig-mgr-dm-mojibake-{}-{}",
             std::process::id(),
             jiff::Timestamp::now().as_nanosecond(),
         ));
@@ -1294,6 +1297,7 @@ mod tests {
             r#"{
                 "participants": [{"name": "Partner"}, {"name": "HÃ¼seyin"}],
                 "messages": [
+                    {"sender_name": "HÃ¼seyin", "timestamp_ms": 1700000000001},
                     {"sender_name": "Partner", "timestamp_ms": 1700000000000,
                      "reactions": [{"reaction": "love", "actor": "HÃ¼seyin"}]}
                 ],
@@ -1305,7 +1309,18 @@ mod tests {
         let threads = read_inbox(&base).expect("read inbox");
         std::fs::remove_dir_all(&base).ok();
 
-        let actor = threads[0].messages[0].reactions[0].actor.as_deref();
+        assert_eq!(
+            threads[0].participants,
+            vec!["Partner".to_owned(), "Hüseyin".to_owned()],
+            "participant display names must be mojibake-repaired",
+        );
+        let sender = threads[0].messages[0].sender.as_deref();
+        assert_eq!(
+            sender,
+            Some("Hüseyin"),
+            "sender_name must be mojibake-repaired",
+        );
+        let actor = threads[0].messages[1].reactions[0].actor.as_deref();
         assert_eq!(
             actor,
             Some("Hüseyin"),

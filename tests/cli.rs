@@ -377,6 +377,26 @@ fn preset_engagement_produces_different_buckets_than_tenure() {
 }
 
 #[test]
+fn preset_and_config_are_mutually_exclusive() {
+    // `--preset` and `--config` are mutually exclusive by a clap
+    // `conflicts_with` declaration (see `src/cli.rs`). Nothing else
+    // pins it, so a derive refactor (renamed field / dropped attribute)
+    // would silently let both coexist and the preset-vs-file precedence
+    // would become undefined — exactly the "owner's calibration bias
+    // leaks in" failure the config-resolution chain is designed to
+    // prevent. Passing both must fail at parse time.
+    ig_mgr()
+        .arg(sample_export())
+        .arg("--preset")
+        .arg("tenure")
+        .arg("--config")
+        .arg("whatever.toml")
+        .assert()
+        .failure()
+        .stderr(contains("cannot be used with"));
+}
+
+#[test]
 fn trace_unknown_handle_fails_loudly() {
     // A `--trace <handle>` that doesn't match any aggregated account is
     // almost certainly a typo at the command line. The run errors with
