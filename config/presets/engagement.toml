@@ -42,3 +42,7 @@ threshold = 1.0
 scale = 1.0
 keep_min = 0.7
 unfollow_max = 0.4
+# This preset scores raw activity by design, so one-directional consumption
+# is a legitimate keep signal here — opt out of the reciprocity ceiling.
+require_reciprocity_for_keep = false
+deep_mutual_keep_days = 730

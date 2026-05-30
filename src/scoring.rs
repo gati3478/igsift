@@ -270,6 +270,29 @@ fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
 }
 
+/// `true` when an account's entire relationship is one-directional
+/// consumption: a personal account you follow that never followed you back,
+/// never messaged you, and never reacted to you, with no explicit keep
+/// override. Brands/public figures are legitimately one-way follows and are
+/// excluded via `account_class`. Drives the reciprocity keep-ceiling gate.
+fn is_parasocial(f: &AccountFeatures) -> bool {
+    f.account_class == AccountClass::Personal
+        && !f.is_mutual
+        && !f.is_favorited
+        && !f.is_close_friend
+        && !f.is_keep_allowlisted
+        && !has_inbound_signal(f)
+}
+
+/// Any signal that the other party engaged toward you — the inbound directions
+/// Instagram ships. A fully one-sided outbound thread (`dm_balance == 1.0`)
+/// does **not** count: it is you talking into the void, not reciprocity.
+fn has_inbound_signal(f: &AccountFeatures) -> bool {
+    f.inbound_dm_request
+        || f.dm_reactions_received > 0
+        || matches!(f.dm_balance, Some(b) if b < 1.0)
+}
+
 fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Bucket {
     // Restricted floors the bucket at `review`, regardless of `keep_prob`
     // — DESIGN.md treats "restricted" as a manual signal that the
@@ -288,7 +311,28 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
     if f.is_drop_listed {
         return Bucket::Unfollow;
     }
+    // Deep-mutual keep-floor: a long reciprocal history is a real
+    // relationship worth keeping even with no recent engagement. Floors to
+    // Keep from any score. `deep_mutual_keep_days == 0` disables it. Sits
+    // below the drop-list (an explicit drop intent beats a long history) and
+    // below `is_restricted` (manual-attention floor wins). Only ever moves an
+    // account UP to Keep — it cannot produce an Unfollow.
+    if p.deep_mutual_keep_days > 0
+        && f.is_mutual
+        && f.mutual_age_days
+            .is_some_and(|age| age >= p.deep_mutual_keep_days)
+    {
+        return Bucket::Keep;
+    }
     if keep_prob >= p.keep_min {
+        // Reciprocity keep-ceiling: refuse to auto-keep a personal account
+        // whose entire relationship is one-directional consumption (you
+        // follow them, they don't follow back, never messaged or reacted to
+        // you). Demotes Keep → Review only — never produces an Unfollow. The
+        // exact mirror of the brand/favorite Unfollow gate below.
+        if p.require_reciprocity_for_keep && is_parasocial(f) {
+            return Bucket::Review;
+        }
         return Bucket::Keep;
     }
     if keep_prob < p.unfollow_max {
@@ -328,6 +372,7 @@ mod tests {
             display_name: None,
             account_class: AccountClass::default(),
             follow_tenure_days: None,
+            mutual_age_days: None,
             is_close_friend: false,
             is_favorited: false,
             is_blocked: false,
@@ -393,6 +438,8 @@ mod tests {
                 scale: 1.0,
                 keep_min: 0.7,
                 unfollow_max: 0.3,
+                require_reciprocity_for_keep: true,
+                deep_mutual_keep_days: 730,
             },
         }
     }
@@ -527,6 +574,10 @@ mod tests {
         // score_raw = ln(0.7 / 0.3) ≈ 0.847.
         let cfg = baseline_cfg();
         let mut acct = baseline_account("edge");
+        // Mutual so the reciprocity keep-ceiling gate doesn't fire — this
+        // test isolates the `keep_min` boundary, not the gate. (mutual_age
+        // stays None, so the deep-mutual floor doesn't fire either.)
+        acct.is_mutual = true;
         // Stage score_raw via a single decayed signal: pick likes with
         // weight 1.0, so likes_given_decayed = target.
         let target = (0.7_f64 / 0.3_f64).ln();
@@ -842,5 +893,195 @@ mod tests {
             Bucket::Review,
             "keep_prob == unfollow_max must stay Review (exclusive `<`)",
         );
+    }
+
+    // ── reciprocity keep-ceiling gate (Rule 1) ───────────────────────────
+    //
+    // A personal, non-mutual account with no inbound signal cannot auto-keep
+    // on one-directional consumption alone — it floors at Review. The gate
+    // can only move keep→review; it never produces Unfollow.
+
+    /// A high-scoring account whose whole relationship is one-way consumption.
+    fn parasocial_keeper(handle: &str) -> AccountFeatures {
+        let mut a = baseline_account(handle);
+        a.likes_given_decayed = 5.0; // score_raw 5 → keep_prob ≈ 0.993 → keep
+        a // Personal, !mutual, no inbound, not favorited/close/allowlisted
+    }
+
+    #[test]
+    fn reciprocity_gate_floors_nonmutual_personal_to_review() {
+        let cfg = baseline_cfg();
+        let acct = parasocial_keeper("consumed");
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(
+            scored[0].keep_prob >= cfg.scoring.keep_min,
+            "must score into keep first"
+        );
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    /// Bucket of a parasocial keeper after applying one mutation — used to
+    /// check that any single relationship signal exempts it from the gate.
+    fn parasocial_keeper_bucket(apply: impl FnOnce(&mut AccountFeatures)) -> Bucket {
+        let cfg = baseline_cfg();
+        let mut acct = parasocial_keeper("x");
+        apply(&mut acct);
+        score(std::slice::from_ref(&acct), &cfg)[0].bucket
+    }
+
+    #[test]
+    fn reciprocity_gate_exempts_each_relationship_signal() {
+        // Each signal alone must keep the otherwise-parasocial account in Keep.
+        use Bucket::Keep;
+        assert_eq!(
+            parasocial_keeper_bucket(|a| a.is_mutual = true),
+            Keep,
+            "mutual"
+        );
+        assert_eq!(
+            parasocial_keeper_bucket(|a| a.account_class = AccountClass::Brand),
+            Keep,
+            "brand",
+        );
+        assert_eq!(
+            parasocial_keeper_bucket(|a| a.is_favorited = true),
+            Keep,
+            "favorited"
+        );
+        assert_eq!(
+            parasocial_keeper_bucket(|a| a.is_close_friend = true),
+            Keep,
+            "close_friend",
+        );
+        assert_eq!(
+            parasocial_keeper_bucket(|a| a.is_keep_allowlisted = true),
+            Keep,
+            "keep_allowlisted",
+        );
+        assert_eq!(
+            parasocial_keeper_bucket(|a| a.dm_reactions_received = 1),
+            Keep,
+            "inbound_reaction",
+        );
+        assert_eq!(
+            parasocial_keeper_bucket(|a| {
+                a.dm_messages_total = 10;
+                a.dm_balance = Some(0.5);
+            }),
+            Keep,
+            "two_way_dm",
+        );
+    }
+
+    #[test]
+    fn one_sided_outbound_thread_does_not_exempt() {
+        // dm_balance == 1.0 (everything I sent, nothing back) is NOT
+        // reciprocity — talking into the void. Still gated to Review.
+        let cfg = baseline_cfg();
+        let mut acct = parasocial_keeper("voidshout");
+        acct.dm_messages_total = 50;
+        acct.dm_balance = Some(1.0);
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn reciprocity_gate_disabled_keeps_nonmutual_personal() {
+        let mut cfg = baseline_cfg();
+        cfg.scoring.require_reciprocity_for_keep = false;
+        let acct = parasocial_keeper("consumed");
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Keep);
+    }
+
+    // ── deep-mutual keep-floor (Rule 2) ───────────────────────────────────
+    //
+    // A mutual account with a long reciprocal history floors at Keep even
+    // from a low score. Can only move up to Keep; never produces Unfollow.
+
+    /// Mutual, neutral score (0.5 → Review without the floor).
+    fn old_mutual(handle: &str, age: Option<u32>) -> AccountFeatures {
+        let mut a = baseline_account(handle);
+        a.is_mutual = true;
+        a.mutual_age_days = age;
+        a
+    }
+
+    #[test]
+    fn deep_mutual_floor_keeps_low_scorer() {
+        let cfg = baseline_cfg(); // deep_mutual_keep_days = 730
+        let acct = old_mutual("longtime", Some(800));
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(
+            scored[0].keep_prob < cfg.scoring.keep_min,
+            "score alone is below keep"
+        );
+        assert_eq!(scored[0].bucket, Bucket::Keep);
+    }
+
+    #[test]
+    fn deep_mutual_floor_boundary_is_inclusive() {
+        let cfg = baseline_cfg();
+        let acct = old_mutual("edge", Some(cfg.scoring.deep_mutual_keep_days));
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(
+            scored[0].bucket,
+            Bucket::Keep,
+            "age == threshold must keep (>=)"
+        );
+    }
+
+    #[test]
+    fn deep_mutual_floor_below_threshold_does_not_fire() {
+        let cfg = baseline_cfg();
+        let acct = old_mutual("recent", Some(cfg.scoring.deep_mutual_keep_days - 1));
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn deep_mutual_floor_none_age_does_not_fire() {
+        let cfg = baseline_cfg();
+        let acct = old_mutual("undatable", None);
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn deep_mutual_floor_requires_mutual_flag() {
+        // Defensive: even with an old age, a non-mutual account is not floored.
+        let cfg = baseline_cfg();
+        let mut acct = baseline_account("nonmutual");
+        acct.is_mutual = false;
+        acct.mutual_age_days = Some(2000);
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_ne!(scored[0].bucket, Bucket::Keep);
+    }
+
+    #[test]
+    fn deep_mutual_floor_disabled_when_zero() {
+        let mut cfg = baseline_cfg();
+        cfg.scoring.deep_mutual_keep_days = 0;
+        let acct = old_mutual("longtime", Some(5000));
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Review, "0 disables the floor");
+    }
+
+    #[test]
+    fn drop_list_beats_deep_mutual_floor() {
+        let cfg = baseline_cfg();
+        let mut acct = old_mutual("doomed", Some(5000));
+        acct.is_drop_listed = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Unfollow);
+    }
+
+    #[test]
+    fn restricted_beats_deep_mutual_floor() {
+        let cfg = baseline_cfg();
+        let mut acct = old_mutual("watch", Some(5000));
+        acct.is_restricted = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Review);
     }
 }

@@ -51,3 +51,7 @@ threshold = 1.5
 scale = 1.0
 keep_min = 0.7
 unfollow_max = 0.35
+# Off by default — see docs/TUNING.md round 6/7. Opt in (= true) if you follow
+# mostly mutual friends and want non-mutual strangers surfaced to review.
+require_reciprocity_for_keep = false
+deep_mutual_keep_days = 730

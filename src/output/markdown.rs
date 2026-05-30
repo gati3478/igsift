@@ -298,6 +298,7 @@ mod tests {
             display_name: None,
             account_class: AccountClass::default(),
             follow_tenure_days: Some(365),
+            mutual_age_days: None,
             is_close_friend: false,
             is_favorited: false,
             is_blocked: false,

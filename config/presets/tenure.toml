@@ -43,3 +43,5 @@ threshold = 1.5
 scale = 1.2
 keep_min = 0.7
 unfollow_max = 0.3
+require_reciprocity_for_keep = false
+deep_mutual_keep_days = 730

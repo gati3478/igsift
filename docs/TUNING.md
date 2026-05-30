@@ -10,6 +10,104 @@ The methodology choice for this pass was the **hybrid** in DESIGN.md's
 with `config/labels.txt` (when laid down) serving as a held-out accuracy
 floor. The labels file is not committed — it's a per-user artifact.
 
+## 2026-05-30 — labeling pass: reciprocity ceiling defaulted OFF (round 7)
+
+A fresh 58-account labeling pass (the prior `labels.txt` was a known-noisy
+oracle — round 6) re-cut against the round-6 gates. The worklist was
+stratified to the accounts the new gates acted on: the confident `unfollow`
+bucket, the deep-mutual-floored keeps, the reciprocity-gated demotions, and
+the ambiguous review band.
+
+### Headline finding — the reciprocity ceiling is net-harmful here
+
+Of the sampled **reciprocity-gated** accounts (scored into keep on one-way
+consumption, demoted to review by the ceiling), **20/20 were labeled keep** —
+the owner deliberately follows many creators/brands one-directionally. The
+ceiling was demoting curated follows, not parasocial cruft.
+
+```
+reciprocity ceiling ON :  20/58 (34.5%)   keep∩keep 17,  keep-stuck-in-review 34
+reciprocity ceiling OFF:  40/58 (69.0%)   keep∩keep 37,  keep-stuck-in-review 14
++ override lists       :  42/58 (72.4%)   0 hard mismatches
+```
+
+Turning the ceiling off **doubled** agreement. This **reverses round 6's
+recommendation** for this following style: non-mutuality is not a drop signal
+for a content-consumer. The ceiling is now **off by default** across all
+presets and the `serde` default; it remains an opt-in toggle for mutual-heavy
+users (a user who follows mostly real-life friends + a few one-way strangers
+is the untested case the ceiling was designed for — we have no data on them,
+so it ships off, not removed).
+
+### Deep-mutual floor — validated, kept on
+
+18 of 20 sampled floored accounts were labeled keep. The 2 exceptions were a
+3.4-year and an **8.8-year** mutual the owner wants gone — indistinguishable
+from the keeps by reciprocal age (raising the threshold past 8.8y would lose
+dozens of real keeps), so they go on the drop-list, not into a threshold tweak.
+The floor stays at 730 days.
+
+### Residual hard mismatches → override lists (not tuning)
+
+The 3 hard mismatches after the ceiling flip were all feature-ceiling cases
+resolved by the lists: two years-deep mutuals labeled drop → `drop_list.txt`;
+one low-engagement non-mutual content account labeled keep → `keep_allowlist.txt`
+(floored Unfollow → Review). Result: **0 hard mismatches**. The remaining ~15
+non-agreements are mid-score keeps correctly sitting in `review` — tangled with
+a mid-score _drop_ at the same `keep_prob`, so no `keep_min` / weight move
+separates them. That residue is allowlist territory, not a tuning lever.
+
+## 2026-05-30 — reciprocity gates (round 6, **gates not weights**)
+
+Round 5's ceiling finding said weights are near zero-sum. This round stops
+tuning weights and adds two **monotonic bucket gates** instead — each moves an
+account in one direction only, so neither can manufacture a wrongful
+`unfollow`. Full design:
+[`docs/specs/2026-05-30-reciprocity-aware-scoring.md`](specs/2026-05-30-reciprocity-aware-scoring.md).
+
+### What changed
+
+- **Reciprocity keep-ceiling** (`require_reciprocity_for_keep`, default on): a
+  personal, non-mutual account with no inbound signal can no longer auto-keep
+  on one-directional consumption — it floors at `review`. Moves `keep → review`
+  only.
+- **Deep-mutual keep-floor** (`deep_mutual_keep_days`, default 730): a mutual
+  account whose reciprocal age (`mutual_age_days`, newly computed from the
+  previously-discarded `followers_*.json` timestamp) is ≥ 2 years floors at
+  `keep`. Moves up to `keep` only.
+
+### Before / after (649 followings)
+
+```
+round 5 (weights only):  510 / 130 / 9   agreement  8/28 (28.6%)   1 hard mismatch
+round 6 (+ both gates):  446 / 194 / 9   agreement  9/28 (32.1%)   0 hard mismatches
+```
+
+The lone round-5 hard mismatch (a `label=drop` non-mutual personal account
+inflated to `keep` at `keep_prob` ≈ 0.76) is resolved for free by the
+reciprocity ceiling. The 64-account drop in `keep` is the parasocial-consumption
+inflation deflating: ~130 of the round-5 keeps were non-mutual personal accounts
+with zero DMs and zero reactions.
+
+### Label-set caveat
+
+One label was corrected this round (a long-standing mutual previously recorded
+`drop` "algorithm-correct-in-isolation" → its true IRL intent `keep`). The
+`labels.txt` oracle is known-noisy — it mixes real intent with
+compromise-with-the-tool entries (≥ 1 such entry remains). This is _why_ the
+round uses gates: a monotonic gate encodes a one-sentence principle whose
+correctness does not depend on the calibration set being clean. Agreement is a
+regression tripwire here, not proof.
+
+### Data finding (`mutual_age_days`)
+
+The follower-side timestamp gives "how long have we _both_ followed each other"
+(later of the two follow dates). Caveat measured on the real export: ~81% of
+mutual accounts report it within a day of your-follow date (simultaneous
+follow-back or exporter approximation), so for most accounts it equals
+`follow_tenure_days`; it only diverges for the older relationships the 2-year
+floor actually cares about.
+
 ## 2026-05-29 — halve `story_out` (round 5, weights)
 
 First round run _after_ `story_likes.json` (~28k events) was folded into

@@ -347,13 +347,14 @@ their content?") is different and out of scope for v1.
 lists bracket the inferred score:
 
 ```
-1. is_restricted       → Review     hard floor; the manual "look first" signal
-2. is_drop_listed      → Unfollow   config/drop_list.txt — forces drop
-3. keep_prob ≥ keep_min → Keep
-4. keep_prob < unfollow_max:
+1. is_restricted        → Review     hard floor; the manual "look first" signal
+2. is_drop_listed       → Unfollow   config/drop_list.txt — forces drop
+3. deep-mutual floor    → Keep        mutual & mutual_age_days ≥ deep_mutual_keep_days
+4. keep_prob ≥ keep_min → Keep        …unless the reciprocity gate fires → Review
+5. keep_prob < unfollow_max:
      is_close_friend | is_favorited | is_keep_allowlisted | non-Personal → Review
      else → Unfollow
-5. otherwise           → Review
+6. otherwise            → Review
 ```
 
 `is_restricted` floors at `review` even when `keep_prob` is below
@@ -365,7 +366,34 @@ the keep-allowlist: a listed handle is forced to `unfollow` regardless of
 score, close-friend/favorited boosts, or brand class. A handle present in
 **both** lists is a contradiction and is rejected at load
 (`allowlist::ensure_disjoint`) before scoring, so rung 2 never competes with
-rung 4's keep-allowlist gate by construction.
+rung 5's keep-allowlist gate by construction.
+
+**Two relationship gates bracket the score (rungs 3–4), both monotonic — each
+can only move an account one direction, so neither can manufacture a wrongful
+`unfollow`.** They encode the core principle that _keep = relationship, not
+consumption_:
+
+- **Deep-mutual keep-floor** (rung 3, `deep_mutual_keep_days`, default 730):
+  a mutual account whose **reciprocal age** (`mutual_age_days` — days since the
+  later of {you followed them, they followed you back}) is ≥ the threshold
+  floors to `keep`. A long two-way history is a real relationship worth keeping
+  even with no recent engagement. Only moves up to `keep`; `0` disables it.
+- **Reciprocity keep-ceiling** (rung 4, `require_reciprocity_for_keep`, default
+  **off** — opt-in): when enabled, an account that scored into `keep` is
+  demoted to `review` when its _entire_ relationship is one-directional
+  consumption — `account_class == Personal`, not mutual, no inbound signal
+  (`inbound_dm_request`, `dm_reactions_received`, or a two-way DM thread), and
+  no explicit keep override. The exact mirror of rung 5's brand/favorite
+  `unfollow` gate; only moves down to `review`. **Off by default**: the only
+  labeled data to date (docs/TUNING.md round 7) showed it demotes
+  deliberately-curated one-way creator/brand follows, halving agreement. It
+  stays a toggle for mutual-heavy users who want non-mutual strangers
+  surfaced.
+
+Why gates and not weights: a weight tuned to the labeled set inherits its
+noise and can swing decisions both ways; a monotonic gate encodes a
+one-sentence principle whose correctness doesn't depend on the calibration
+labels being clean. See [`docs/specs/2026-05-30-reciprocity-aware-scoring.md`](specs/2026-05-30-reciprocity-aware-scoring.md).
 
 ## Output
 

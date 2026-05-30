@@ -60,3 +60,14 @@ scale = 1.0        # spread; larger = softer transition
 keep_min = 0.7     # keep_prob >= keep_min            -> keep
 unfollow_max = 0.35 # keep_prob <  unfollow_max (+gates) -> unfollow
                    # everything in between             -> review
+
+# Relationship gates (mirror cut-offs above; both are monotonic — they can
+# only refuse to auto-keep a stranger / refuse to drop a deep mutual, never
+# manufacture an unfollow).
+require_reciprocity_for_keep = false # OFF for this user: the 2026-05-30 labeling
+                                     # pass showed it demotes deliberately-curated
+                                     # one-way creator/brand follows (20/20 labeled
+                                     # keep) — agreement 34.5% -> 69.0% with it off.
+                                     # Non-mutuality is not a drop signal for this
+                                     # following style; real drops go on drop_list.txt.
+deep_mutual_keep_days = 730          # mutual & reciprocal age >= 2y -> keep floor; 0 disables

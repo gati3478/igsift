@@ -44,6 +44,16 @@ use anyhow::{Context, Result};
 use crate::features::{AccountClass, AccountFeatures};
 use crate::scoring::{Bucket, ScoredAccount};
 
+/// Presentation threshold (days) for the "long-standing mutual follow"
+/// shape in [`decision_hint`]. Mirrors the **default**
+/// `scoring.deep_mutual_keep_days` (2 years) so the hint and the
+/// deep-mutual keep-floor line up out of the box. It is intentionally a
+/// fixed shape descriptor, not the live config value: "a years-deep mutual"
+/// is a true characterization regardless of where a user retunes the floor,
+/// and keeping it here preserves `decision_hint`'s `(f, bucket)` signature
+/// (a pinned SSOT consumed identically by the Markdown and HTML writers).
+const LONG_STANDING_MUTUAL_HINT_DAYS: u32 = 730;
+
 /// One-line characterization of an account's "shape" — what kind of
 /// follow it is and why it landed in the bucket. Lives at the output
 /// module level so the Markdown and HTML writers share the same
@@ -92,6 +102,16 @@ pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str
     }
     if f.dm_messages_total > 0 {
         return "DM history exists but no recent messages";
+    }
+    // A years-deep reciprocal relationship with no recent engagement — the
+    // population the deep-mutual keep-floor lands in Keep. Sits below the
+    // engagement arms (an active DM partner is better described as such) and
+    // above the structural fallbacks so it doesn't read as generic "tenure".
+    if f.is_mutual
+        && f.mutual_age_days
+            .is_some_and(|d| d >= LONG_STANDING_MUTUAL_HINT_DAYS)
+    {
+        return "long-standing mutual follow";
     }
     if !f.is_mutual {
         return "one-sided — you follow, no reciprocation";
@@ -173,6 +193,7 @@ mod tests {
             display_name: None,
             account_class: AccountClass::Personal,
             follow_tenure_days: Some(365),
+            mutual_age_days: None,
             is_close_friend: false,
             is_favorited: false,
             is_blocked: false,
@@ -335,6 +356,29 @@ mod tests {
                 bucket: Bucket::Review,
             },
             Case {
+                // Guard: a mutual account with old DM history still reports
+                // the DM-history shape, not the long-standing-mutual shape —
+                // the new arm sits below the engagement arms.
+                label: "old DM history beats long-standing mutual",
+                expected: "DM history exists but no recent messages",
+                mutate: |f| {
+                    f.dm_messages_total = 1;
+                    f.mutual_age_days = Some(3000);
+                },
+                bucket: Bucket::Keep,
+            },
+            Case {
+                // The new arm: a years-deep mutual with no engagement signal
+                // reports its relationship shape instead of falling through
+                // to the generic tenure-only tail.
+                label: "long-standing mutual beats tenure-only tail",
+                expected: "long-standing mutual follow",
+                mutate: |f| {
+                    f.mutual_age_days = Some(3000); // baseline is_mutual = true
+                },
+                bucket: Bucket::Keep,
+            },
+            Case {
                 label: "one-sided beats brand-fallback",
                 expected: "one-sided — you follow, no reciprocation",
                 mutate: |f| {
@@ -383,6 +427,36 @@ mod tests {
         assert_eq!(
             decision_hint(&f, Bucket::Keep),
             "engaged with their content in last 90 days",
+        );
+    }
+
+    #[test]
+    fn long_standing_mutual_hint_boundary() {
+        // The arm fires at `mutual_age_days >= LONG_STANDING_MUTUAL_HINT_DAYS`
+        // (inclusive), for a mutual account with no stronger signal. Below
+        // the threshold, or with an undatable relationship (None), it falls
+        // through to the tenure-only tail. baseline() is is_mutual = true.
+        let at = LONG_STANDING_MUTUAL_HINT_DAYS;
+
+        let mut f = baseline();
+        f.mutual_age_days = Some(at);
+        assert_eq!(
+            decision_hint(&f, Bucket::Keep),
+            "long-standing mutual follow"
+        );
+
+        let mut f = baseline();
+        f.mutual_age_days = Some(at - 1);
+        assert_eq!(
+            decision_hint(&f, Bucket::Keep),
+            "tenure-only — no engagement signal"
+        );
+
+        let mut f = baseline();
+        f.mutual_age_days = None;
+        assert_eq!(
+            decision_hint(&f, Bucket::Keep),
+            "tenure-only — no engagement signal"
         );
     }
 }

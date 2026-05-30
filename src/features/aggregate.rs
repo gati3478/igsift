@@ -105,6 +105,14 @@ pub struct AccountFeatures {
     pub display_name: Option<String>,
     pub account_class: AccountClass,
     pub follow_tenure_days: Option<u32>,
+    /// Days since the relationship became **mutual** — the later of {you
+    /// followed them, they followed you back}. `None` when not mutual, or
+    /// when either follow lacks a timestamp (an undatable relationship is
+    /// not auto-kept by the deep-mutual floor in [`crate::scoring`]). Drawn
+    /// from `following.json` + `followers_*.json` timestamps; distinct from
+    /// `follow_tenure_days` (your-follow date only) — the two differ for the
+    /// ~19% of mutuals whose follow-back lagged your follow.
+    pub mutual_age_days: Option<u32>,
 
     pub is_close_friend: bool,
     pub is_favorited: bool,
@@ -244,6 +252,14 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
         .iter()
         .map(|f| f.username.as_str())
         .collect();
+    // When-they-followed-back, keyed by handle — feeds `mutual_age_days`.
+    // Followers without a timestamp simply don't appear, so the relationship
+    // stays undatable (and the deep-mutual floor stays off) for them.
+    let follower_since: HashMap<&str, Timestamp> = inputs
+        .followers
+        .iter()
+        .filter_map(|f| f.followed_me_at.map(|ts| (f.username.as_str(), ts)))
+        .collect();
 
     let mut by_handle: HashMap<&str, AccountFeatures> =
         HashMap::with_capacity(inputs.followings.len());
@@ -264,6 +280,12 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
             display_name: display_name.map(|s| s.to_owned()),
             account_class: inputs.classifier.classify(handle, display_name),
             follow_tenure_days: f.followed_at.and_then(|ts| days_since(ts, now)),
+            mutual_age_days: mutual_age_days(
+                follower_handles.contains(handle),
+                f.followed_at,
+                follower_since.get(handle).copied(),
+                now,
+            ),
             is_close_friend: close_friend.contains(handle),
             is_favorited: favorited.contains(handle),
             is_blocked: false,
@@ -574,6 +596,27 @@ fn days_since(earlier: Timestamp, now: Timestamp) -> Option<u32> {
         return None;
     }
     u32::try_from(secs / 86_400).ok()
+}
+
+/// Days since a reciprocal follow became mutual — the later of {you followed
+/// them, they followed you back}.
+///
+/// `None` when the account isn't mutual, or when either follow lacks a
+/// timestamp: an undatable relationship must not satisfy the deep-mutual
+/// keep-floor in [`crate::scoring`]. Taking the **later** (`max`) of the two
+/// follows is the load-bearing choice — the relationship has only been
+/// reciprocal since both follows were in place, so a years-old one-way follow
+/// that was reciprocated last month is a one-month-old *mutual* relationship.
+fn mutual_age_days(
+    is_mutual: bool,
+    you_followed: Option<Timestamp>,
+    they_followed: Option<Timestamp>,
+    now: Timestamp,
+) -> Option<u32> {
+    if !is_mutual {
+        return None;
+    }
+    days_since(you_followed?.max(they_followed?), now)
 }
 
 /// Exponential decay weight `exp(-Δt_days / τ_days)` ∈ (0, 1].
@@ -1756,5 +1799,98 @@ mod tests {
 
         let by = by_username(aggregate(&inputs, now));
         assert_eq!(by["alice"].follow_tenure_days, Some(0));
+    }
+
+    // ── mutual-follow duration (reciprocal age) ───────────────────────────
+
+    fn follower(username: &str, followed_me_at: Option<Timestamp>) -> FollowerEntry {
+        FollowerEntry {
+            username: username.to_owned(),
+            followed_me_at,
+        }
+    }
+
+    #[test]
+    fn mutual_age_days_from_later_follow() {
+        // You followed alice 1000 days ago; she followed back 800 days ago.
+        // The relationship has been mutual since the LATER follow → 800 days.
+        let now = fixed_now();
+        let you = Timestamp::from_second(now.as_second() - 1000 * 86_400).unwrap();
+        let them = Timestamp::from_second(now.as_second() - 800 * 86_400).unwrap();
+        let followings = vec![following("alice", Some(you))];
+        let followers = vec![follower("alice", Some(them))];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let decay = synth_decay();
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+        inputs.followers = &followers;
+
+        let alice = &by_username(aggregate(&inputs, now))["alice"];
+        assert!(alice.is_mutual);
+        assert_eq!(alice.mutual_age_days, Some(800));
+    }
+
+    #[test]
+    fn mutual_age_days_uses_later_of_the_two_follows() {
+        // They followed you long ago (1000d); you followed back recently
+        // (300d). Mutual only since YOUR follow → 300 days. Pins `max`, not
+        // `min` — a `min` would wrongly report the relationship as 1000d old.
+        let now = fixed_now();
+        let them = Timestamp::from_second(now.as_second() - 1000 * 86_400).unwrap();
+        let you = Timestamp::from_second(now.as_second() - 300 * 86_400).unwrap();
+        let followings = vec![following("alice", Some(you))];
+        let followers = vec![follower("alice", Some(them))];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let decay = synth_decay();
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+        inputs.followers = &followers;
+
+        let alice = &by_username(aggregate(&inputs, now))["alice"];
+        assert_eq!(alice.mutual_age_days, Some(300));
+    }
+
+    #[test]
+    fn mutual_age_days_none_when_not_mutual() {
+        // In followings but not followers → not mutual → no reciprocal age.
+        let now = fixed_now();
+        let you = Timestamp::from_second(now.as_second() - 1000 * 86_400).unwrap();
+        let followings = vec![following("alice", Some(you))];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let decay = synth_decay();
+        let classifier = synth_classifier();
+        let inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+
+        let alice = &by_username(aggregate(&inputs, now))["alice"];
+        assert!(!alice.is_mutual);
+        assert_eq!(alice.mutual_age_days, None);
+    }
+
+    #[test]
+    fn mutual_age_days_none_when_a_follow_timestamp_missing() {
+        // Mutual, but your follow lacks a timestamp → relationship can't be
+        // dated → None (conservative: the deep-mutual floor won't fire on an
+        // undatable relationship).
+        let now = fixed_now();
+        let them = Timestamp::from_second(now.as_second() - 800 * 86_400).unwrap();
+        let followings = vec![following("alice", None)];
+        let followers = vec![follower("alice", Some(them))];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        let resolver = NameResolver::default();
+        let decay = synth_decay();
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+        inputs.followers = &followers;
+
+        let alice = &by_username(aggregate(&inputs, now))["alice"];
+        assert!(alice.is_mutual);
+        assert_eq!(alice.mutual_age_days, None);
     }
 }

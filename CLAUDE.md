@@ -177,13 +177,32 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   `HashSet<String>`), surface as `is_keep_allowlisted` / `is_drop_listed`
   on `AccountFeatures`, and gate in `scoring::assign_bucket`. Precedence
   (top wins): `is_restricted` (Review floor) → `is_drop_listed` (Unfollow)
-  → `keep_min` → keep-gates. `is_restricted` is the one floor the
-  drop-list yields to. A handle on **both** lists is a contradiction —
-  `allowlist::ensure_disjoint` rejects it loudly at load (in `run`),
-  before scoring, so the two rungs never compete by construction. When
-  adding a new override, mirror this end to end (loader → `Classifier`
-  field + lookup → `AccountFeatures` field → `assign_bucket` rung →
-  `decision_hint` row) and the ~7 test struct-builders.
+  → deep-mutual floor (Keep) → `keep_min` + reciprocity gate → keep-gates.
+  `is_restricted` is the one floor the drop-list yields to. A handle on
+  **both** lists is a contradiction — `allowlist::ensure_disjoint` rejects
+  it loudly at load (in `run`), before scoring, so the two rungs never
+  compete by construction. When adding a new override, mirror this end to
+  end (loader → `Classifier` field + lookup → `AccountFeatures` field →
+  `assign_bucket` rung → `decision_hint` row) and the ~7 test
+  struct-builders.
+- **Relationship gates are monotonic (keep = relationship, not
+  consumption).** Two config-gated rungs in `assign_bucket` bracket the
+  score, each moving an account in **one** direction only so neither can
+  manufacture a wrongful `unfollow`: the **deep-mutual keep-floor**
+  (`scoring.deep_mutual_keep_days`, default 730 — mutual + `mutual_age_days`
+  ≥ threshold floors to Keep; `0` disables) and the **reciprocity
+  keep-ceiling** (`scoring.require_reciprocity_for_keep`, default **false**,
+  opt-in — when on, a personal, non-mutual account with no inbound signal
+  can't auto-keep on one-way consumption, demoted Keep → Review).
+  `mutual_age_days` (days since the _later_ of your-follow / their-follow-back,
+  from `followers_*.json` timestamps) is computed in `features::aggregate`.
+  The ceiling defaults off across all presets + the `serde` default — the only
+  labeled pass (TUNING round 7) measured it as harmful for a content-consumer
+  following style; it's preserved as a toggle for mutual-heavy users. Both
+  gates are deliberately
+  **gates not weights** — their correctness doesn't depend on the noisy
+  `labels.txt` oracle. Full rationale:
+  [`docs/specs/2026-05-30-reciprocity-aware-scoring.md`](docs/specs/2026-05-30-reciprocity-aware-scoring.md).
 - **Archive cache fingerprint, not mtime.** `archive::resolve` writes
   `{count}\n{total_bytes}\n` into `.complete` and invalidates on any
   mismatch. mtime-based checks are vulnerable to `cp -p` and to

@@ -93,6 +93,29 @@ pub struct ScoringParams {
     pub scale: f64,
     pub keep_min: f64,
     pub unfollow_max: f64,
+    /// When `true` (default), a personal, non-mutual account with no inbound
+    /// signal cannot bucket `keep` on one-directional consumption alone — it
+    /// floors at `review`. See [`crate::scoring::assign_bucket`]. The
+    /// `engagement` preset disables this (it scores raw activity by design).
+    #[serde(default = "default_require_reciprocity_for_keep")]
+    pub require_reciprocity_for_keep: bool,
+    /// A mutual account whose reciprocal age (`mutual_age_days`) is ≥ this
+    /// many days floors at `keep` — a long reciprocal history is a real
+    /// relationship. `0` disables the floor. Default 730 (2 years).
+    #[serde(default = "default_deep_mutual_keep_days")]
+    pub deep_mutual_keep_days: u32,
+}
+
+fn default_require_reciprocity_for_keep() -> bool {
+    // Off by default: the only labeled data we have (2026-05-30 pass) showed
+    // the reciprocity ceiling demotes deliberately-curated one-way follows,
+    // halving agreement. It stays an opt-in toggle for mutual-heavy users who
+    // want non-mutual strangers surfaced — see docs/TUNING.md round 7.
+    false
+}
+
+fn default_deep_mutual_keep_days() -> u32 {
+    730
 }
 
 /// Read and parse the scoring config, following the documented resolution
