@@ -76,6 +76,7 @@ cargo run -- init [--force]                        # scaffold config/ files
 cargo fmt --all                                    # format (rustfmt.toml: edition 2024)
 cargo clippy --all-targets -- -D warnings          # lint; CI treats warnings as errors
 cargo nextest run                                  # tests (cargo test also works)
+cargo deny check advisories bans sources           # supply-chain gate (CI + pre-push)
 ```
 
 Run flags: `--out PATH` (output stem), `--preset balanced|engagement|tenure`
@@ -89,7 +90,7 @@ into `.ig-mgr-extracted*/` next to the input, with cache reuse keyed on
 a `{count}\n{total_bytes}` fingerprint (mtime-immune to `cp -p` and
 `rsync --times`).
 
-Set up once per clone: `brew install lefthook && lefthook install` (pre-commit fmt + pre-push clippy/test mirror CI — see `lefthook.yml`). Optional CI tool: `cargo install --locked cargo-nextest` (only installs with `--locked`).
+Set up once per clone: `brew install lefthook && lefthook install` (pre-commit fmt + pre-push clippy/test/cargo-deny mirror CI — see `lefthook.yml`). Optional CI tools: `cargo install --locked cargo-nextest cargo-deny` (both install with `--locked`).
 
 ## Layout
 
@@ -130,7 +131,7 @@ config/
     tenure.toml                # tenure-weighted preset
 scripts/
   walk_export_schema.sh # JSON-schema walker; drift detector for IG exports
-docs/DESIGN.md  ROADMAP.md  TUNING.md
+docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
 ```
 
 ## Conventions

@@ -139,8 +139,8 @@ Iterate from here by:
    `cp config/presets/engagement.toml config/scoring.toml`) and edit
    weights to chase higher label agreement. See
    [`docs/TUNING.md`](docs/TUNING.md) for the journal of how the
-   committed `config/scoring.toml` was tuned against a 649-account
-   labeled set.
+   committed `config/scoring.toml` was tuned against a hand-labeled
+   subset (~28 accounts) of the maintainer's 649-account export.
 
 ## Development
 
@@ -159,9 +159,10 @@ The two local tools the hooks expect (CI runs the same checks):
 Local git hooks are managed by [Lefthook](https://github.com/evilmartians/lefthook)
 ([`lefthook.yml`](lefthook.yml)): `pre-commit` runs `cargo fmt --check` (fast
 gate), `pre-push` runs `cargo clippy -D warnings`, `cargo nextest run`, and
-`cargo deny`. Together they cover every CI lane — CI's separate `build` step is
-subsumed by `clippy --all-targets`. Set up once per clone:
-`brew install lefthook && lefthook install`.
+`cargo deny` — the same lanes CI runs (CI's `build` step is subsumed by
+`clippy --all-targets`). The pre-push hook is file-scoped, so CI re-runs every
+lane unconditionally on each push/PR as the authoritative gate. Set up once per
+clone: `brew install lefthook && lefthook install`.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for conventions and
 [`SECURITY.md`](SECURITY.md) for reporting privacy/security issues.
