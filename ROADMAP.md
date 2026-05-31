@@ -274,3 +274,10 @@ behind each item.
       brand lexicon, reciprocity + deep-mutual gates, decay constants); see
       [`docs/TUNING.md`](docs/TUNING.md). Ongoing use: act on the output,
       evaluate regret over time, iterate.
+- [x] **Effort-skew gate + DM like-shadow dedup** (2026-06-01) — fixed the
+      "Liked a message" double-count corrupting `dm_balance`, added
+      `dm_inbound_replies` (real replies vs. taps), a monotonic two-tier
+      effort-skew gate (Keep → Review, evidence-guarded, owner-config only),
+      and the CSV `reply_skew` / `dm_inbound_replies` columns. Calibrated to
+      `min=6 / soft=0.80 / hard=0.85` (round 9). Spec:
+      [`docs/specs/2026-05-31-effort-skew-gate-design.md`](docs/specs/2026-05-31-effort-skew-gate-design.md).

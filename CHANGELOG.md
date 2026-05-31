@@ -28,6 +28,15 @@ account. Fully offline — no network, database, or automated unfollow.
 - Relationship-aware bucket gates: a deep-mutual keep-floor and an opt-in
   reciprocity keep-ceiling, both monotonic — they only refuse to auto-keep a
   stranger or refuse to drop a years-deep mutual, never manufacture an unfollow.
+- Effort-skew gate: a monotonic two-tier `Keep → Review` demotion for accounts
+  the owner over-invests in (high outbound DM volume, near-zero real replies),
+  evidence-guarded on owner DM volume and disabled by default in the presets.
+  The SOFT tier demotes unmarked personal keeps; the HARD tier overrides
+  close-friend / favorite / mutual markers. Paired with a parser fix:
+  Instagram serializes a message-like twice (in `reactions[]` and as a
+  standalone "Liked a message" message), so the aggregator now excludes the
+  shadow from DM volume / balance — one-sidedness is no longer masked — and
+  tracks `dm_inbound_replies` (real replies, not taps).
 - Three subcommands (`run`, `init`, `check`), three scoring presets
   (`balanced`/`engagement`/`tenure`), per-term `--trace`, and an optional
   labeled-set confusion-matrix report.

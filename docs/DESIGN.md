@@ -3,10 +3,11 @@
 The full design for the Instagram following-cleanup CLI. Status, build, and the
 short pitch live in the [README](../README.md); the task list in
 [ROADMAP.md](../ROADMAP.md). The full pipeline is implemented and tuned:
-parsers, feature aggregation, decay-weighted scoring with the two relationship
-gates, the brand/public-figure account-class heuristic, the keeplist/droplist
+parsers, feature aggregation, decay-weighted scoring with the relationship
+gates (deep-mutual keep-floor, reciprocity keep-ceiling) and the effort-skew
+gate, the brand/public-figure account-class heuristic, the keeplist/droplist
 overrides, and the CSV/Markdown/HTML writers. The weight/decay calibration
-journal is [`docs/TUNING.md`](TUNING.md) (8 rounds through 2026-05-30).
+journal is [`docs/TUNING.md`](TUNING.md) (9 rounds through 2026-06-01).
 
 ## Inputs
 
@@ -166,6 +167,14 @@ explicitly so `src/export.rs` is designed for them:
 - **Multi-part DM threads**: 14 of 593 threads span 2–10 `message_*.json` files
   (e.g., `validoli` has 10 parts). Concatenate all parts per thread before
   computing features, or the largest conversations silently truncate.
+- **Message-like shadows**: a double-tap message like is serialized **twice** —
+  in the target message's `reactions[]` AND as a standalone message with
+  `content == "Liked a message"` from the reactor. The aggregator excludes that
+  shadow from `dm_messages_total` / `dm_balance` / `dm_inbound_replies` (the
+  reaction is the canonical record, already counted) — see
+  `aggregate::LIKE_SHADOW_CONTENT`. 31,155 such shadows across 394 of 594
+  threads in the validated export; counting them as messages was masking
+  one-sidedness in `dm_balance`.
 
 ## Algorithm sketch
 
@@ -181,7 +190,8 @@ one decision per account.
 | ------------------------ | --------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------- |
 | `dm_messages_total`      | inbox `<thread>` messages                           | outbound + inbound, log-scaled                                 | high                                      |
 | `dm_recency_days`        | last `timestamp_ms` in thread                       | recency enters via decayed counts; field surfaces in CSV only  | (no separate weight)                      |
-| `dm_balance`             | outbound / (outbound + inbound) message count       | penalize one-sided threads                                     | medium                                    |
+| `dm_balance`             | outbound / (outbound + inbound) message count       | penalize one-sided threads (post-shadow-dedup)                 | medium                                    |
+| `dm_inbound_replies`     | inbox `<thread>` real messages (shadows excluded)   | the other party's real replies, not taps; effort-skew evidence | (gate evidence, not scored)               |
 | `dm_reactions_given`     | `reactions[?actor == me]`                           | log-scaled, recency-weighted                                   | medium                                    |
 | `dm_reactions_received`  | `reactions[?actor != me]` — **inbound** reciprocity | log-scaled, recency-weighted                                   | medium-high                               |
 | `dm_reaction_balance`    | given / (given + received)                          | penalize one-sided reactions                                   | low-medium                                |

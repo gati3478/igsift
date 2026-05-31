@@ -1,6 +1,8 @@
 # SPEC — droplist feature
 
-Status: **proposed** (not yet implemented). Spec only; confirm before code.
+Status: **implemented** (2026-05-29). This early stand-alone spec is kept for
+historical context; the live behavior is documented in
+[`docs/DESIGN.md`](docs/DESIGN.md) ("Bucket precedence", "Droplist override").
 
 ## Objective
 
@@ -8,10 +10,10 @@ Give the user an explicit override that forces a hand-flagged account to
 `Unfollow`, regardless of score or inferred keep-signals. It is the exact
 inverse of the existing `config/keeplist.txt`:
 
-| List                    | File                        | Effect                                       |
-| ----------------------- | --------------------------- | -------------------------------------------- |
-| keeplist (exists) | `config/keeplist.txt` | floors `Unfollow → Review` (never auto-drop) |
-| **droplist (new)**     | `config/droplist.txt`      | forces `→ Unfollow` (never auto-keep)        |
+| List               | File                  | Effect                                       |
+| ------------------ | --------------------- | -------------------------------------------- |
+| keeplist (exists)  | `config/keeplist.txt` | floors `Unfollow → Review` (never auto-drop) |
+| **droplist (new)** | `config/droplist.txt` | forces `→ Unfollow` (never auto-keep)        |
 
 **Why it exists** (see `docs/TUNING.md` round 5): keep/drop intent is not
 separable on the current features, so weight-tuning trades keep-recall for

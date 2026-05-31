@@ -104,13 +104,13 @@ src/
   text.rs                       # fix_mojibake — repairs IG's UTF-8-as-Latin-1 export bug
   features/
     mod.rs                      # re-exports
-    aggregate.rs                # per-account features: raw + decayed + windowed + is_mutual
+    aggregate.rs                # per-account features: raw + decayed + windowed + is_mutual + dm_inbound_replies (post-shadow-dedup)
     name_resolution.rs          # display_name → handle bridge for DM attribution
     account_class.rs            # brand-detection (aho-corasick lexicon) + keeplist / droplist gates
-  scoring.rs                    # score_raw composition, sigmoid, bucket assignment, top_terms
+  scoring.rs                    # score_raw composition, sigmoid, bucket assignment (incl. effort-skew gate), top_terms
   output/
     mod.rs                      # write() dispatcher (CSV+MD+HTML) + shared writer SSOT (decision_hint, HINT_ONE_SIDED, contributions_inline)
-    csv.rs                      # CSV row writer (DESIGN.md "Output" header is the contract: keep_score, top_signal)
+    csv.rs                      # CSV row writer (DESIGN.md "Output" header is the contract: keep_score, top_signal, reply_skew)
     markdown.rs                 # decision-oriented MD: keep-% cards + proportion-bar summary + droplist quarantine
     html.rs                     # self-contained HTML report (inline CSS+JS, no deps) + per-row keep/drop triage → localStorage → copy/paste to lists
 tests/
@@ -174,7 +174,7 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   pins this; don't relax it.
 - **Decision-hint SSOT.** The one-line account-shape characterization
   surfaced by both Markdown and HTML writers lives in
-  `src/output/mod.rs::decision_hint`. The 17-row precedence-chain test
+  `src/output/mod.rs::decision_hint`. The 19-row precedence-chain test
   is the contract; both writers call the shared function. Adding new
   rules: insert at the right precedence, extend the table-driven test.
   The one-sided hint string is hoisted to a `HINT_ONE_SIDED` const in
@@ -192,7 +192,8 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   `HashSet<String>`), surface as `is_keeplisted` / `is_droplisted`
   on `AccountFeatures`, and gate in `scoring::assign_bucket`. Precedence
   (top wins): `is_restricted` (Review floor) → `is_droplisted` (Unfollow)
-  → deep-mutual floor (Keep) → `keep_min` + reciprocity gate → keep-gates.
+  → effort-skew HARD (Review) → deep-mutual floor (Keep) → `keep_min`
+  (+ effort-skew SOFT / reciprocity gate → Review) → keep-gates.
   `is_restricted` is the one floor the droplist yields to. A handle on
   **both** lists is a contradiction — `lists::ensure_disjoint` rejects
   it loudly at load (in `run`), before scoring, so the two rungs never
@@ -201,8 +202,8 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   `assign_bucket` rung → `decision_hint` row) and the ~7 test
   struct-builders.
 - **Relationship gates are monotonic (keep = relationship, not
-  consumption).** Two config-gated rungs in `assign_bucket` bracket the
-  score, each moving an account in **one** direction only so neither can
+  consumption).** Monotonic config-gated rungs in `assign_bucket` bracket the
+  score, each moving an account in **one** direction only so none can
   manufacture a wrongful `unfollow`: the **deep-mutual keep-floor**
   (`scoring.deep_mutual_keep_days`, default 730 — mutual + `mutual_age_days`
   ≥ threshold floors to Keep; `0` disables) and the **reciprocity
@@ -213,10 +214,17 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   from `followers_*.json` timestamps) is computed in `features::aggregate`.
   The ceiling defaults off across all presets + the `serde` default — the only
   labeled pass (TUNING round 7) measured it as harmful for a content-consumer
-  following style; it's preserved as a toggle for mutual-heavy users. Both
-  gates are deliberately
+  following style; it's preserved as a toggle for mutual-heavy users.
+  The **effort-skew gate** (`scoring.effort_skew_min_dm_out` / `_soft` /
+  `_hard`; `min_dm_out = 0` disables) adds two more monotonic rungs — a SOFT
+  tier (demotes an unmarked personal Keep) and a HARD tier (overrides
+  close-friend / favorite / mutual + the deep-mutual floor) — both Keep →
+  Review only and **evidence-guarded** on owner DM volume, so they act only
+  inside a 1:1 thread the owner invested in; off by default in the presets.
+  See [`docs/specs/2026-05-31-effort-skew-gate-design.md`](docs/specs/2026-05-31-effort-skew-gate-design.md).
+  These gates are deliberately
   **gates not weights** — their correctness doesn't depend on the noisy
-  `labels.txt` oracle. Full rationale:
+  `labels.txt` oracle. Full rationale (deep-mutual + reciprocity):
   [`docs/specs/2026-05-30-reciprocity-aware-scoring.md`](docs/specs/2026-05-30-reciprocity-aware-scoring.md).
 - **Archive cache fingerprint, not mtime.** `archive::resolve` writes
   `{count}\n{total_bytes}\n` into `.complete` and invalidates on any
