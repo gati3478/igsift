@@ -8,6 +8,7 @@
 /export/
 /exports/
 /ig-exported-data/
+/downloaded-ig-data/
 *.zip
 
 # Archive extraction caches — written by `archive::resolve` next to the
