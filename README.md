@@ -72,7 +72,11 @@ cargo run -- ./instagram-export                   # from a source checkout (any 
 
 Three files appear next to your input as `following-audit_<date>.{csv,md,html}`.
 Open the **HTML** in a browser — a sortable, filterable table — then do the
-unfollows by hand in Instagram.
+unfollows by hand in Instagram. As you skim, you can flag accounts **Keep** or
+**Drop** right in the report; a bar appears with **Copy** / **Download** buttons
+that hand you the exact lines to paste into your keeplist / droplist (see
+[Customizing](#customizing-the-results)). Nothing is sent anywhere — the
+selections live in your browser until you copy them out.
 
 No config files are required; `igsift` ships with sensible defaults.
 
@@ -115,6 +119,10 @@ Run `igsift init` to scaffold three optional files under `config/`:
 - **`keeplist.txt`** — accounts you'll **never** unfollow (floored to _review_ at worst).
 - **`droplist.txt`** — accounts to **always** force into _unfollow_, whatever the score (the exact mirror of the keeplist). A handle can't be on both lists.
 - **`labels.txt`** — hand-label 20–30 accounts as keep/drop; `igsift` reports how well its scores agree with you after each run.
+
+The fastest way to fill `keeplist.txt` / `droplist.txt` is from the HTML report:
+flag accounts as you read, then **Copy** (or **Download**) each list and paste it
+into the matching file. The lists are case-insensitive, one handle per line.
 
 To tune the scoring weights yourself, copy a preset to `config/scoring.toml` and
 edit it — see [`docs/TUNING.md`](docs/TUNING.md).

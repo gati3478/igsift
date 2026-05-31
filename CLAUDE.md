@@ -109,10 +109,10 @@ src/
     account_class.rs            # brand-detection (aho-corasick lexicon) + keeplist / droplist gates
   scoring.rs                    # score_raw composition, sigmoid, bucket assignment, top_terms
   output/
-    mod.rs                      # write() dispatcher (CSV+MD+HTML) + shared decision_hint SSOT
-    csv.rs                      # CSV row writer (DESIGN.md "Output" header is the contract)
-    markdown.rs                 # decision-oriented MD: per-bucket cards + tables
-    html.rs                     # self-contained HTML report (inline CSS + JS, no deps)
+    mod.rs                      # write() dispatcher (CSV+MD+HTML) + shared writer SSOT (decision_hint, HINT_ONE_SIDED, contributions_inline)
+    csv.rs                      # CSV row writer (DESIGN.md "Output" header is the contract: keep_score, top_signal)
+    markdown.rs                 # decision-oriented MD: keep-% cards + proportion-bar summary + droplist quarantine
+    html.rs                     # self-contained HTML report (inline CSS+JS, no deps) + per-row keep/drop triage → localStorage → copy/paste to lists
 tests/
   cli.rs                        # binary integration tests + fixture-count assertions (locked-in)
   fixtures/sample_export/       # sanitized synthetic export
@@ -177,6 +177,14 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   `src/output/mod.rs::decision_hint`. The 17-row precedence-chain test
   is the contract; both writers call the shared function. Adding new
   rules: insert at the right precedence, extend the table-driven test.
+  The one-sided hint string is hoisted to a `HINT_ONE_SIDED` const in
+  the same module: the Markdown writer suppresses _that specific_ hint
+  when it would only restate the `one-sided` attribute badge already on
+  the card, so the two sites compare against the const, never a
+  copy-pasted literal. HTML does not suppress (no attribute-line
+  redundancy there). The `keep_prob → "NN%"` percentage is a
+  human-report-only rendering (Markdown + HTML); the CSV keeps the raw
+  `0.0–1.0` float — `pct()` currently lives in both writer modules.
 - **Keeplist / droplist are mirror overrides.** Two per-user
   handle lists bracket the score: `config/keeplist.txt` floors
   `Unfollow → Review`, `config/droplist.txt` forces `→ Unfollow`. Both
