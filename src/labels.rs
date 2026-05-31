@@ -240,13 +240,13 @@ pub(crate) fn compute(labels: &LabelSet, scored: &[ScoredAccount]) -> ReportData
 ///
 /// - Header line with label totals (`N labels: K keep, D drop`).
 /// - Confusion matrix (2 × 3).
-/// - Agreement ratio.
+/// - Agreement ratio (bold headline, colored ✓/✗ verdict).
 /// - "Labels not in scored set" warnings (one per missing handle).
 /// - Hard mismatches: `label=keep & bucket=unfollow` and
 ///   `label=drop & bucket=keep`. Soft mismatches (label=keep & bucket=review,
 ///   label=drop & bucket=review) are visible in the matrix but not listed —
 ///   `review` is an honest "I'm unsure" outcome.
-pub fn report(labels: &LabelSet, scored: &[ScoredAccount]) {
+pub fn report(labels: &LabelSet, scored: &[ScoredAccount], caps: &crate::term_style::Caps) {
     let data = compute(labels, scored);
     let by_handle: HashMap<&str, &ScoredAccount> = scored
         .iter()
@@ -269,10 +269,13 @@ pub fn report(labels: &LabelSet, scored: &[ScoredAccount]) {
         "  label=drop     {:>11}  {:>13}  {:>15}",
         data.confusion[1][0], data.confusion[1][1], data.confusion[1][2],
     );
-    println!(
-        "agreement: {}/{} ({:.1}%)  \
-         [label=keep ∩ bucket=keep + label=drop ∩ bucket=unfollow]",
+    let pct_line = format!(
+        "agreement: {}/{} ({:.1}%)",
         data.agreed, data.scored_total, data.agreement_pct,
+    );
+    println!(
+        "{}  [label=keep ∩ bucket=keep + label=drop ∩ bucket=unfollow]",
+        caps.paint(&pct_line, caps.bold_style())
     );
 
     if !data.missing.is_empty() {
@@ -286,9 +289,15 @@ pub fn report(labels: &LabelSet, scored: &[ScoredAccount]) {
     }
 
     if data.hard_mismatches.is_empty() {
-        println!("hard mismatches: none");
+        let head = format!("{} no hard mismatches", caps.check_glyph());
+        println!("{}", caps.paint(&head, caps.bucket_style(Bucket::Keep)));
     } else {
-        println!("hard mismatches ({}):", data.hard_mismatches.len());
+        let head = format!(
+            "{} {} hard mismatch(es)",
+            caps.cross_glyph(),
+            data.hard_mismatches.len()
+        );
+        println!("{}", caps.paint(&head, caps.bucket_style(Bucket::Unfollow)));
         for (handle, label) in &data.hard_mismatches {
             let acct = by_handle[handle.as_str()];
             println!(

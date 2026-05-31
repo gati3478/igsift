@@ -649,7 +649,11 @@ pub fn run(args: RunArgs) -> Result<()> {
     // Labels report (optional). `config/labels.txt` is opt-in — a tuning
     // session that hasn't committed labels yet sees no report and no error.
     match labels::load_default()? {
-        Some(label_set) => labels::report(&label_set, &scored),
+        Some(label_set) => labels::report(
+            &label_set,
+            &scored,
+            &crate::term_style::Caps::detect(args.color),
+        ),
         None => println!("labels: config/labels.txt not found (accuracy report skipped)"),
     }
 

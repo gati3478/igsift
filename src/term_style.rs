@@ -104,6 +104,16 @@ impl Caps {
         }
     }
 
+    /// Success marker: `✓` (unicode) / `OK` (ascii).
+    pub fn check_glyph(&self) -> &'static str {
+        if self.unicode { "✓" } else { "OK" }
+    }
+
+    /// Failure marker: `✗` (unicode) / `X` (ascii).
+    pub fn cross_glyph(&self) -> &'static str {
+        if self.unicode { "✗" } else { "X" }
+    }
+
     /// Filled glyph for a bucket dot. ASCII fallback when `unicode` is off.
     pub fn bucket_glyph(&self, bucket: Bucket) -> &'static str {
         match (bucket, self.unicode) {
@@ -369,6 +379,24 @@ mod tests {
                 "row {i} has wrong width: {row:?}"
             );
         }
+    }
+
+    #[test]
+    fn status_glyphs_flip_with_unicode() {
+        let uni = Caps {
+            color: false,
+            unicode: true,
+            width: 80,
+        };
+        let asc = Caps {
+            color: false,
+            unicode: false,
+            width: 80,
+        };
+        assert_eq!(uni.check_glyph(), "✓");
+        assert_eq!(asc.check_glyph(), "OK");
+        assert_eq!(uni.cross_glyph(), "✗");
+        assert_eq!(asc.cross_glyph(), "X");
     }
 
     #[test]
