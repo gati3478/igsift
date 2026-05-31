@@ -76,7 +76,13 @@ fn render_to_string(scored: &[ScoredAccount], meta: &RunMeta, caps: &Caps) -> St
     let right = caps.boxed("Unfollow candidates", &bottom, card_w);
 
     if w >= 72 {
-        let left_cols = left.iter().map(|r| r.chars().count()).max().unwrap_or(0);
+        // Measure the left column in DISPLAY columns so a wide-char row still
+        // aligns the right card flush.
+        let left_cols = left
+            .iter()
+            .map(|r| crate::term_style::display_width(r))
+            .max()
+            .unwrap_or(0);
         let rows = left.len().max(right.len());
         // `left` and `right` always have equal row count (both `boxed` of a
         // take(10) slice); the `get(i).unwrap_or_default()` + lpad keeps columns
@@ -84,7 +90,7 @@ fn render_to_string(scored: &[ScoredAccount], meta: &RunMeta, caps: &Caps) -> St
         for i in 0..rows {
             let l = left.get(i).cloned().unwrap_or_default();
             let r = right.get(i).cloned().unwrap_or_default();
-            let lpad = left_cols.saturating_sub(l.chars().count());
+            let lpad = left_cols.saturating_sub(crate::term_style::display_width(&l));
             let _ = writeln!(o, "{l}{} {r}", " ".repeat(lpad));
         }
     } else {
@@ -204,12 +210,33 @@ mod tests {
         };
         let out = render_to_string(&sample(), &meta(), &caps);
         for line in out.lines() {
-            assert!(
-                line.chars().count() <= 40,
-                "line exceeds width 40 ({} cols): {line:?}",
-                line.chars().count(),
-            );
+            let cols = crate::term_style::display_width(line);
+            assert!(cols <= 40, "line exceeds width 40 ({cols} cols): {line:?}");
         }
+    }
+
+    #[test]
+    fn wide_config_label_keeps_banner_box_aligned() {
+        // A non-ASCII --config path lands in the header line; the banner box
+        // must stay rectangular (all box rows equal DISPLAY width).
+        use crate::term_style::display_width;
+        let caps = Caps {
+            color: false,
+            unicode: true,
+            width: 80,
+        };
+        let meta = RunMeta {
+            total: 3,
+            config_label: "/数据/配置.toml",
+            date: jiff::civil::date(2026, 5, 31),
+        };
+        let out = render_to_string(&sample(), &meta, &caps);
+        let banner_rows: Vec<&str> = out.lines().take_while(|l| !l.is_empty()).collect();
+        let widths: Vec<usize> = banner_rows.iter().map(|r| display_width(r)).collect();
+        assert!(
+            widths.iter().all(|&w| w == widths[0]),
+            "banner rows must share one display width with a wide config label: {widths:?}"
+        );
     }
 
     #[test]

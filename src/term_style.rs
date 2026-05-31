@@ -7,17 +7,30 @@
 use crate::cli::ColorChoice;
 use crate::scoring::Bucket;
 use anstyle::{AnsiColor, Style};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-/// True when the active locale env vars advertise UTF-8.
+/// True when the active locale advertises UTF-8. Honors POSIX precedence for
+/// the character-encoding category: `LC_ALL` overrides `LC_CTYPE` overrides
+/// `LANG` — the first one that is **set and non-empty** decides, so forcing
+/// `LC_ALL=C` correctly yields ASCII even when `LANG` is a UTF-8 locale
+/// (otherwise igsift would emit Unicode that mojibakes on the C locale).
 fn locale_is_utf8() -> bool {
-    ["LC_ALL", "LC_CTYPE", "LANG"].iter().any(|k| {
-        std::env::var(k)
-            .map(|v| {
+    locale_is_utf8_from(|k| std::env::var_os(k).map(|v| v.to_string_lossy().into_owned()))
+}
+
+/// Pure core of [`locale_is_utf8`], parameterized over the env lookup so the
+/// POSIX precedence is unit-testable without mutating process environment.
+fn locale_is_utf8_from(get: impl Fn(&str) -> Option<String>) -> bool {
+    for key in ["LC_ALL", "LC_CTYPE", "LANG"] {
+        match get(key) {
+            Some(v) if !v.is_empty() => {
                 let v = v.to_ascii_lowercase();
-                v.contains("utf-8") || v.contains("utf8")
-            })
-            .unwrap_or(false)
-    })
+                return v.contains("utf-8") || v.contains("utf8");
+            }
+            _ => continue,
+        }
+    }
+    false
 }
 
 /// Rendering capabilities, resolved once at the edge from the environment
@@ -177,12 +190,12 @@ impl Caps {
         // title_seg = "─ Title " (h + space + title + space)
         let title_seg = format!("{h} {title} ");
         // Guard: clamp to `inner` so an overlong title never widens the top border.
-        let title_seg = if title_seg.chars().count() > inner {
+        let title_seg = if display_width(&title_seg) > inner {
             truncate_with_ellipsis(&title_seg, inner, self.unicode)
         } else {
             title_seg
         };
-        let title_len = title_seg.chars().count();
+        let title_len = display_width(&title_seg);
         let fill = inner.saturating_sub(title_len);
         rows.push(format!("{tl}{title_seg}{}{tr}", h.to_string().repeat(fill)));
 
@@ -193,7 +206,7 @@ impl Caps {
         let body_width = inner.saturating_sub(1); // space before body is fixed
         for line in lines {
             let body = truncate_with_ellipsis(line, body_width, self.unicode);
-            let body_len = body.chars().count();
+            let body_len = display_width(&body);
             let pad = body_width.saturating_sub(body_len);
             rows.push(format!("{v} {body}{}{v}", " ".repeat(pad)));
         }
@@ -204,20 +217,52 @@ impl Caps {
     }
 }
 
-/// Truncate `s` to at most `max` columns, appending an ellipsis marker
-/// when cut (`…` under unicode, `...` under ASCII).
+/// Display width of `s` in terminal columns: CJK/wide chars count as 2,
+/// combining/zero-width as 0. Plain text ONLY — never pass an ANSI-painted
+/// string (escape sequences would be miscounted, since `[32m` is printable).
+/// All layout measurement in this module and in `summary` goes through this,
+/// so a non-ASCII handle or `--config` path can't skew a box or a column.
+pub(crate) fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+/// Display width of a single char in columns (0 for control/combining).
+fn char_width(ch: char) -> usize {
+    UnicodeWidthChar::width(ch).unwrap_or(0)
+}
+
+/// Truncate `s` to at most `max` DISPLAY columns, appending an ellipsis
+/// marker when cut (`…` under unicode, `...` under ASCII). A wide char that
+/// would overflow the budget is dropped whole (never split mid-cell), so the
+/// result is always `<= max` columns.
 fn truncate_with_ellipsis(s: &str, max: usize, unicode: bool) -> String {
-    if s.chars().count() <= max {
+    if display_width(s) <= max {
         return s.to_owned();
     }
     let marker = if unicode { "…" } else { "..." };
-    let marker_len = marker.chars().count(); // 1 or 3
-    if max <= marker_len {
-        // No room for content; emit as much of the marker as fits.
-        return marker.chars().take(max).collect();
+    let marker_w = display_width(marker); // 1 or 3 columns
+    if max <= marker_w {
+        // No room for content; emit as much of the marker as fits by columns.
+        return take_columns(marker, max);
     }
-    let kept: String = s.chars().take(max - marker_len).collect();
+    let kept = take_columns(s, max - marker_w);
     format!("{kept}{marker}")
+}
+
+/// Greedily take whole chars from `s` until adding the next would exceed
+/// `budget` display columns. Never splits a multi-column char.
+fn take_columns(s: &str, budget: usize) -> String {
+    let mut used = 0;
+    let mut out = String::new();
+    for ch in s.chars() {
+        let cw = char_width(ch);
+        if used + cw > budget {
+            break;
+        }
+        used += cw;
+        out.push(ch);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -436,5 +481,73 @@ mod tests {
         );
         assert!(!b.contains('█'), "too small for a full block: {b:?}");
         assert_eq!(b.chars().count(), 10);
+    }
+
+    #[test]
+    fn locale_precedence_lc_all_overrides_lang() {
+        fn lookup(map: &[(&str, &str)], k: &str) -> Option<String> {
+            map.iter()
+                .find(|(key, _)| *key == k)
+                .map(|(_, v)| (*v).to_owned())
+        }
+        // LC_ALL=C wins over a UTF-8 LANG → ASCII.
+        let m = [("LC_ALL", "C"), ("LANG", "en_US.UTF-8")];
+        assert!(!locale_is_utf8_from(|k| lookup(&m, k)));
+        // LC_CTYPE wins over LANG when LC_ALL is unset.
+        let m = [("LC_CTYPE", "en_US.UTF-8"), ("LANG", "C")];
+        assert!(locale_is_utf8_from(|k| lookup(&m, k)));
+        // An empty higher-precedence var is skipped, not treated as "C".
+        let m = [("LC_ALL", ""), ("LANG", "C.UTF-8")];
+        assert!(locale_is_utf8_from(|k| lookup(&m, k)));
+        // Falls back to LANG when the others are unset.
+        let m = [("LANG", "fr_FR.utf8")];
+        assert!(locale_is_utf8_from(|k| lookup(&m, k)));
+        // Nothing set → ASCII.
+        let m: [(&str, &str); 0] = [];
+        assert!(!locale_is_utf8_from(|k| lookup(&m, k)));
+    }
+
+    #[test]
+    fn display_width_counts_columns_not_codepoints() {
+        assert_eq!(display_width("abc"), 3);
+        assert_eq!(display_width("王小明"), 6); // 3 CJK chars × 2 cols
+        assert_eq!(display_width("café"), 4); // precomposed é = 1 col
+        assert_eq!(display_width("e\u{0301}"), 1); // e + combining acute = 1 col
+        assert_eq!(display_width("😀"), 2); // emoji = 2 cols
+        assert_eq!(display_width(""), 0);
+    }
+
+    #[test]
+    fn boxed_wide_chars_keep_equal_display_width() {
+        let caps = Caps {
+            color: false,
+            unicode: true,
+            width: 80,
+        };
+        // CJK title + CJK body — codepoint counts differ from display widths.
+        let rows = caps.boxed("账号", &["王小明的账号".to_string()], 20);
+        let widths: Vec<usize> = rows.iter().map(|r| display_width(r)).collect();
+        assert!(
+            widths.iter().all(|&w| w == widths[0]),
+            "all rows must share one DISPLAY width, got {widths:?}"
+        );
+        assert_eq!(widths[0], 20, "box should be exactly the requested 20 cols");
+    }
+
+    #[test]
+    fn truncate_respects_display_columns_for_wide_chars() {
+        // 5 CJK chars = 10 cols. Truncate to 6 cols: marker `…` (1 col) →
+        // budget 5 → 2 CJK chars (4 cols) + `…`, total 5 cols ≤ 6.
+        let out = truncate_with_ellipsis("王小明的号", 6, true);
+        assert!(out.ends_with('…'), "keeps the ellipsis: {out:?}");
+        assert!(
+            display_width(&out) <= 6,
+            "must not exceed 6 display cols, got {} ({out:?})",
+            display_width(&out)
+        );
+        // A wide char is never split mid-cell.
+        assert!(!out.contains('的') || display_width(&out) <= 6);
+        // Short-enough strings are returned unchanged.
+        assert_eq!(truncate_with_ellipsis("王", 6, true), "王");
     }
 }
