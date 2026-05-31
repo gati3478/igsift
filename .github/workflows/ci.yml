@@ -54,15 +54,20 @@ jobs:
       - name: Test
         run: cargo nextest run
 
-  # Runtime smoke-test on native Windows x64. The unit/integration suite only
-  # runs on Linux (the `check` job above), and the release workflow merely
-  # *cross-builds* the Windows targets — so without this, nothing ever executes
-  # a Windows binary. Build it and exercise version + check + a full audit
-  # against the fixture, asserting all three output files are produced.
+  # Runtime smoke-test on native Windows — x64 (windows-latest) and arm64
+  # (windows-11-arm). The unit/integration suite only runs on Linux (the
+  # `check` job above), and the release workflow merely *cross-builds* the
+  # Windows targets — so without this, nothing ever executes a Windows binary.
+  # Build it and exercise version + check + a full audit against the fixture,
+  # asserting all three output files are produced, on each architecture.
   windows-smoke:
-    name: windows-smoke
-    runs-on: windows-latest
-    timeout-minutes: 20
+    name: windows-smoke (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, windows-11-arm]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -75,6 +80,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ${{ matrix.runner }}
 
       - name: Build release binary
         run: cargo build --release --bin igsift
