@@ -482,6 +482,8 @@ fn fixture_counts_match_expected() {
         .arg("--out")
         .arg(out_stem("fixture_counts"))
         .arg("-v")
+        .arg("--color")
+        .arg("never")
         .assert()
         .success()
         .stdout(contains("following count: 4"))
@@ -561,9 +563,11 @@ fn fixture_counts_match_expected() {
         //     keep_prob get review, never unfollow."
         // No fixture account is restricted or hide_story'd, so all
         // three remaining buckets are accounted for by the above.
-        .stdout(contains("bucket keep: 3"))
-        .stdout(contains("bucket review: 1"))
-        .stdout(contains("bucket unfollow: 0"));
+        // Spacing encodes `{label:<8} {count:>4}` from summary.rs's bucket panel —
+        // update these substrings if that format string changes.
+        .stdout(contains("keep        3"))
+        .stdout(contains("review      1"))
+        .stdout(contains("unfollow    0"));
 }
 
 #[test]
@@ -749,5 +753,55 @@ fn droplist_forces_a_followee_to_unfollow() {
         bob_row.split(',').nth(3),
         Some("unfollow"),
         "droplisted bob_synth must bucket Unfollow: {bob_row}",
+    );
+}
+
+#[test]
+fn summary_is_esc_free_when_piped() {
+    // assert_cmd runs with stdout NOT a TTY → Auto must resolve to no color.
+    let result = igsift()
+        .arg(sample_export())
+        .arg("--out")
+        .arg(out_stem("pipe_safe"))
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&result.get_output().stdout);
+    assert!(
+        !stdout.contains('\u{1b}'),
+        "piped summary must contain no ANSI ESC bytes:\n{stdout}"
+    );
+}
+
+#[test]
+fn color_never_is_esc_free() {
+    let result = igsift()
+        .arg(sample_export())
+        .arg("--out")
+        .arg(out_stem("color_never"))
+        .arg("--color")
+        .arg("never")
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&result.get_output().stdout);
+    assert!(
+        !stdout.contains('\u{1b}'),
+        "--color never must contain no ANSI ESC bytes:\n{stdout}"
+    );
+}
+
+#[test]
+fn color_always_emits_esc() {
+    let result = igsift()
+        .arg(sample_export())
+        .arg("--out")
+        .arg(out_stem("color_always"))
+        .arg("--color")
+        .arg("always")
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&result.get_output().stdout);
+    assert!(
+        stdout.contains('\u{1b}'),
+        "--color always must force ANSI ESC bytes even when piped"
     );
 }
