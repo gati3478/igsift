@@ -130,18 +130,48 @@ five binaries attached.
 
 ### Cutting the 1.0 release
 
-Once `v0.1.0` is validated and the repo is public:
+Do this once `v0.1.0` is validated and the repo is public. The tag name alone
+drives the Release name and archive names, but the binary's `--version` comes
+from `Cargo.toml` — so the version bump below is **not optional**: skip it and
+you ship a "v1.0.0" Release whose binary reports `igsift 0.1.0`.
 
 ```bash
-# 1. Promote CHANGELOG.md: rename the [Unreleased] heading to [1.0.0] (dated).
-# 2. Commit that change, then tag and push:
-git tag v1.0.0 && git push origin v1.0.0
+# 1. Bump the crate version 0.1.0 → 1.0.0 in Cargo.toml, then refresh the
+#    lockfile so Cargo.lock's `igsift` entry matches (CI fails on a stale lock):
+#      sed -i '' 's/^version = "0.1.0"/version = "1.0.0"/' Cargo.toml   # macOS sed
+cargo build                                  # updates Cargo.lock to 1.0.0
+
+# 2. Promote CHANGELOG.md (Keep a Changelog style): leave an empty [Unreleased]
+#    section at top, add a new `## [1.0.0] - YYYY-MM-DD` heading below it, and
+#    move the current entries under it.
+
+# 3. Commit the bump + changelog together, push to main, and wait for CI green:
+git add Cargo.toml Cargo.lock CHANGELOG.md
+git commit -m "release: 1.0.0"
+git push origin main
+
+# 4. Tag the release commit (annotated) and push the tag — this fires release.yml:
+git tag -a v1.0.0 -m "igsift v1.0.0"
+git push origin v1.0.0
 ```
 
-The `v1.0.0` tag (not `v0.*`) makes `create-release` publish a **full**
-release, not a pre-release. Users install by downloading a prebuilt archive
-from the Release, or with `cargo install --path .` / `cargo build --release`
-from a clone.
+The `v1.0.0` tag (not `v0.*`) makes `create-release` publish a **full** release,
+not a pre-release. After the workflow finishes, sanity-check it:
+
+```bash
+gh run watch "$(gh run list --workflow=Release --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
+gh release view v1.0.0 --json isPrerelease,assets --jq '{prerelease: .isPrerelease, assets: [.assets[].name]}'
+# isPrerelease must be false; expect 10 assets (5 archives + 5 .sha256).
+```
+
+> **Branch-protection note.** If step 4 of this checklist is enabled with
+> "require a pull request" **and** "Do not allow bypassing" (admins included),
+> the direct `git push origin main` above is rejected — route the
+> `release: 1.0.0` commit through a short PR instead. By GitHub's default
+> (admins bypass), a solo owner can push directly.
+
+Users install by downloading a prebuilt archive from the Release, or with
+`cargo install --path .` / `cargo build --release` from a clone.
 
 ## Not enabled (deliberate)
 

@@ -125,7 +125,7 @@ config/
 scripts/
   walk_export_schema.sh        # JSON-schema walker; drift detector for IG exports
 .github/workflows/
-  ci.yml                       # fmt + clippy + test + cargo-deny gate (mirrors lefthook)
+  ci.yml                       # fmt/clippy/test/cargo-deny + Windows x64/arm64 runtime smoke-test
   release.yml                  # on `v*` tag: cross-compile 5 targets → GitHub Release
 docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
 ```
