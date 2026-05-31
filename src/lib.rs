@@ -598,63 +598,26 @@ pub fn run(args: RunArgs) -> Result<()> {
     // own progress frame.
     progress.finish();
 
-    let keep_count = scored
-        .iter()
-        .filter(|s| s.bucket == scoring::Bucket::Keep)
-        .count();
-    let review_count = scored
-        .iter()
-        .filter(|s| s.bucket == scoring::Bucket::Review)
-        .count();
-    let unfollow_count = scored
-        .iter()
-        .filter(|s| s.bucket == scoring::Bucket::Unfollow)
-        .count();
-    println!("bucket keep: {keep_count}");
-    println!("bucket review: {review_count}");
-    println!("bucket unfollow: {unfollow_count}");
-
-    print_keep_prob_histogram(&scored);
-
-    // Top/bottom 10 as the human-readable sanity surface. Borrows into
-    // `scored` rather than cloning — the full ranking stays a Vec<ScoredAccount>
-    // that the output writers (CSV/Markdown/HTML) consume.
-    let mut by_prob: Vec<&scoring::ScoredAccount> = scored.iter().collect();
-    by_prob.sort_by(|a, b| {
-        b.keep_prob
-            .partial_cmp(&a.keep_prob)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    println!("top 10 keep candidates:");
-    for s in by_prob.iter().take(10) {
-        println!(
-            "  {}  keep_prob={:.3}  bucket={}  dominant={}",
-            s.features.username,
-            s.keep_prob,
-            s.bucket.as_str(),
-            s.dominant_feature,
-        );
-    }
-    println!("bottom 10 unfollow candidates:");
-    for s in by_prob.iter().rev().take(10) {
-        println!(
-            "  {}  keep_prob={:.3}  bucket={}  dominant={}",
-            s.features.username,
-            s.keep_prob,
-            s.bucket.as_str(),
-            s.dominant_feature,
-        );
-    }
+    let caps = crate::term_style::Caps::detect(args.color);
+    let config_label = config_label(&args);
+    let meta = summary::RunMeta {
+        total: scored.len(),
+        config_label: &config_label,
+        date: jiff::Zoned::now().date(),
+    };
+    summary::render(&scored, &meta, &caps);
 
     // Labels report (optional). `config/labels.txt` is opt-in — a tuning
     // session that hasn't committed labels yet sees no report and no error.
     match labels::load_default()? {
-        Some(label_set) => labels::report(
-            &label_set,
-            &scored,
-            &crate::term_style::Caps::detect(args.color),
+        Some(label_set) => labels::report(&label_set, &scored, &caps),
+        None => println!(
+            "{}",
+            caps.paint(
+                "labels: config/labels.txt not found (accuracy report skipped)",
+                caps.dim_style()
+            )
         ),
-        None => println!("labels: config/labels.txt not found (accuracy report skipped)"),
     }
 
     if let Some(handle) = args.trace.as_deref() {
@@ -671,6 +634,19 @@ pub fn run(args: RunArgs) -> Result<()> {
     println!("wrote: {}", paths.html.display());
 
     Ok(())
+}
+
+/// Human label for the resolved scoring source, shown in the summary
+/// header. Mirrors the resolution precedence in `config::read_scoring_config`
+/// (preset flag → explicit --config path → default chain).
+fn config_label(args: &RunArgs) -> String {
+    if let Some(p) = args.preset {
+        format!("{} preset", p.name())
+    } else if let Some(c) = &args.config {
+        c.display().to_string()
+    } else {
+        "default config".to_string()
+    }
 }
 
 /// Resolve the filename stem the output writer should use. `--out` wins
@@ -693,34 +669,6 @@ fn resolve_output_stem(cli_out: Option<&std::path::Path>, export_dir: &std::path
     match parent {
         Some(p) => p.join(name),
         None => PathBuf::from(name),
-    }
-}
-
-/// 10-bucket histogram over `keep_prob`. Buckets are half-open
-/// `[i*0.1, (i+1)*0.1)` except the last is `[0.9, 1.0]` so a
-/// `keep_prob == 1.0` lands in the rightmost bucket rather than
-/// falling off the end (no extra branching at the use sites).
-fn print_keep_prob_histogram(scored: &[scoring::ScoredAccount]) {
-    let mut counts = [0u32; 10];
-    for s in scored {
-        let idx = ((s.keep_prob * 10.0).floor() as usize).min(9);
-        counts[idx] += 1;
-    }
-    let max_count = counts.iter().copied().max().unwrap_or(0);
-    // Each '█' represents ~max/40 accounts; scale=0 sentinel means "no
-    // data" and suppresses the bar entirely. `checked_div` cleanly
-    // collapses both the empty-data case and the per-bucket divide.
-    let bar_scale = max_count.div_ceil(40);
-    println!("keep_prob histogram:");
-    for (i, c) in counts.iter().enumerate() {
-        let lo = i as f64 / 10.0;
-        let hi = (i + 1) as f64 / 10.0;
-        let right = if i == 9 { ']' } else { ')' };
-        let bar = c
-            .checked_div(bar_scale)
-            .map(|n| "█".repeat(n as usize))
-            .unwrap_or_default();
-        println!("  [{lo:.1}, {hi:.1}{right}: {c:>4} {bar}");
     }
 }
 
