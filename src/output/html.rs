@@ -525,7 +525,7 @@ input[type=search] { width:100%; padding: 10px 12px 10px 36px; font-size: .9375r
 input[type=search]::placeholder { color: var(--muted); }
 .shown { font-size: .8125rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space:nowrap; }
 .tbl-wrap { background: var(--surface); border: 1px solid var(--border-soft);
-  border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+  border-radius: var(--radius); box-shadow: var(--shadow); overflow-x: auto; }
 table { width:100%; border-collapse: collapse; font-size: .875rem; }
 thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2);
   text-align: left; font-weight: 600; font-size: .6875rem; letter-spacing: .06em;
@@ -538,7 +538,7 @@ thead th[aria-sort=ascending] .arrow, thead th[aria-sort=descending] .arrow { op
 thead th[aria-sort=ascending] .arrow::after { content:'\\2191'; }
 thead th[aria-sort=descending] .arrow::after { content:'\\2193'; }
 thead th.col-num { text-align: right; }
-thead th.col-act { text-align: right; }
+thead th.col-act { text-align: right; right: 0; z-index: 3; box-shadow: -8px 0 8px -8px rgba(0,0,0,.18); }
 tbody td { padding: var(--s3) var(--s3); border-bottom: 1px solid var(--border-soft);
   vertical-align: middle; color: var(--fg-2); }
 tbody tr:last-child td { border-bottom: none; }
@@ -567,7 +567,12 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; white-space:nowr
 .mutual-yes { color: var(--keep-fg); border-color: var(--keep-line); background: var(--keep-bg); }
 .why { font-family: var(--mono); font-size: .75rem; color: var(--muted); white-space: nowrap; }
 .hint { color: var(--muted); max-width: 22rem; }
-td.actions { text-align: right; white-space: nowrap; }
+td.actions { text-align: right; white-space: nowrap;
+  position: sticky; right: 0; background: var(--surface);
+  box-shadow: -8px 0 8px -8px rgba(0,0,0,.18); }
+tbody tr:hover td.actions { background: var(--surface-2); }
+tbody tr.sel-keep td.actions { background: var(--keep-bg); }
+tbody tr.sel-drop td.actions { background: var(--unfollow-bg); }
 .seg { display:inline-flex; border:1px solid var(--border); border-radius: 999px; overflow:hidden; background: var(--surface); }
 .seg button { appearance:none; border:0; background:transparent; cursor:pointer; font: inherit;
   font-size:.75rem; font-weight:500; color: var(--fg-2); padding: 5px 11px;
