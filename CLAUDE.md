@@ -74,8 +74,9 @@ cargo deny check advisories bans sources           # supply-chain gate (CI + pre
 
 Run flags: `--out PATH` (output stem), `--preset balanced|engagement|tenure`
 or `--config PATH` (mutually exclusive), `--trace HANDLE` (per-term scoring
-breakdown), `--rebuild-cache` (force archive re-extract), `-v` / `-vv`
-(debug / trace verbosity; `RUST_LOG` overrides).
+breakdown), `--rebuild-cache` (force archive re-extract), `--color
+auto|always|never` (summary colorization; `auto` = TTY-only, honors `NO_COLOR`,
+pipe-safe), `-v` / `-vv` (debug / trace verbosity; `RUST_LOG` overrides).
 
 `<input>` is a directory (extracted or containing `*.zip` parts) or a
 single `.zip` — `archive::resolve` detects and extracts transparently
@@ -96,7 +97,9 @@ src/
   config.rs                     # scoring.toml deserialization; preset resolution chain
   export.rs                     # IG export JSON parsers + validate_shape pre-flight
   lists.rs                      # config/{keeplist,droplist}.txt loaders + ensure_disjoint
-  labels.rs                     # config/labels.txt loader + confusion-matrix report
+  labels.rs                     # config/labels.txt loader + confusion-matrix report (caps-aware render)
+  term_style.rs                 # terminal vocabulary: Caps detection (TTY/NO_COLOR/locale/width) + palette/glyphs + bar/boxed renderers (pipe-safe paint chokepoint)
+  summary.rs                    # run-summary dashboard: header banner + bucket panel + histogram + keep/unfollow cards
   progress.rs                   # indicatif spinner wrapper (auto-hide on -v or off-TTY)
   text.rs                       # fix_mojibake — repairs IG's UTF-8-as-Latin-1 export bug
   features/

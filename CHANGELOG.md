@@ -33,6 +33,12 @@ account. Fully offline — no network, database, or automated unfollow.
   labeled-set confusion-matrix report.
 - CSV, decision-oriented Markdown, and self-contained HTML report writers, with
   XSS / CSV-formula-injection escaping.
+- Polished terminal run-summary dashboard: boxed header banner, colored bucket
+  panel with proportional bars, keep_prob histogram, side-by-side keep/unfollow
+  cards, and a colored accuracy block. Pipe-safe — emits no ANSI when stdout is
+  not a TTY — with an ASCII fallback for non-UTF-8 terminals and
+  width-responsive panels. A `--color auto|always|never` flag (default `auto`,
+  honoring `NO_COLOR`) controls colorization.
 
 ### Release & CI
 

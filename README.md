@@ -105,6 +105,7 @@ igsift init             # scaffold the optional config files (see Customizing)
 - `--config <PATH>` — use your own scoring-weights TOML instead of a preset
 - `--rebuild-cache` — re-extract the archive even if a cache exists
 - `--trace <handle>` — print the full per-signal score breakdown for one account
+- `--color <when>` — `auto` (default) | `always` | `never`; `auto` colorizes the run summary only on an interactive terminal (also respects `NO_COLOR`), so piped/redirected output stays plain
 - `-v` / `-vv` — more logging (also hides the progress spinner)
 
 ## Customizing the results
