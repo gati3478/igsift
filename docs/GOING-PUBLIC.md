@@ -90,9 +90,10 @@ repos). This is the channel `SECURITY.md` points contributors to.
 Free for public repos. Settings → Branches → add a rule for `main`:
 
 - Require a pull request before merging.
-- Require status checks to pass: select **`check`** and **`cargo-deny`** (the two
-  CI jobs from `ci.yml`). Don't add the Release workflow here — it's
-  tag-triggered, not a PR check, so it never reports a status on a PR.
+- Require status checks to pass: select **`check`**, **`cargo-deny`**, and
+  **`windows-smoke`** (the CI jobs from `ci.yml`). Don't add the Release
+  workflow here — it's tag-triggered, not a PR check, so it never reports a
+  status on a PR.
 - Require branches to be up to date before merging.
 - Require linear history (matches the existing clean linear log).
 
