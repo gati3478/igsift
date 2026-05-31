@@ -543,8 +543,12 @@ tbody td { padding: var(--s3) var(--s3); border-bottom: 1px solid var(--border-s
   vertical-align: middle; color: var(--fg-2); }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover td { background: var(--surface-2); }
+/* selected rows: color + a left rule so the keep/drop distinction
+   survives without color (the toggle icon + aria-pressed carry it too). */
 tbody tr.sel-keep td { background: var(--keep-bg); }
 tbody tr.sel-drop td { background: var(--unfollow-bg); }
+tbody tr.sel-keep td:first-child { box-shadow: inset 3px 0 0 var(--keep-line); }
+tbody tr.sel-drop td:first-child { box-shadow: inset 3px 0 0 var(--unfollow-line); }
 .handle a { font-family: var(--mono); font-size: .8125rem; font-weight: 500; color: var(--fg); text-decoration: none; }
 .handle a:hover { color: var(--accent); text-decoration: underline; }
 .name.empty { color: var(--muted); }

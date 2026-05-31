@@ -63,13 +63,17 @@ pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> 
     // reads at a glance — four flat bullets couldn't. Skipped at total=0 so
     // the bar math never divides by zero (and an empty run has no shape).
     if total > 0 {
+        let pcts = bucket_percentages([keep_count, review_count, unfollow_count], total);
         writeln!(writer, "```text").context("md")?;
-        for (label, count) in [
+        for (i, (label, count)) in [
             ("Keep", keep_count),
             ("Review", review_count),
             ("Unfollow", unfollow_count),
-        ] {
-            writeln!(writer, "{}", proportion_line(label, count, total)).context("md")?;
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            writeln!(writer, "{}", proportion_line(label, count, pcts[i], total)).context("md")?;
         }
         writeln!(writer, "```").context("md")?;
         writeln!(writer).context("md")?;
@@ -84,22 +88,51 @@ pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> 
 
 /// `keep_prob ∈ [0, 1]` → an integer percentage for human-facing display.
 /// The CSV keeps the raw float for spreadsheet math; cards and tables here
-/// read better as `keep 26%` than `keep_prob=0.256`.
+/// read better as `keep 26%` than `keep_prob=0.256`. `keep_prob` is a
+/// sigmoid output so the input is always in `[0, 1]`; `.round()` lands on an
+/// integer-valued float before the `as u32` cast, so the cast never
+/// truncates a fraction or wraps a negative.
 fn pct(p: f64) -> u32 {
     (p * 100.0).round() as u32
 }
 
+/// Integer percentages for the three-bucket split that sum to exactly 100.
+/// Rounding each share independently can total 99 or 101 (e.g. 1/1/1 →
+/// 33+33+33 = 99), which reads as sloppy in a Summary. Largest-remainder:
+/// floor every share, then hand the leftover points to the buckets with the
+/// largest fractional parts. Returns `[0, 0, 0]` for an empty run.
+fn bucket_percentages(counts: [usize; 3], total: usize) -> [u32; 3] {
+    if total == 0 {
+        return [0, 0, 0];
+    }
+    let exact = counts.map(|c| c as f64 / total as f64 * 100.0);
+    let mut pcts = exact.map(|x| x.floor() as u32);
+    // exact sums to 100, so the floors sum to ≤ 100 and the leftover is
+    // 0..=2 across three buckets — give it to the largest fractions.
+    let leftover = 100 - pcts.iter().sum::<u32>();
+    let mut order = [0, 1, 2];
+    order.sort_by(|&a, &b| {
+        let fa = exact[a] - exact[a].floor();
+        let fb = exact[b] - exact[b].floor();
+        fb.partial_cmp(&fa).unwrap_or(Ordering::Equal)
+    });
+    for &i in order.iter().take(leftover as usize) {
+        pcts[i] += 1;
+    }
+    pcts
+}
+
 /// One Summary proportion row: `Label ███░░  count  pct%`. `count` is
-/// right-aligned so the numbers form a column across the three rows.
-fn proportion_line(label: &str, count: usize, total: usize) -> String {
+/// right-aligned so the numbers form a column across the three rows; `pct`
+/// is precomputed by [`bucket_percentages`] so the column sums to 100. The
+/// bar `filled` is independently rounded (it's a visual width, not the
+/// printed percentage) and clamped so the `BAR_WIDTH - filled` subtraction
+/// can never underflow even at `share == 1.0`.
+fn proportion_line(label: &str, count: usize, pct: u32, total: usize) -> String {
     let share = count as f64 / total as f64;
-    let filled = (share * BAR_WIDTH as f64).round() as usize;
-    let filled = filled.min(BAR_WIDTH);
+    let filled = ((share * BAR_WIDTH as f64).round() as usize).min(BAR_WIDTH);
     let bar: String = "█".repeat(filled) + &"░".repeat(BAR_WIDTH - filled);
-    format!(
-        "{label:<9}{bar}  {count:>4}  {}%",
-        (share * 100.0).round() as u32
-    )
+    format!("{label:<9}{bar}  {count:>4}  {pct}%")
 }
 
 fn write_unfollow_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> Result<()> {
@@ -533,22 +566,83 @@ mod tests {
     }
 
     #[test]
-    fn summary_lists_per_bucket_counts() {
-        // The Summary block reports each bucket count via `== Bucket::X`.
-        // Asymmetric counts so a `==`→`!=` mutation flips the number.
+    fn summary_pairs_each_label_with_its_own_count_and_pct() {
+        // Three distinct counts (3/2/1 of 6 → 50/33/17) so every bucket's
+        // number is unique. Asserting the WHOLE proportion line per bucket
+        // ties label→count→pct on one line: a mutation that miscounts a
+        // bucket, swaps the label/count tuples, or mislabels a row trips
+        // here — `contains("1 ...")` matching some other line can't mask it.
         let scored = vec![
             make_scored("k1", 0.90, Bucket::Keep),
             make_scored("k2", 0.92, Bucket::Keep),
-            make_scored("r1", 0.50, Bucket::Review),
+            make_scored("k3", 0.94, Bucket::Keep),
+            make_scored("r1", 0.55, Bucket::Review),
+            make_scored("r2", 0.45, Bucket::Review),
             make_scored("u1", 0.10, Bucket::Unfollow),
         ];
         let md = render(&scored);
-        // New Summary: headline + proportion bars carrying count + share.
-        // 2 keep / 1 review / 1 unfollow of 4 → 50% / 25% / 25%.
-        assert!(md.contains("**4 accounts scored**"), "{md}");
-        assert!(md.contains("Keep"), "{md}");
-        assert!(md.contains("2  50%"), "{md}");
-        assert!(md.contains("1  25%"), "{md}");
+        assert!(md.contains("**6 accounts scored**"), "{md}");
+        // Each line: `{label:<9}{bar}  {count:>4}  {pct}%`. Match the label,
+        // its right-aligned count, and its pct as a contiguous tail so the
+        // three can't be satisfied by each other's lines.
+        let line = |label: &str, count: u32, pct: u32| {
+            md.lines()
+                .any(|l| l.starts_with(label) && l.ends_with(&format!("  {count:>4}  {pct}%")))
+        };
+        assert!(line("Keep", 3, 50), "Keep line wrong:\n{md}");
+        assert!(line("Review", 2, 33), "Review line wrong:\n{md}");
+        assert!(line("Unfollow", 1, 17), "Unfollow line wrong:\n{md}");
+    }
+
+    #[test]
+    fn pct_rounds_half_away_from_zero() {
+        // Pins the `.round()` (not truncate/floor) and the [0,1] cast safety.
+        assert_eq!(pct(0.0), 0);
+        assert_eq!(pct(1.0), 100);
+        assert_eq!(pct(0.005), 1); // half rounds up, not down to 0
+        assert_eq!(pct(0.2049), 20);
+        assert_eq!(pct(0.999), 100);
+    }
+
+    #[test]
+    fn bucket_percentages_always_sum_to_100() {
+        // Largest-remainder: independently-rounded shares would total 99
+        // (1/1/1 → 33+33+33) or 101; this must always sum to exactly 100.
+        assert_eq!(bucket_percentages([1, 1, 1], 3).iter().sum::<u32>(), 100);
+        assert_eq!(
+            bucket_percentages([572, 40, 37], 649).iter().sum::<u32>(),
+            100
+        );
+        assert_eq!(bucket_percentages([1, 6, 1], 8).iter().sum::<u32>(), 100);
+        // Empty run is all zeros (caller guards total>0, but pin the contract).
+        assert_eq!(bucket_percentages([0, 0, 0], 0), [0, 0, 0]);
+        // Clean split is exact, no remainder shuffling.
+        assert_eq!(bucket_percentages([2, 1, 1], 4), [50, 25, 25]);
+        // 1/1/1 → the leftover point goes to the first-largest fraction.
+        assert_eq!(bucket_percentages([1, 1, 1], 3).iter().sum::<u32>(), 100);
+    }
+
+    #[test]
+    fn proportion_line_renders_bar_width_and_columns() {
+        // 1 of 4 = 25% → bar filled = round(0.25*30) = 8 of 30; count
+        // right-aligned in width 4; pct is the precomputed arg, not recomputed.
+        let line = proportion_line("Keep", 1, 25, 4);
+        assert!(
+            line.starts_with("Keep     "),
+            "label left-padded to 9: {line:?}"
+        );
+        assert_eq!(line.matches('█').count(), 8, "filled cells: {line:?}");
+        assert_eq!(
+            line.matches('░').count(),
+            BAR_WIDTH - 8,
+            "empty cells: {line:?}"
+        );
+        assert!(line.ends_with("     1  25%"), "count+pct tail: {line:?}");
+        // share == 1.0 fills the whole bar without underflowing the
+        // `BAR_WIDTH - filled` subtraction.
+        let full = proportion_line("Keep", 5, 100, 5);
+        assert_eq!(full.matches('█').count(), BAR_WIDTH);
+        assert_eq!(full.matches('░').count(), 0);
     }
 
     #[test]
@@ -560,15 +654,55 @@ mod tests {
         forced.features.is_droplisted = true;
         let lowscore = make_scored("genuinely_low", 0.15, Bucket::Unfollow);
         let md = render(&[forced, lowscore]);
-        assert!(md.contains("### Scored low"), "{md}");
-        assert!(md.contains("### Forced by droplist"), "{md}");
-        // The forced row appears after the "Forced by droplist" heading,
-        // not in the scored-low block.
+        assert!(md.contains("### Scored low (1)"), "{md}");
+        assert!(md.contains("### Forced by droplist (1)"), "{md}");
+        // The forced row sits under its own subhead; the scored-low row sits
+        // BEFORE that subhead. Pinning both complements catches a filter
+        // inversion that would otherwise leak a row into the wrong partition.
+        let pos_low_head = md.find("Scored low").expect("scored-low subhead");
+        let pos_low_card = md.find("@genuinely_low").expect("low card");
         let pos_forced_head = md.find("Forced by droplist").expect("subhead");
         let pos_forced_card = md.find("@forced_high").expect("forced card");
+        assert!(pos_low_head < pos_low_card, "low card under its head: {md}");
+        assert!(
+            pos_low_card < pos_forced_head,
+            "scored-low row must precede the forced subhead: {md}"
+        );
         assert!(
             pos_forced_card > pos_forced_head,
             "forced row must be under its subhead: {md}"
         );
+    }
+
+    #[test]
+    fn no_droplisted_unfollow_rows_render_a_flat_list() {
+        // The common case: with no droplisted account, Unfollow stays a flat
+        // card list — no quarantine subheads. Pins the `forced.is_empty()`
+        // early return (an inversion would wrap every run in subheads).
+        let scored = vec![make_scored("plain", 0.20, Bucket::Unfollow)];
+        let md = render(&scored);
+        assert!(!md.contains("### Scored low"), "no subhead when flat: {md}");
+        assert!(
+            !md.contains("### Forced by droplist"),
+            "no subhead when flat: {md}"
+        );
+    }
+
+    #[test]
+    fn all_droplisted_unfollow_shows_empty_scored_low_block() {
+        // Every Unfollow forced by the droplist → `### Scored low (0)` plus
+        // the explanatory line, then the forced cards. Pins the
+        // `scored_low.is_empty()` arm a mutation could delete silently.
+        let mut a = make_scored("forced_a", 0.99, Bucket::Unfollow);
+        a.features.is_droplisted = true;
+        let mut b = make_scored("forced_b", 0.80, Bucket::Unfollow);
+        b.features.is_droplisted = true;
+        let md = render(&[a, b]);
+        assert!(md.contains("### Scored low (0)"), "{md}");
+        assert!(
+            md.contains("every Unfollow here was forced by the droplist"),
+            "explanatory line for the empty scored-low block: {md}",
+        );
+        assert!(md.contains("### Forced by droplist (2)"), "{md}");
     }
 }
