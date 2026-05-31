@@ -34,7 +34,10 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists — reusing it."
           else
-            gh release create "$TAG" --verify-tag --title "igsift $TAG" --generate-notes
+            # 0.x tags are pre-releases; 1.0.0+ ship as full releases.
+            prerelease=""
+            case "$TAG" in v0.*) prerelease="--prerelease" ;; esac
+            gh release create "$TAG" --verify-tag --title "igsift $TAG" --generate-notes $prerelease
           fi
 
   upload:
