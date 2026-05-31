@@ -53,3 +53,6 @@ recommendations_*.md
 /.claude/
 /.remember/
 /tasks/
+
+# Local Playwright browser-test harness (browser binary + node_modules; never committed)
+/.playwright-harness/
