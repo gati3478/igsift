@@ -367,49 +367,52 @@ fn write_export_bar(writer: &mut impl Write) -> Result<()> {
         "<div class=\"exportbar\" id=\"exportbar\" role=\"region\" aria-label=\"Triage selections\">"
     )
     .context("html")?;
-    writeln!(writer, "<div class=\"counts\">").context("html")?;
+
+    // Counts — big tabular number + muted label, never wrapping. A list with
+    // zero selections dims (data-empty) so the eye lands on the one you're
+    // building; renderBar() toggles that attribute.
+    writeln!(writer, "<div class=\"eb-counts\">").context("html")?;
     writeln!(
         writer,
-        "<span class=\"cnt keep\"><span class=\"dot\" aria-hidden=\"true\"></span><b id=\"kc\">0</b> to keeplist</span>"
+        "<span class=\"eb-count keep\" data-empty=\"true\"><span class=\"eb-dot\" aria-hidden=\"true\"></span><b id=\"kc\">0</b><span class=\"eb-count-label\">keeplist</span></span>"
     )
     .context("html")?;
     writeln!(
         writer,
-        "<span class=\"cnt drop\"><span class=\"dot\" aria-hidden=\"true\"></span><b id=\"dc\">0</b> to droplist</span>"
-    )
-    .context("html")?;
-    writeln!(writer, "</div>").context("html")?;
-    writeln!(writer, "<div class=\"sep\" aria-hidden=\"true\"></div>").context("html")?;
-    // Copy is the primary action (click → paste, no file hunting); Download
-    // is the secondary affordance for when the clipboard isn't available.
-    writeln!(writer, "<div class=\"grp\" data-list=\"keep\">").context("html")?;
-    writeln!(
-        writer,
-        "<button class=\"btn primary\" data-act=\"copy\" data-list=\"keep\">{COPY_ICON}Copy keeplist</button>"
-    )
-    .context("html")?;
-    writeln!(
-        writer,
-        "<button class=\"btn\" data-act=\"download\" data-list=\"keep\">.txt</button>"
+        "<span class=\"eb-count drop\" data-empty=\"true\"><span class=\"eb-dot\" aria-hidden=\"true\"></span><b id=\"dc\">0</b><span class=\"eb-count-label\">droplist</span></span>"
     )
     .context("html")?;
     writeln!(writer, "</div>").context("html")?;
-    writeln!(writer, "<div class=\"grp\" data-list=\"drop\">").context("html")?;
-    writeln!(
-        writer,
-        "<button class=\"btn primary\" data-act=\"copy\" data-list=\"drop\">{COPY_ICON}Copy droplist</button>"
-    )
-    .context("html")?;
-    writeln!(
-        writer,
-        "<button class=\"btn\" data-act=\"download\" data-list=\"drop\">.txt</button>"
-    )
-    .context("html")?;
+    writeln!(writer, "<div class=\"eb-sep\" aria-hidden=\"true\"></div>").context("html")?;
+
+    // One segmented control per list, filled in that list's semantic color
+    // (keep = green, drop = red). Copy is the primary action (click → paste);
+    // the download glyph is the secondary "save as .txt" affordance.
+    writeln!(writer, "<div class=\"eb-actions\">").context("html")?;
+    for (list, label) in [("keep", "keeplist"), ("drop", "droplist")] {
+        writeln!(
+            writer,
+            "<div class=\"eb-seg {list}\" role=\"group\" aria-label=\"Export {label}\">"
+        )
+        .context("html")?;
+        writeln!(
+            writer,
+            "<button class=\"eb-btn eb-copy\" data-act=\"copy\" data-list=\"{list}\">{COPY_ICON}Copy {label}</button>"
+        )
+        .context("html")?;
+        writeln!(
+            writer,
+            "<button class=\"eb-btn eb-dl\" data-act=\"download\" data-list=\"{list}\" aria-label=\"Download {label} as .txt\" title=\"Download {label} as .txt\">{DOWNLOAD_ICON}</button>"
+        )
+        .context("html")?;
+        writeln!(writer, "</div>").context("html")?;
+    }
     writeln!(writer, "</div>").context("html")?;
-    writeln!(writer, "<div class=\"sep\" aria-hidden=\"true\"></div>").context("html")?;
+
+    writeln!(writer, "<div class=\"eb-sep\" aria-hidden=\"true\"></div>").context("html")?;
     writeln!(
         writer,
-        "<button class=\"btn ghost\" id=\"clearAll\">Clear</button>"
+        "<button class=\"eb-clear\" id=\"clearAll\">Clear</button>"
     )
     .context("html")?;
     writeln!(writer, "</div>").context("html")?;
@@ -443,6 +446,7 @@ const KEEP_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"curre
 const DROP_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 4l8 8M12 4l-8 8\"/></svg>";
 const SEARCH_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"7\" cy=\"7\" r=\"4.5\"/><path d=\"M11 11l3 3\"/></svg>";
 const COPY_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"5\" y=\"5\" width=\"8\" height=\"8\" rx=\"1.5\"/><path d=\"M3 11V4a1.5 1.5 0 011.5-1.5H11\"/></svg>";
+const DOWNLOAD_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 2v8M4.5 7.5L8 11l3.5-3.5M3 13.5h10\"/></svg>";
 
 /// Inline CSS. 8pt spacing grid, system font, semantic bucket color
 /// applied as a thin top rule + the number (not full tile fills), real
@@ -589,30 +593,47 @@ tbody tr.sel-drop td.actions { background: var(--unfollow-bg); }
 }
 .empty-state { padding: var(--s8) var(--s5); text-align:center; color: var(--muted); font-style: italic; }
 .exportbar { position: fixed; left: 50%; bottom: var(--s5);
-  transform: translateX(-50%) translateY(140%); z-index: 50; display:flex;
+  transform: translateX(-50%) translateY(160%); z-index: 50; display:flex;
   align-items:center; gap: var(--s4); background: var(--surface);
-  border:1px solid var(--border); box-shadow: 0 8px 32px rgba(0,0,0,.18);
-  border-radius: 999px; padding: var(--s2) var(--s2) var(--s2) var(--s5);
-  transition: transform .28s cubic-bezier(.2,.8,.2,1); max-width: calc(100vw - 32px); }
-.exportbar.show { transform: translateX(-50%) translateY(0); }
-.exportbar .counts { display:flex; gap: var(--s4); font-size:.875rem; }
-.exportbar .cnt { display:inline-flex; align-items:center; gap:6px; font-variant-numeric: tabular-nums; }
-.exportbar .cnt b { font-weight:600; }
-.exportbar .cnt .dot { width:8px;height:8px;border-radius:50%; }
-.exportbar .cnt.keep .dot { background: var(--keep-line); }
-.exportbar .cnt.drop .dot { background: var(--unfollow-line); }
-.exportbar .sep { width:1px; align-self:stretch; background: var(--border); }
-.exportbar .grp { display:flex; align-items:center; gap: var(--s2); }
-.btn { appearance:none; border:1px solid var(--border); background: var(--surface-2);
-  color: var(--fg); font: inherit; font-size:.8125rem; font-weight:500;
-  padding: 7px 13px; border-radius: 999px; cursor:pointer; display:inline-flex;
-  align-items:center; gap:6px; min-height: 34px; }
-.btn:hover { background: var(--accent-weak); border-color: var(--accent); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color:#fff; }
-.btn.primary:hover { filter: brightness(1.05); }
-.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
-.btn.ghost:hover { color: var(--fg); background: var(--surface-2); }
-.btn svg { width:14px; height:14px; }
+  border:1px solid var(--border);
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,.30), 0 4px 12px -4px rgba(0,0,0,.18);
+  border-radius: var(--radius); padding: var(--s3) var(--s4);
+  transition: transform .28s cubic-bezier(.2,.8,.2,1), opacity .28s ease;
+  opacity: 0; max-width: calc(100vw - var(--s6)); }
+.exportbar.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+.eb-counts { display:flex; align-items:center; gap: var(--s4); padding-left: var(--s1); }
+.eb-count { display:inline-flex; align-items:baseline; gap: var(--s2);
+  white-space: nowrap; font-size:.8125rem; color: var(--muted); }
+.eb-count b { font-size:1.0625rem; font-weight:600; font-variant-numeric: tabular-nums;
+  color: var(--fg); line-height:1; }
+.eb-count-label { letter-spacing:.01em; }
+.eb-dot { width:7px; height:7px; border-radius:50%; align-self:center; flex:none; }
+.eb-count.keep .eb-dot { background: var(--keep-line); }
+.eb-count.drop .eb-dot { background: var(--unfollow-line); }
+.eb-count[data-empty=true] { opacity:.45; }
+.eb-sep { width:1px; align-self:stretch; margin: calc(-1 * var(--s1)) 0; background: var(--border-soft); }
+.eb-actions { display:flex; align-items:center; gap: var(--s3); }
+.eb-seg { display:inline-flex; align-items:stretch; border-radius: var(--radius-sm); overflow:hidden; }
+.eb-btn { appearance:none; border:0; font: inherit; font-size:.8125rem; font-weight:600;
+  cursor:pointer; display:inline-flex; align-items:center; justify-content:center;
+  gap: var(--s2); min-height:38px; transition: background .12s ease, filter .12s ease; }
+.eb-btn svg { width:15px; height:15px; flex:none; }
+.eb-copy { padding: 0 var(--s4); color:#fff; }
+.eb-seg.keep .eb-copy { background: var(--keep-line); }
+.eb-seg.drop .eb-copy { background: var(--unfollow-line); }
+.eb-copy:hover { filter: brightness(1.06); }
+.eb-dl { padding: 0 var(--s3); box-shadow: inset 1px 0 0 rgba(255,255,255,.25); }
+.eb-seg.keep .eb-dl { background: var(--keep-bg); color: var(--keep-fg); }
+.eb-seg.drop .eb-dl { background: var(--unfollow-bg); color: var(--unfollow-fg); }
+.eb-seg.keep .eb-dl:hover { background: color-mix(in srgb, var(--keep-bg) 80%, var(--keep-line)); }
+.eb-seg.drop .eb-dl:hover { background: color-mix(in srgb, var(--unfollow-bg) 80%, var(--unfollow-line)); }
+.eb-clear { appearance:none; border:0; background:transparent; font: inherit;
+  font-size:.8125rem; font-weight:500; color: var(--muted); cursor:pointer;
+  padding: var(--s2) var(--s3); border-radius: var(--radius-sm); min-height:38px;
+  transition: background .12s ease, color .12s ease; }
+.eb-clear:hover { color: var(--fg); background: var(--surface-2); }
+.eb-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); position: relative; z-index: 1; }
+.eb-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .toast { position: fixed; left:50%; bottom: 92px; transform: translateX(-50%) translateY(10px);
   background: var(--fg); color: var(--bg); font-size:.8125rem; font-weight:500;
   padding: 8px 16px; border-radius: 999px; opacity:0; pointer-events:none;
@@ -622,7 +643,13 @@ tbody tr.sel-drop td.actions { background: var(--unfollow-bg); }
 @media (max-width: 860px) {
   .tiles { grid-template-columns: 1fr; }
   .why, thead th.col-why, td.why { display:none; }
-  .exportbar { flex-wrap: wrap; border-radius: var(--radius); justify-content:center; padding: var(--s3); bottom: var(--s3); }
+  .exportbar { left: var(--s3); right: var(--s3); transform: translateY(160%);
+    flex-wrap: wrap; justify-content:center; gap: var(--s3); max-width:none;
+    padding: var(--s3); bottom: var(--s3); }
+  .exportbar.show { transform: translateY(0); }
+  .eb-sep { display:none; }
+  .eb-counts { width:100%; justify-content:center; }
+  .eb-actions { flex-wrap: wrap; justify-content:center; }
 }
 ";
 
@@ -705,13 +732,18 @@ main.addEventListener('click', function(e){
   saveSel(); syncRow(tr); renderBar();
 });
 
-/* export bar */
+/* export bar — resolve all anchors once; renderBar runs on every toggle */
 var bar = document.getElementById('exportbar');
+var kc = document.getElementById('kc'), dc = document.getElementById('dc');
+var kCount = kc.closest('.eb-count'), dCount = dc.closest('.eb-count');
 function listOf(kind){ return Object.keys(sel).filter(function(h){ return sel[h] === kind; }).sort(); }
 function renderBar(){
   var k = listOf('keep'), d = listOf('drop');
-  document.getElementById('kc').textContent = k.length;
-  document.getElementById('dc').textContent = d.length;
+  kc.textContent = k.length;
+  dc.textContent = d.length;
+  // Dim the list with no selections so the active one stands out.
+  kCount.setAttribute('data-empty', String(k.length === 0));
+  dCount.setAttribute('data-empty', String(d.length === 0));
   bar.classList.toggle('show', (k.length + d.length) > 0);
 }
 function fileText(kind){
@@ -883,12 +915,54 @@ mod tests {
         assert!(html.contains("data-toggle=\"keep\""));
         assert!(html.contains("data-toggle=\"drop\""));
         assert!(html.contains("aria-pressed=\"false\""));
-        // The export bar + the client-side store the toggles write to.
-        assert!(html.contains("id=\"exportbar\""));
+        // The client-side store the toggles write to.
         assert!(html.contains("igsift.triage.v1"));
-        // Copy is the primary action; download is secondary.
-        assert!(html.contains("class=\"btn primary\" data-act=\"copy\""));
-        assert!(html.contains("data-act=\"download\""));
+    }
+
+    #[test]
+    fn export_bar_markup_is_fully_wired() {
+        // The export bar is driven entirely by JS that keys off a fixed set
+        // of IDs and data-attributes. The JS can't be unit-tested here, so
+        // pin the contract markup: dropping any of these breaks the feature
+        // at runtime but would otherwise pass silently.
+        let html = render(&[baseline("acct", Bucket::Unfollow, 0.2)]);
+
+        // The element IDs renderBar()/clearAll/listOf resolve. A missing
+        // #kc/#dc throws on load (getElementById(...).textContent); a missing
+        // #clearAll throws when wiring its listener.
+        for id in [
+            "id=\"exportbar\"",
+            "id=\"kc\"",
+            "id=\"dc\"",
+            "id=\"clearAll\"",
+        ] {
+            assert!(html.contains(id), "missing {id}: {html}");
+        }
+
+        // All four action buttons: the click handler dispatches on
+        // (data-act, data-list). The pair must be emitted adjacent in this
+        // order (see write_export_bar).
+        for (act, list) in [
+            ("copy", "keep"),
+            ("download", "keep"),
+            ("copy", "drop"),
+            ("download", "drop"),
+        ] {
+            assert!(
+                html.contains(&format!("data-act=\"{act}\" data-list=\"{list}\"")),
+                "missing {act}/{list} button: {html}",
+            );
+        }
+
+        // Copy is the emphasized primary; the download button is icon-only,
+        // so it must carry an accessible label.
+        assert!(html.contains("class=\"eb-btn eb-copy\" data-act=\"copy\""));
+        assert!(html.contains("aria-label=\"Download keeplist as .txt\""));
+
+        // renderBar() calls kc.closest('.eb-count') — pin that #kc/#dc sit
+        // inside an .eb-count wrapper, and that both ship dimmed at rest.
+        assert!(html.contains("class=\"eb-count keep\" data-empty=\"true\""));
+        assert!(html.contains("class=\"eb-count drop\" data-empty=\"true\""));
     }
 
     #[test]

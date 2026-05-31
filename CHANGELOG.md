@@ -31,8 +31,22 @@ account. Fully offline — no network, database, or automated unfollow.
 - Three subcommands (`run`, `init`, `check`), three scoring presets
   (`balanced`/`engagement`/`tenure`), per-term `--trace`, and an optional
   labeled-set confusion-matrix report.
-- CSV, decision-oriented Markdown, and self-contained HTML report writers, with
-  XSS / CSV-formula-injection escaping.
+- Three audit report writers, with XSS / CSV-formula-injection escaping:
+    - **CSV** — one row per account (`keep_score` + `top_signal` columns, kept
+      as raw values for spreadsheet math); the header is a pinned inter-run
+      diff contract.
+    - **Markdown** — a decision-oriented skim: score rendered as `keep NN%`, a
+      Summary proportion bar that sums to exactly 100%, the redundant one-sided
+      hint suppressed, and droplist-forced rows quarantined under their own
+      subheading.
+    - **HTML** — a self-contained, sortable/filterable browser report
+      ("Keep likelihood" as a percentage with a bucket-keyed bar), with
+      **in-report triage**: per-row Keep / Drop toggles (mutually exclusive,
+      persisted in `localStorage`) and a floating export bar — color-keyed
+      segmented controls (green = keeplist, red = droplist) — that Copies or
+      Downloads the appendable handle lists to paste into
+      `config/keeplist.txt` / `config/droplist.txt`. Fully local; nothing
+      leaves the browser.
 - Polished terminal run-summary dashboard: boxed header banner, colored bucket
   panel with proportional bars, keep_prob histogram, side-by-side keep/unfollow
   cards, and a colored accuracy block. Pipe-safe — emits no ANSI when stdout is
