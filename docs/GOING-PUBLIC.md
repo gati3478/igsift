@@ -1,8 +1,11 @@
 # Going public — manual steps
 
-Everything in this list happens **outside the repo** (GitHub UI / one-off git
-commands) and cannot be committed as code. Work top to bottom. Items marked
-**done** are recorded for auditability.
+Most of this list happens **outside the repo** (GitHub UI / one-off git
+commands) — the kind of setup that can't be committed as code. The one
+exception is the release (step 6): it's now automated by
+`.github/workflows/release.yml`, so "cutting a release" is just promoting the
+changelog and pushing a tag. Work top to bottom. Items marked **done** are
+recorded for auditability.
 
 ## 0. Purge the leaked blob from the remote (GATING — ✅ DONE 2026-05-30)
 
@@ -84,7 +87,8 @@ Free for public repos. Settings → Branches → add a rule for `main`:
 
 - Require a pull request before merging.
 - Require status checks to pass: select **`check`** and **`cargo-deny`** (the two
-  CI jobs).
+  CI jobs from `ci.yml`). Don't add the Release workflow here — it's
+  tag-triggered, not a PR check, so it never reports a status on a PR.
 - Require branches to be up to date before merging.
 - Require linear history (matches the existing clean linear log).
 
@@ -94,25 +98,44 @@ Free for public repos. Settings → Branches → add a rule for `main`:
 updates). After going public, confirm Settings → Code security → Dependabot is
 enabled.
 
-## 6. (Optional) First tagged release
+## 6. Cutting a release (automated)
 
-The crate is `v0.1.0` and unreleased. If/when you want a GitHub Release:
+Releases are built by `.github/workflows/release.yml`. Pushing a `v*` tag
+triggers it; there is **no** manual "draft a release from the tag" step
+anymore — the workflow creates the Release itself.
+
+What it does, on a single `v*` tag push:
+
+1. A `create-release` job runs first and creates the GitHub Release once, up
+   front (separate job so the parallel build matrix can't race to create it).
+   It auto-marks `v0.x` tags as `--prerelease` and `v1.0.0`+ as full releases,
+   and generates notes categorized by `.github/release.yml`
+   (New Features / Bug Fixes / Dependencies / Other Changes).
+2. A build matrix cross-compiles `igsift` for five targets and uploads each
+   archive (with a `.sha256` checksum, plus README + LICENSE) to that Release:
+    - macOS arm64 — `aarch64-apple-darwin`
+    - Windows x64 / arm64 — `x86_64` / `aarch64-pc-windows-msvc`
+    - Linux x64 / arm64 — `x86_64` / `aarch64-unknown-linux-musl`
+      (statically linked against musl, so they run on Fedora and any other
+      distro regardless of the builder's libc)
+
+**Status today:** `v0.1.0` is already published as a **pre-release** with all
+five binaries attached.
+
+### Cutting the 1.0 release
+
+Once `v0.1.0` is validated and the repo is public:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+# 1. Promote CHANGELOG.md: rename the [Unreleased] heading to [1.0.0] (dated).
+# 2. Commit that change, then tag and push:
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
-Then draft a release from the tag — GitHub's auto-generated notes are
-categorized by `.github/release.yml` (New Features / Bug Fixes / Dependencies /
-Other), and `CHANGELOG.md`'s `[Unreleased]` section should be promoted to
-`[0.1.0]` at the same time.
-
-**Not yet automated (deliberate):** there is no binary-build release workflow.
-For an unreleased solo CLI a cross-compile matrix (macOS/Linux/Windows targets
-uploaded to the Release) is premature — add `.github/workflows/release.yml`
-when the first real release demands prebuilt binaries, rather than carrying
-speculative CI now. Until then, users install with `cargo install --path .` or
-`cargo build --release`.
+The `v1.0.0` tag (not `v0.*`) makes `create-release` publish a **full**
+release, not a pre-release. Users install by downloading a prebuilt archive
+from the Release, or with `cargo install --path .` / `cargo build --release`
+from a clone.
 
 ## Not enabled (deliberate)
 

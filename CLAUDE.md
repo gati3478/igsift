@@ -95,7 +95,7 @@ src/
   archive.rs                    # input detect + zip extract + cache (.igsift-extracted*/)
   config.rs                     # scoring.toml deserialization; preset resolution chain
   export.rs                     # IG export JSON parsers + validate_shape pre-flight
-  lists.rs                  # config/{keeplist,droplist}.txt loaders + ensure_disjoint
+  lists.rs                      # config/{keeplist,droplist}.txt loaders + ensure_disjoint
   labels.rs                     # config/labels.txt loader + confusion-matrix report
   progress.rs                   # indicatif spinner wrapper (auto-hide on -v or off-TTY)
   text.rs                       # fix_mojibake — repairs IG's UTF-8-as-Latin-1 export bug
@@ -111,19 +111,22 @@ src/
     markdown.rs                 # decision-oriented MD: per-bucket cards + tables
     html.rs                     # self-contained HTML report (inline CSS + JS, no deps)
 tests/
-  cli.rs                  # binary integration tests + fixture-count assertions (locked-in)
-  fixtures/sample_export/ # sanitized synthetic export
+  cli.rs                        # binary integration tests + fixture-count assertions (locked-in)
+  fixtures/sample_export/       # sanitized synthetic export
 config/
   scoring.toml                 # Gati's tuned weights + decay constants
-  keeplist.txt.example   # per-user keeplist template (real .txt gitignored)
-  droplist.txt.example        # per-user droplist template — forces Unfollow (real .txt gitignored)
+  keeplist.txt.example         # per-user keeplist template (real .txt gitignored)
+  droplist.txt.example         # per-user droplist template — forces Unfollow (real .txt gitignored)
   labels.txt.example           # per-user labels template (real .txt gitignored)
   presets/
     balanced.toml              # default preset; compiled-in fallback when no config/preset resolves
     engagement.toml            # engagement-weighted preset
     tenure.toml                # tenure-weighted preset
 scripts/
-  walk_export_schema.sh # JSON-schema walker; drift detector for IG exports
+  walk_export_schema.sh        # JSON-schema walker; drift detector for IG exports
+.github/workflows/
+  ci.yml                       # fmt + clippy + test + cargo-deny gate (mirrors lefthook)
+  release.yml                  # on `v*` tag: cross-compile 5 targets → GitHub Release
 docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
 ```
 
@@ -168,7 +171,7 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   pins this; don't relax it.
 - **Decision-hint SSOT.** The one-line account-shape characterization
   surfaced by both Markdown and HTML writers lives in
-  `src/output/mod.rs::decision_hint`. The 13-row precedence-chain test
+  `src/output/mod.rs::decision_hint`. The 17-row precedence-chain test
   is the contract; both writers call the shared function. Adding new
   rules: insert at the right precedence, extend the table-driven test.
 - **Keeplist / droplist are mirror overrides.** Two per-user
