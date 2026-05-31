@@ -38,7 +38,12 @@ account. Fully offline — no network, database, or automated unfollow.
   cards, and a colored accuracy block. Pipe-safe — emits no ANSI when stdout is
   not a TTY — with an ASCII fallback for non-UTF-8 terminals and
   width-responsive panels. A `--color auto|always|never` flag (default `auto`,
-  honoring `NO_COLOR`) controls colorization.
+  honoring `NO_COLOR`) controls colorization. Layout is Unicode-display-width
+  correct (CJK/wide chars count as two columns, combining/zero-width as zero),
+  so boxes and columns stay aligned for any content — including a non-ASCII
+  `--config` path in the header; control characters in such paths are
+  sanitized. UTF-8 vs. ASCII rendering honors POSIX locale precedence
+  (`LC_ALL` › `LC_CTYPE` › `LANG`).
 
 ### Release & CI
 
