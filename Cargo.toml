@@ -2,7 +2,7 @@
 name = "igsift"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "Local-first CLI that sifts your Instagram followings from a personal data export into a keep/unfollow audit."
 authors = ["Gati Petriashvili <gatipetriashvili@gmail.com>"]
 license = "MIT"
@@ -48,7 +48,7 @@ toml = "1.1.2"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 unicode-width = "0.2"
-zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 assert_cmd = "2.2.2"

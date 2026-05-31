@@ -45,6 +45,14 @@ account. Fully offline — no network, database, or automated unfollow.
   sanitized. UTF-8 vs. ASCII rendering honors POSIX locale precedence
   (`LC_ALL` › `LC_CTYPE` › `LANG`).
 
+### Dependencies
+
+- Upgraded `zip` 7 → 8 (`deflate-flate2-zlib-rs` backend, read-only deflate),
+  which drops the unused `zopfli` encoder for a net-smaller dependency graph.
+  This raises the minimum supported Rust to **1.88** (`zip` 8's MSRV); the
+  build toolchain stays on the latest stable. Verified: the full suite builds
+  and passes on Rust 1.88.
+
 ### Release & CI
 
 - Cross-platform release workflow (`.github/workflows/release.yml`): pushing a
