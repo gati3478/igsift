@@ -2,18 +2,28 @@
 //!
 //! Single file, no external assets, no server: inline CSS, vanilla JS,
 //! double-click to open in a browser. The data is exactly what the
-//! Markdown report has, presented as three filterable + sortable
-//! tables (Unfollow / Review / Keep). Built for triage: type to
-//! filter a section, click a header to sort, click a handle to open
-//! the profile in Instagram.
+//! Markdown report has, presented as three filterable + sortable tables
+//! (Unfollow / Review / Keep) plus a per-row triage affordance.
+//!
+//! ## Triage from the report
+//!
+//! Each row carries a keep/drop segmented control. Selections persist
+//! client-side (`localStorage`) and feed a floating export bar that
+//! Copies or Downloads an appendable plain-text block per list — the
+//! user pastes it into `config/keeplist.txt` / `config/droplist.txt`. A
+//! `file://` page can't write to disk, so collect-and-paste is the honest
+//! model. Keep/drop are mutually exclusive per row, mirroring
+//! `lists::ensure_disjoint`.
 //!
 //! ## Why hand-rolled markup
 //!
 //! No template engine (`maud`, `minijinja`, …). The output is one
-//! function over a single data shape; templating gains us nothing
-//! over `writeln!` and adds a build-time dep. HTML escaping for the
-//! handful of user-controlled fields (display names, hints) lives in
-//! [`escape`] below — the standard `& < > "` substitutions.
+//! function over a single data shape; templating gains us nothing over
+//! `writeln!` and adds a build-time dep. Rows are **server-rendered**:
+//! all user-controlled fields pass through [`escape`] here, so the HTML
+//! escaping is the security boundary regardless of what the JS does. The
+//! JS reads handles back from `data-` attributes (browser-unescaped) only
+//! to build the export text and clipboard payload.
 
 use std::cmp::Ordering;
 use std::io::Write;
@@ -23,6 +33,13 @@ use anyhow::{Context, Result};
 use super::csv::profile_url;
 use super::{contributions_inline, decision_hint};
 use crate::scoring::{Bucket, ScoredAccount};
+
+/// `keep_prob ∈ [0, 1]` → integer percentage for display. Matches the
+/// Markdown writer's `pct`; the raw float stays reachable in the cell's
+/// `title` (and drives sort via `data-p`) so rounding never reorders rows.
+fn pct(p: f64) -> u32 {
+    (p * 100.0).round() as u32
+}
 
 pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> {
     let keep = scored.iter().filter(|s| s.bucket == Bucket::Keep).count();
@@ -49,13 +66,17 @@ pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> 
     writeln!(writer, "</head>").context("html")?;
     writeln!(writer, "<body>").context("html")?;
 
+    writeln!(writer, "<div class=\"wrap\">").context("html")?;
     write_header(&mut writer, total, &date, keep, review, unfollow)?;
 
-    writeln!(writer, "<main>").context("html")?;
+    writeln!(writer, "<main id=\"main\">").context("html")?;
     write_unfollow_section(&mut writer, scored)?;
     write_review_section(&mut writer, scored)?;
     write_keep_section(&mut writer, scored)?;
     writeln!(writer, "</main>").context("html")?;
+    writeln!(writer, "</div>").context("html")?;
+
+    write_export_bar(&mut writer)?;
 
     writeln!(writer, "<script>{SCRIPT}</script>").context("script")?;
     writeln!(writer, "</body></html>").context("html")?;
@@ -71,24 +92,38 @@ fn write_header(
     unfollow: usize,
 ) -> Result<()> {
     writeln!(writer, "<header>").context("html")?;
+    writeln!(
+        writer,
+        "<p class=\"eyebrow\">igsift · local-first following audit</p>"
+    )
+    .context("html")?;
     writeln!(writer, "<h1>Following audit</h1>").context("html")?;
     writeln!(
         writer,
-        "<p class=\"meta\">{total} accounts scored on {}</p>",
+        "<p class=\"meta\">{total} accounts scored on {} · no network, no automated unfollow — you act manually in Instagram.</p>",
         escape(date)
     )
     .context("html")?;
-    writeln!(writer, "<div class=\"stats\">").context("html")?;
-    for (cls, label, n) in [
-        ("keep", "Keep", keep),
-        ("review", "Review", review),
-        ("unfollow", "Unfollow", unfollow),
+    writeln!(writer, "<div class=\"tiles\">").context("html")?;
+    for (cls, label, n, sub) in [
+        ("keep", "Keep", keep, "relationships worth holding"),
+        ("review", "Review", review, "judgment calls — hardest first"),
+        (
+            "unfollow",
+            "Unfollow",
+            unfollow,
+            "low signal — safe to drop",
+        ),
     ] {
+        writeln!(writer, "<div class=\"tile {cls}\">").context("html")?;
         writeln!(
             writer,
-            "<div class=\"stat {cls}\"><div class=\"num\">{n}</div><div>{label}</div></div>"
+            "<div class=\"label\"><span class=\"dot\" aria-hidden=\"true\"></span>{label}</div>"
         )
         .context("html")?;
+        writeln!(writer, "<div class=\"num\">{n}</div>").context("html")?;
+        writeln!(writer, "<div class=\"sub\">{sub}</div>").context("html")?;
+        writeln!(writer, "</div>").context("html")?;
     }
     writeln!(writer, "</div>").context("html")?;
     writeln!(writer, "</header>").context("html")?;
@@ -106,7 +141,13 @@ fn write_unfollow_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> 
             .unwrap_or(Ordering::Equal)
             .then_with(|| a.features.username.cmp(&b.features.username))
     });
-    write_section(writer, "unfollow", "Unfollow", &rows)
+    write_section(
+        writer,
+        "unfollow",
+        "Unfollow",
+        "Lowest keep likelihood first — the safest drops sit at the top.",
+        &rows,
+    )
 }
 
 fn write_review_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> Result<()> {
@@ -122,7 +163,13 @@ fn write_review_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> Re
             .unwrap_or(Ordering::Equal)
             .then_with(|| a.features.username.cmp(&b.features.username))
     });
-    write_section(writer, "review", "Review", &rows)
+    write_section(
+        writer,
+        "review",
+        "Review",
+        "Hardest calls first — scores nearest the 50% line need your judgment.",
+        &rows,
+    )
 }
 
 fn write_keep_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> Result<()> {
@@ -131,67 +178,97 @@ fn write_keep_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> Resu
     rows.sort_by(|a, b| {
         // Highest keep_prob first — the inverse of the other buckets.
         // Reasoning: in Unfollow/Review the user reads top-down to make
-        // decisions; in Keep the top of the list is the validation
-        // surface ("these should obviously be keeps"), and the bottom
-        // is the boundary ("could these have been Review?"). Both ends
-        // are interesting — the filter UI lets the user explore.
+        // decisions; in Keep the top is the validation surface ("these
+        // should obviously be keeps") and the bottom is the boundary
+        // ("could these have been Review?"). The filter/sort UI lets the
+        // user explore either end.
         b.keep_prob
             .partial_cmp(&a.keep_prob)
             .unwrap_or(Ordering::Equal)
             .then_with(|| a.features.username.cmp(&b.features.username))
     });
-    write_section(writer, "keep", "Keep", &rows)
+    write_section(
+        writer,
+        "keep",
+        "Keep",
+        "Highest-confidence first. The bottom rows sit near the Review boundary — worth a glance.",
+        &rows,
+    )
 }
 
 fn write_section(
     writer: &mut impl Write,
     id: &str,
     label: &str,
+    sub: &str,
     rows: &[&ScoredAccount],
 ) -> Result<()> {
     writeln!(writer, "<section data-bucket=\"{id}\">").context("html")?;
     writeln!(
         writer,
-        "<h2>{label} <span class=\"count\">({})</span></h2>",
+        "<div class=\"sec-head\"><h2>{label} <span class=\"pill\">{}</span></h2></div>",
         rows.len()
     )
     .context("html")?;
+    writeln!(writer, "<p class=\"sec-sub\">{sub}</p>").context("html")?;
+
     writeln!(writer, "<div class=\"controls\">").context("html")?;
+    writeln!(writer, "<label class=\"search\">{SEARCH_ICON}").context("html")?;
     writeln!(
         writer,
-        "<input type=\"search\" placeholder=\"Filter {label} — handle, name, or hint\" data-filter>",
+        "<input type=\"search\" placeholder=\"Filter {} — handle, name, or hint\" aria-label=\"Filter {label}\"></label>",
+        label.to_lowercase()
+    )
+    .context("html")?;
+    writeln!(
+        writer,
+        "<span class=\"shown\" data-shown>{} shown</span>",
+        rows.len()
     )
     .context("html")?;
     writeln!(writer, "</div>").context("html")?;
 
     if rows.is_empty() {
-        writeln!(writer, "<p class=\"empty\">No accounts in this bucket.</p>").context("html")?;
+        writeln!(
+            writer,
+            "<div class=\"tbl-wrap\"><p class=\"empty-state\">Nothing in this bucket.</p></div>"
+        )
+        .context("html")?;
         writeln!(writer, "</section>").context("html")?;
         return Ok(());
     }
 
+    writeln!(writer, "<div class=\"tbl-wrap\">").context("html")?;
     writeln!(writer, "<table>").context("html")?;
     writeln!(writer, "<thead><tr>").context("html")?;
-    for (label, sort_kind) in [
-        ("Handle", "text"),
-        ("Display name", "text"),
-        ("keep_prob", "num"),
-        ("Mutual", "text"),
-        ("Class", "text"),
-        ("Tenure (d)", "num"),
-        ("Why", "text"),
-        ("Hint", "text"),
+    // (label, sort-kind, extra-class). `num` columns right-align and sort
+    // numerically (via data- attributes); `act` is the non-sortable
+    // triage column.
+    for (col_label, kind, extra) in [
+        ("Handle", "text", ""),
+        ("Display name", "text", ""),
+        ("Keep likelihood", "num", "col-num"),
+        ("Mutual", "num", ""),
+        ("Class", "text", ""),
+        ("Tenure (d)", "num", "col-num"),
+        ("Why", "text", "col-why"),
+        ("Hint", "text", ""),
+        ("Triage", "act", "col-act"),
     ] {
-        let num_class = if sort_kind == "num" {
-            " class=\"num\""
+        if kind == "act" {
+            writeln!(writer, "<th class=\"{extra}\">{col_label}</th>").context("html")?;
         } else {
-            ""
-        };
-        writeln!(
-            writer,
-            "<th{num_class} data-sort=\"{sort_kind}\">{label}</th>"
-        )
-        .context("html")?;
+            let class = if extra.is_empty() {
+                "sortable".to_string()
+            } else {
+                format!("{extra} sortable")
+            };
+            writeln!(
+                writer,
+                "<th class=\"{class}\" tabindex=\"0\" role=\"button\" aria-sort=\"none\" data-kind=\"{kind}\">{col_label}<span class=\"arrow\" aria-hidden=\"true\"></span></th>"
+            )
+            .context("html")?;
+        }
     }
     writeln!(writer, "</tr></thead>").context("html")?;
 
@@ -201,6 +278,7 @@ fn write_section(
     }
     writeln!(writer, "</tbody>").context("html")?;
     writeln!(writer, "</table>").context("html")?;
+    writeln!(writer, "</div>").context("html")?;
     writeln!(writer, "</section>").context("html")?;
     Ok(())
 }
@@ -210,16 +288,26 @@ fn write_row(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
     let handle = &f.username;
     let url = profile_url(handle);
     let display = f.display_name.as_deref().unwrap_or("");
-    let mutual = if f.is_mutual { "yes" } else { "no" };
+    let mutual = f.is_mutual;
     let class = f.account_class.as_str();
-    let tenure_cell = f
-        .follow_tenure_days
-        .map(|d| d.to_string())
-        .unwrap_or_default();
+    let tenure = f.follow_tenure_days;
     let why = contributions_inline(s, "—");
     let hint = decision_hint(f, s.bucket);
+    let p = pct(s.keep_prob);
 
-    writeln!(writer, "<tr>").context("html")?;
+    // data- attributes drive typed sort + the export payload. The handle
+    // is HTML-escaped into the attribute; the browser un-escapes it on
+    // `dataset` read, so the JS recovers the exact handle for the file.
+    writeln!(
+        writer,
+        "<tr data-b=\"{bucket}\" data-h=\"{h}\" data-p=\"{raw}\" data-t=\"{t}\" data-m=\"{m}\">",
+        bucket = s.bucket.as_str(),
+        h = escape(handle),
+        raw = s.keep_prob,
+        t = tenure.map(|d| d.to_string()).unwrap_or_default(),
+        m = u8::from(mutual),
+    )
+    .context("html")?;
     writeln!(
         writer,
         "<td class=\"handle\"><a href=\"{}\" target=\"_blank\" rel=\"noopener noreferrer\">@{}</a></td>",
@@ -227,14 +315,109 @@ fn write_row(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
         escape(handle)
     )
     .context("html")?;
-    writeln!(writer, "<td>{}</td>", escape(display)).context("html")?;
-    writeln!(writer, "<td class=\"num\">{:.3}</td>", s.keep_prob).context("html")?;
-    writeln!(writer, "<td>{mutual}</td>").context("html")?;
-    writeln!(writer, "<td>{class}</td>").context("html")?;
-    writeln!(writer, "<td class=\"num\">{tenure_cell}</td>").context("html")?;
+    if display.is_empty() {
+        writeln!(writer, "<td class=\"name empty\">—</td>").context("html")?;
+    } else {
+        writeln!(writer, "<td class=\"name\">{}</td>", escape(display)).context("html")?;
+    }
+    writeln!(
+        writer,
+        "<td class=\"score\" title=\"raw keep_prob = {raw:.3}\"><span class=\"score-cell\"><span class=\"score-pct\">{p}%</span><span class=\"score-bar\" aria-hidden=\"true\"><i style=\"width:{p}%\"></i></span></span></td>",
+        raw = s.keep_prob,
+    )
+    .context("html")?;
+    if mutual {
+        writeln!(
+            writer,
+            "<td><span class=\"tag mutual-yes\">mutual</span></td>"
+        )
+        .context("html")?;
+    } else {
+        writeln!(writer, "<td><span class=\"tag\">one-way</span></td>").context("html")?;
+    }
+    writeln!(
+        writer,
+        "<td><span class=\"tag\">{}</span></td>",
+        escape(class)
+    )
+    .context("html")?;
+    writeln!(
+        writer,
+        "<td class=\"num\">{}</td>",
+        tenure.map(|d| d.to_string()).unwrap_or_default()
+    )
+    .context("html")?;
     writeln!(writer, "<td class=\"why\">{}</td>", escape(&why)).context("html")?;
     writeln!(writer, "<td class=\"hint\">{}</td>", escape(hint)).context("html")?;
+    writeln!(
+        writer,
+        "<td class=\"actions\"><span class=\"seg\" role=\"group\" aria-label=\"Triage @{h}\"><button class=\"keep\" data-toggle=\"keep\" aria-pressed=\"false\">{keep_icon}Keep</button><button class=\"drop\" data-toggle=\"drop\" aria-pressed=\"false\">{drop_icon}Drop</button></span></td>",
+        h = escape(handle),
+        keep_icon = KEEP_ICON,
+        drop_icon = DROP_ICON,
+    )
+    .context("html")?;
     writeln!(writer, "</tr>").context("html")?;
+    Ok(())
+}
+
+fn write_export_bar(writer: &mut impl Write) -> Result<()> {
+    writeln!(
+        writer,
+        "<div class=\"exportbar\" id=\"exportbar\" role=\"region\" aria-label=\"Triage selections\">"
+    )
+    .context("html")?;
+    writeln!(writer, "<div class=\"counts\">").context("html")?;
+    writeln!(
+        writer,
+        "<span class=\"cnt keep\"><span class=\"dot\" aria-hidden=\"true\"></span><b id=\"kc\">0</b> to keeplist</span>"
+    )
+    .context("html")?;
+    writeln!(
+        writer,
+        "<span class=\"cnt drop\"><span class=\"dot\" aria-hidden=\"true\"></span><b id=\"dc\">0</b> to droplist</span>"
+    )
+    .context("html")?;
+    writeln!(writer, "</div>").context("html")?;
+    writeln!(writer, "<div class=\"sep\" aria-hidden=\"true\"></div>").context("html")?;
+    // Copy is the primary action (click → paste, no file hunting); Download
+    // is the secondary affordance for when the clipboard isn't available.
+    writeln!(writer, "<div class=\"grp\" data-list=\"keep\">").context("html")?;
+    writeln!(
+        writer,
+        "<button class=\"btn primary\" data-act=\"copy\" data-list=\"keep\">{COPY_ICON}Copy keeplist</button>"
+    )
+    .context("html")?;
+    writeln!(
+        writer,
+        "<button class=\"btn\" data-act=\"download\" data-list=\"keep\">.txt</button>"
+    )
+    .context("html")?;
+    writeln!(writer, "</div>").context("html")?;
+    writeln!(writer, "<div class=\"grp\" data-list=\"drop\">").context("html")?;
+    writeln!(
+        writer,
+        "<button class=\"btn primary\" data-act=\"copy\" data-list=\"drop\">{COPY_ICON}Copy droplist</button>"
+    )
+    .context("html")?;
+    writeln!(
+        writer,
+        "<button class=\"btn\" data-act=\"download\" data-list=\"drop\">.txt</button>"
+    )
+    .context("html")?;
+    writeln!(writer, "</div>").context("html")?;
+    writeln!(writer, "<div class=\"sep\" aria-hidden=\"true\"></div>").context("html")?;
+    writeln!(
+        writer,
+        "<button class=\"btn ghost\" id=\"clearAll\">Clear</button>"
+    )
+    .context("html")?;
+    writeln!(writer, "</div>").context("html")?;
+    writeln!(
+        writer,
+        "<div class=\"toast\" id=\"toast\" role=\"status\" aria-live=\"polite\"></div>"
+    )
+    .context("html")?;
     Ok(())
 }
 
@@ -255,164 +438,314 @@ fn escape(s: &str) -> String {
     out
 }
 
-/// Inline CSS. System-font stack, neutral palette, subtle bucket
-/// tinting on the summary tiles, sticky table headers, monospace
-/// handles. Kept compact — no Tailwind, no resets beyond what's
-/// needed.
+/// Inline SVGs — outlined, 1-style icon set, sized to text via CSS.
+const KEEP_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 8.5l3.2 3.2L13 5\"/></svg>";
+const DROP_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 4l8 8M12 4l-8 8\"/></svg>";
+const SEARCH_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"7\" cy=\"7\" r=\"4.5\"/><path d=\"M11 11l3 3\"/></svg>";
+const COPY_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"5\" y=\"5\" width=\"8\" height=\"8\" rx=\"1.5\"/><path d=\"M3 11V4a1.5 1.5 0 011.5-1.5H11\"/></svg>";
+
+/// Inline CSS. 8pt spacing grid, system font, semantic bucket color
+/// applied as a thin top rule + the number (not full tile fills), real
+/// dark mode (elevated surfaces lighter, borders replace shadows), visible
+/// keyboard focus, `prefers-reduced-motion`. Kept compact — no framework.
 const STYLE: &str = "\
 :root {
-  --bg: #fafaf9;
-  --surface: #ffffff;
-  --fg: #1c1c1c;
-  --muted: #78716c;
-  --border: #e7e5e4;
-  --keep-bg: #ecfdf5;
-  --keep-fg: #065f46;
-  --review-bg: #fef3c7;
-  --review-fg: #92400e;
-  --unfollow-bg: #fee2e2;
-  --unfollow-fg: #991b1b;
+  --bg: #f5f5f7; --surface: #ffffff; --surface-2: #fbfbfd;
+  --fg: #1d1d1f; --fg-2: #515154; --muted: #6e6e73;
+  --border: #d2d2d7; --border-soft: #e8e8ed;
+  --accent: #0066cc; --accent-weak: #e6f0fb;
+  --keep-fg: #1c6b3d; --keep-bg: #e9f6ee; --keep-line: #2e9e5b;
+  --review-fg: #8a5a00; --review-bg: #fdf2dc; --review-line: #d9920b;
+  --unfollow-fg: #a3282a; --unfollow-bg: #fce9e9; --unfollow-line: #d94a4a;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
+  --radius: 12px; --radius-sm: 8px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s8:48px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #18181b;
-    --surface: #27272a;
-    --fg: #fafaf9;
-    --muted: #a1a1aa;
-    --border: #3f3f46;
-    --keep-bg: #052e2b;
-    --keep-fg: #6ee7b7;
-    --review-bg: #422006;
-    --review-fg: #fcd34d;
-    --unfollow-bg: #450a0a;
-    --unfollow-fg: #fca5a5;
+    --bg: #161618; --surface: #1f1f22; --surface-2: #26262a;
+    --fg: #f2f2f4; --fg-2: #c4c4c9; --muted: #9a9aa1;
+    --border: #3a3a40; --border-soft: #2c2c31;
+    --accent: #4ea1ff; --accent-weak: #16304d;
+    --keep-fg: #6fd99b; --keep-bg: #11301f; --keep-line: #2e9e5b;
+    --review-fg: #f0c265; --review-bg: #332406; --review-line: #d9920b;
+    --unfollow-fg: #f0908f; --unfollow-bg: #361414; --unfollow-line: #d94a4a;
+    --shadow: none;
   }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: var(--bg);
-  color: var(--fg);
-  line-height: 1.5;
+body { font-family: var(--font); background: var(--bg); color: var(--fg);
+  line-height: 1.5; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 var(--s5); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+:focus:not(:focus-visible) { outline: none; }
+header { padding: var(--s8) 0 var(--s5); }
+.eyebrow { font-size: .75rem; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); margin: 0 0 var(--s2); }
+h1 { margin: 0; font-size: 2rem; font-weight: 600; letter-spacing: -.02em; }
+.meta { margin: var(--s2) 0 0; color: var(--muted); font-size: .9375rem; }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); margin-top: var(--s5); }
+.tile { background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: var(--s4) var(--s5); position: relative; overflow: hidden; }
+.tile::before { content:''; position:absolute; inset:0 0 auto 0; height:3px; }
+.tile.keep::before { background: var(--keep-line); }
+.tile.review::before { background: var(--review-line); }
+.tile.unfollow::before { background: var(--unfollow-line); }
+.tile .label { display:flex; align-items:center; gap: var(--s2);
+  font-size: .8125rem; font-weight: 500; color: var(--fg-2); }
+.tile .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+.tile.keep .dot { background: var(--keep-line); }
+.tile.review .dot { background: var(--review-line); }
+.tile.unfollow .dot { background: var(--unfollow-line); }
+.tile .num { font-size: 2.25rem; font-weight: 600; line-height: 1.1;
+  margin-top: var(--s2); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.tile .sub { font-size: .8125rem; color: var(--muted); margin-top: var(--s1); }
+main { padding-bottom: 120px; }
+section { margin-top: var(--s8); }
+.sec-head { display:flex; align-items:baseline; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s2); }
+h2 { margin:0; font-size: 1.375rem; font-weight: 600; letter-spacing: -.01em;
+  display:flex; align-items:center; gap: var(--s3); }
+h2 .pill { font-size: .8125rem; font-weight: 600; padding: 2px 10px;
+  border-radius: 999px; font-variant-numeric: tabular-nums; }
+section[data-bucket=keep] h2 .pill { background: var(--keep-bg); color: var(--keep-fg); }
+section[data-bucket=review] h2 .pill { background: var(--review-bg); color: var(--review-fg); }
+section[data-bucket=unfollow] h2 .pill { background: var(--unfollow-bg); color: var(--unfollow-fg); }
+.sec-sub { color: var(--muted); font-size: .9375rem; margin: 0; }
+.controls { display:flex; align-items:center; gap: var(--s3); margin: var(--s4) 0 var(--s3); flex-wrap: wrap; }
+.search { position: relative; flex: 1 1 320px; max-width: 30rem; }
+.search svg { position:absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  width:16px; height:16px; color: var(--muted); pointer-events:none; }
+input[type=search] { width:100%; padding: 10px 12px 10px 36px; font-size: .9375rem;
+  font-family: var(--font); color: var(--fg); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); }
+input[type=search]::placeholder { color: var(--muted); }
+.shown { font-size: .8125rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space:nowrap; }
+.tbl-wrap { background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+table { width:100%; border-collapse: collapse; font-size: .875rem; }
+thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2);
+  text-align: left; font-weight: 600; font-size: .6875rem; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); padding: var(--s3) var(--s3);
+  white-space: nowrap; border-bottom: 1px solid var(--border); }
+thead th.sortable { cursor: pointer; user-select: none; }
+thead th.sortable:hover { color: var(--fg); }
+thead th .arrow { opacity: 0; margin-left: 4px; font-size: .75rem; }
+thead th[aria-sort=ascending] .arrow, thead th[aria-sort=descending] .arrow { opacity: 1; color: var(--accent); }
+thead th[aria-sort=ascending] .arrow::after { content:'\\2191'; }
+thead th[aria-sort=descending] .arrow::after { content:'\\2193'; }
+thead th.col-num { text-align: right; }
+thead th.col-act { text-align: right; }
+tbody td { padding: var(--s3) var(--s3); border-bottom: 1px solid var(--border-soft);
+  vertical-align: middle; color: var(--fg-2); }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: var(--surface-2); }
+tbody tr.sel-keep td { background: var(--keep-bg); }
+tbody tr.sel-drop td { background: var(--unfollow-bg); }
+.handle a { font-family: var(--mono); font-size: .8125rem; font-weight: 500; color: var(--fg); text-decoration: none; }
+.handle a:hover { color: var(--accent); text-decoration: underline; }
+.name.empty { color: var(--muted); }
+td.score { text-align: right; white-space: nowrap; }
+.score-cell { display:inline-flex; align-items:center; gap: var(--s2); justify-content:flex-end; }
+.score-pct { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 3ch; text-align: right; color: var(--fg); }
+.score-bar { width: 44px; height: 6px; border-radius: 3px; background: var(--border-soft); overflow: hidden; flex: none; }
+.score-bar > i { display:block; height:100%; border-radius: 3px; }
+tr[data-b=keep] .score-bar > i { background: var(--keep-line); }
+tr[data-b=review] .score-bar > i { background: var(--review-line); }
+tr[data-b=unfollow] .score-bar > i { background: var(--unfollow-line); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space:nowrap; color: var(--fg-2); }
+.tag { display:inline-flex; align-items:center; gap:4px; font-size:.75rem; padding: 1px 8px;
+  border-radius: 999px; border:1px solid var(--border); color: var(--fg-2);
+  background: var(--surface-2); white-space:nowrap; }
+.mutual-yes { color: var(--keep-fg); border-color: var(--keep-line); background: var(--keep-bg); }
+.why { font-family: var(--mono); font-size: .75rem; color: var(--muted); white-space: nowrap; }
+.hint { color: var(--muted); max-width: 22rem; }
+td.actions { text-align: right; white-space: nowrap; }
+.seg { display:inline-flex; border:1px solid var(--border); border-radius: 999px; overflow:hidden; background: var(--surface); }
+.seg button { appearance:none; border:0; background:transparent; cursor:pointer; font: inherit;
+  font-size:.75rem; font-weight:500; color: var(--fg-2); padding: 5px 11px;
+  display:inline-flex; align-items:center; gap:5px; min-height: 30px;
+  transition: background .12s ease, color .12s ease; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button svg { width:13px; height:13px; }
+.seg button:hover { background: var(--surface-2); color: var(--fg); }
+.seg button[aria-pressed=true].keep { background: var(--keep-line); color:#fff; }
+.seg button[aria-pressed=true].drop { background: var(--unfollow-line); color:#fff; }
+@media (prefers-color-scheme: dark) {
+  .seg button[aria-pressed=true].keep { color:#08160d; }
+  .seg button[aria-pressed=true].drop { color:#1a0707; }
 }
-header { padding: 2rem 2rem 1.5rem; border-bottom: 1px solid var(--border); }
-h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.01em; }
-.meta { margin: 0.25rem 0 1.25rem; color: var(--muted); font-size: 0.875rem; }
-.stats { display: flex; gap: 0.75rem; flex-wrap: wrap; }
-.stat {
-  padding: 0.75rem 1.25rem;
-  border-radius: 0.5rem;
-  min-width: 7rem;
+.empty-state { padding: var(--s8) var(--s5); text-align:center; color: var(--muted); font-style: italic; }
+.exportbar { position: fixed; left: 50%; bottom: var(--s5);
+  transform: translateX(-50%) translateY(140%); z-index: 50; display:flex;
+  align-items:center; gap: var(--s4); background: var(--surface);
+  border:1px solid var(--border); box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  border-radius: 999px; padding: var(--s2) var(--s2) var(--s2) var(--s5);
+  transition: transform .28s cubic-bezier(.2,.8,.2,1); max-width: calc(100vw - 32px); }
+.exportbar.show { transform: translateX(-50%) translateY(0); }
+.exportbar .counts { display:flex; gap: var(--s4); font-size:.875rem; }
+.exportbar .cnt { display:inline-flex; align-items:center; gap:6px; font-variant-numeric: tabular-nums; }
+.exportbar .cnt b { font-weight:600; }
+.exportbar .cnt .dot { width:8px;height:8px;border-radius:50%; }
+.exportbar .cnt.keep .dot { background: var(--keep-line); }
+.exportbar .cnt.drop .dot { background: var(--unfollow-line); }
+.exportbar .sep { width:1px; align-self:stretch; background: var(--border); }
+.exportbar .grp { display:flex; align-items:center; gap: var(--s2); }
+.btn { appearance:none; border:1px solid var(--border); background: var(--surface-2);
+  color: var(--fg); font: inherit; font-size:.8125rem; font-weight:500;
+  padding: 7px 13px; border-radius: 999px; cursor:pointer; display:inline-flex;
+  align-items:center; gap:6px; min-height: 34px; }
+.btn:hover { background: var(--accent-weak); border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color:#fff; }
+.btn.primary:hover { filter: brightness(1.05); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--fg); background: var(--surface-2); }
+.btn svg { width:14px; height:14px; }
+.toast { position: fixed; left:50%; bottom: 92px; transform: translateX(-50%) translateY(10px);
+  background: var(--fg); color: var(--bg); font-size:.8125rem; font-weight:500;
+  padding: 8px 16px; border-radius: 999px; opacity:0; pointer-events:none;
+  transition: opacity .2s ease, transform .2s ease; z-index:60; }
+.toast.show { opacity:1; transform: translateX(-50%) translateY(0); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+@media (max-width: 860px) {
+  .tiles { grid-template-columns: 1fr; }
+  .why, thead th.col-why, td.why { display:none; }
+  .exportbar { flex-wrap: wrap; border-radius: var(--radius); justify-content:center; padding: var(--s3); bottom: var(--s3); }
 }
-.stat.keep { background: var(--keep-bg); color: var(--keep-fg); }
-.stat.review { background: var(--review-bg); color: var(--review-fg); }
-.stat.unfollow { background: var(--unfollow-bg); color: var(--unfollow-fg); }
-.stat .num { font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; }
-section { padding: 2rem; }
-section + section { border-top: 1px solid var(--border); }
-h2 { margin: 0 0 0.75rem; font-size: 1.125rem; font-weight: 600; }
-h2 .count { color: var(--muted); font-weight: 400; }
-.controls { margin-bottom: 1rem; }
-input[type='search'] {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--surface);
-  color: var(--fg);
-  font-size: 0.875rem;
-  width: 100%;
-  max-width: 28rem;
-}
-input[type='search']:focus { outline: 2px solid var(--review-fg); outline-offset: -1px; }
-.empty { color: var(--muted); font-style: italic; }
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.875rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  overflow: hidden;
-}
-th, td {
-  text-align: left;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-tr:last-child td { border-bottom: none; }
-th {
-  background: var(--bg);
-  font-weight: 600;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  cursor: pointer;
-  user-select: none;
-  position: sticky;
-  top: 0;
-}
-th:hover { color: var(--fg); }
-th.sorted-asc::after { content: ' \\2191'; }
-th.sorted-desc::after { content: ' \\2193'; }
-td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-.handle a {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  color: var(--fg);
-  text-decoration: none;
-}
-.handle a:hover { text-decoration: underline; color: var(--review-fg); }
-.why { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 0.75rem; color: var(--muted); }
-.hint { color: var(--muted); font-style: italic; max-width: 24rem; }
 ";
 
-/// Vanilla JS for sort + filter. ~60 lines, no deps, no closures over
-/// the DOM at construction time (each handler resolves its own
-/// section / table / index at click time so the script is robust to
-/// future template changes).
+/// Vanilla JS: filter (with live shown-count), keyboard-operable sort
+/// (Enter/Space, `aria-sort`), per-row keep/drop toggles (mutually
+/// exclusive, `localStorage`-persisted), and the floating export bar
+/// (Copy primary + Download per list, Clear). No deps. Rows are
+/// server-rendered, so the script never injects user data as HTML — it
+/// reads handles from `data-` attributes (browser-unescaped) only to
+/// build the export text / clipboard payload.
 const SCRIPT: &str = "\
-document.querySelectorAll('input[data-filter]').forEach(function (input) {
-  input.addEventListener('input', function (e) {
-    var q = e.target.value.toLowerCase();
-    var section = e.target.closest('section');
-    var rows = section.querySelectorAll('tbody tr');
-    rows.forEach(function (row) {
-      row.style.display = row.textContent.toLowerCase().indexOf(q) !== -1 ? '' : 'none';
+'use strict';
+var STORE = 'igsift.triage.v1';
+function loadSel(){ try { return JSON.parse(localStorage.getItem(STORE)) || {}; } catch(e){ return {}; } }
+function saveSel(){ try { localStorage.setItem(STORE, JSON.stringify(sel)); } catch(e){} }
+var sel = loadSel();
+
+/* filter */
+document.querySelectorAll('section').forEach(function(sec){
+  var input = sec.querySelector('input[type=search]');
+  var shown = sec.querySelector('[data-shown]');
+  if(!input) return;
+  input.addEventListener('input', function(){
+    var q = input.value.toLowerCase(), n = 0;
+    sec.querySelectorAll('tbody tr').forEach(function(tr){
+      var hit = tr.textContent.toLowerCase().indexOf(q) !== -1;
+      tr.style.display = hit ? '' : 'none';
+      if(hit) n++;
     });
+    if(shown) shown.textContent = n + ' shown';
   });
 });
 
-document.querySelectorAll('th[data-sort]').forEach(function (th) {
-  th.addEventListener('click', function () {
-    var table = th.closest('table');
-    var tbody = table.querySelector('tbody');
-    var idx = Array.from(th.parentNode.children).indexOf(th);
-    var isNum = th.dataset.sort === 'num';
-    var asc = !th.classList.contains('sorted-asc');
-    table.querySelectorAll('th').forEach(function (other) {
-      other.classList.remove('sorted-asc', 'sorted-desc');
+/* sort */
+function cellVal(tr, idx, kind){
+  if(kind === 'num'){
+    if(idx === 2) return parseFloat(tr.dataset.p);
+    if(idx === 3) return parseInt(tr.dataset.m, 10);
+    if(idx === 5){ var v = parseFloat(tr.dataset.t); return isNaN(v) ? -Infinity : v; }
+  }
+  if(idx === 0) return (tr.dataset.h || '').toLowerCase();
+  var cell = tr.children[idx];
+  return (cell ? cell.textContent : '').trim().toLowerCase();
+}
+document.querySelectorAll('thead th.sortable').forEach(function(th){
+  function run(){
+    var table = th.closest('table'), tbody = table.querySelector('tbody');
+    var idx = Array.prototype.indexOf.call(th.parentNode.children, th);
+    var kind = th.dataset.kind;
+    var asc = th.getAttribute('aria-sort') !== 'ascending';
+    table.querySelectorAll('th').forEach(function(o){ o.setAttribute('aria-sort','none'); });
+    th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a,b){
+      var av = cellVal(a, idx, kind), bv = cellVal(b, idx, kind);
+      if(kind === 'num') return asc ? av-bv : bv-av;
+      return asc ? String(av).localeCompare(bv) : String(bv).localeCompare(av);
     });
-    th.classList.add(asc ? 'sorted-asc' : 'sorted-desc');
-    var rows = Array.from(tbody.querySelectorAll('tr'));
-    rows.sort(function (a, b) {
-      var av = a.children[idx].textContent.trim();
-      var bv = b.children[idx].textContent.trim();
-      if (isNum) {
-        var an = parseFloat(av);
-        var bn = parseFloat(bv);
-        // NaN at the bottom regardless of direction so empty cells
-        // don't pollute the top of an ascending sort.
-        if (isNaN(an)) return 1;
-        if (isNaN(bn)) return -1;
-        return asc ? an - bn : bn - an;
-      }
-      return asc ? av.localeCompare(bv) : bv.localeCompare(av);
-    });
-    rows.forEach(function (r) { tbody.appendChild(r); });
-  });
+    rows.forEach(function(r){ tbody.appendChild(r); });
+  }
+  th.addEventListener('click', run);
+  th.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); run(); } });
 });
+
+/* per-row keep/drop toggles (mutually exclusive) */
+function syncRow(tr){
+  var h = tr.dataset.h, state = sel[h];
+  tr.classList.toggle('sel-keep', state === 'keep');
+  tr.classList.toggle('sel-drop', state === 'drop');
+  tr.querySelectorAll('button[data-toggle]').forEach(function(b){
+    b.setAttribute('aria-pressed', String(state === b.dataset.toggle));
+  });
+}
+var main = document.getElementById('main');
+main.addEventListener('click', function(e){
+  var btn = e.target.closest('button[data-toggle]');
+  if(!btn) return;
+  var tr = btn.closest('tr'), h = tr.dataset.h, want = btn.dataset.toggle;
+  if(sel[h] === want) delete sel[h]; else sel[h] = want;
+  saveSel(); syncRow(tr); renderBar();
+});
+
+/* export bar */
+var bar = document.getElementById('exportbar');
+function listOf(kind){ return Object.keys(sel).filter(function(h){ return sel[h] === kind; }).sort(); }
+function renderBar(){
+  var k = listOf('keep'), d = listOf('drop');
+  document.getElementById('kc').textContent = k.length;
+  document.getElementById('dc').textContent = d.length;
+  bar.classList.toggle('show', (k.length + d.length) > 0);
+}
+function fileText(kind){
+  var file = kind === 'keep' ? 'keeplist.txt' : 'droplist.txt';
+  var header = '# igsift ' + (kind==='keep'?'keeplist':'droplist')
+    + ' — append to config/' + file + '\\n# one handle per line\\n';
+  return header + listOf(kind).join('\\n') + '\\n';
+}
+function toast(msg){
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove('show'); }, 1800);
+}
+bar.addEventListener('click', function(e){
+  var btn = e.target.closest('button[data-act]');
+  if(!btn) return;
+  if(btn.dataset.act === 'copy' || btn.dataset.act === 'download'){
+    var kind = btn.dataset.list, name = kind==='keep' ? 'keeplist' : 'droplist';
+    if(listOf(kind).length === 0){ toast('No ' + name + ' selections yet'); return; }
+    if(btn.dataset.act === 'copy'){
+      navigator.clipboard.writeText(fileText(kind)).then(
+        function(){ toast('Copied ' + listOf(kind).length + ' handles — paste into config/' + name + '.txt'); },
+        function(){ toast('Copy failed — use .txt instead'); }
+      );
+    } else {
+      var blob = new Blob([fileText(kind)], { type:'text/plain' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name + '.append.txt';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+      toast('Downloaded ' + name + '.append.txt');
+    }
+  }
+});
+document.getElementById('clearAll').addEventListener('click', function(){
+  sel = {}; saveSel();
+  document.querySelectorAll('tbody tr').forEach(syncRow);
+  renderBar(); toast('Cleared all selections');
+});
+
+/* restore persisted selections on load */
+document.querySelectorAll('tbody tr').forEach(syncRow);
+renderBar();
 ";
 
 #[cfg(test)]
@@ -486,10 +819,67 @@ mod tests {
             baseline("k2", Bucket::Keep, 0.95),
         ];
         let html = render(&scored);
-        assert!(html.contains("Unfollow <span class=\"count\">(1)</span>"));
-        assert!(html.contains("Review <span class=\"count\">(1)</span>"));
-        assert!(html.contains("Keep <span class=\"count\">(2)</span>"));
+        assert!(html.contains("<section data-bucket=\"unfollow\">"));
+        assert!(html.contains("<section data-bucket=\"review\">"));
+        assert!(html.contains("<section data-bucket=\"keep\">"));
+        // Section pill counts.
+        assert!(html.contains("Unfollow <span class=\"pill\">1</span>"));
+        assert!(html.contains("Review <span class=\"pill\">1</span>"));
+        assert!(html.contains("Keep <span class=\"pill\">2</span>"));
         assert!(html.contains("4 accounts scored"));
+    }
+
+    #[test]
+    fn header_stat_tiles_show_per_bucket_counts() {
+        // Tiles compute keep/review/unfollow via `== Bucket::X`. Asymmetric
+        // counts (3/1/1) so a `==`→`!=` mutation changes each tile number.
+        let scored = vec![
+            baseline("k1", Bucket::Keep, 0.90),
+            baseline("k2", Bucket::Keep, 0.92),
+            baseline("k3", Bucket::Keep, 0.95),
+            baseline("r1", Bucket::Review, 0.50),
+            baseline("u1", Bucket::Unfollow, 0.10),
+        ];
+        let html = render(&scored);
+        assert!(html.contains("<div class=\"tile keep\">"));
+        assert!(html.contains("<div class=\"num\">3</div>"));
+        assert!(html.contains("<div class=\"num\">1</div>"));
+    }
+
+    #[test]
+    fn keep_likelihood_renders_as_percentage_with_raw_in_title() {
+        // The user-facing value is an integer percent; the raw float is
+        // preserved in the title (power users) AND in data-p (exact sort).
+        let scored = vec![baseline("acct", Bucket::Keep, 0.873)];
+        let html = render(&scored);
+        assert!(
+            html.contains("Keep likelihood"),
+            "column header renamed: {html}"
+        );
+        assert!(html.contains(">87%<"), "percent cell: {html}");
+        assert!(
+            html.contains("title=\"raw keep_prob = 0.873\""),
+            "raw float in title: {html}"
+        );
+        assert!(
+            html.contains("data-p=\"0.873\""),
+            "exact float for sort: {html}"
+        );
+    }
+
+    #[test]
+    fn rows_carry_keep_drop_toggles_and_store_key() {
+        let scored = vec![baseline("acct", Bucket::Unfollow, 0.2)];
+        let html = render(&scored);
+        assert!(html.contains("data-toggle=\"keep\""));
+        assert!(html.contains("data-toggle=\"drop\""));
+        assert!(html.contains("aria-pressed=\"false\""));
+        // The export bar + the client-side store the toggles write to.
+        assert!(html.contains("id=\"exportbar\""));
+        assert!(html.contains("igsift.triage.v1"));
+        // Copy is the primary action; download is secondary.
+        assert!(html.contains("class=\"btn primary\" data-act=\"copy\""));
+        assert!(html.contains("data-act=\"download\""));
     }
 
     #[test]
@@ -522,17 +912,8 @@ mod tests {
     }
 
     #[test]
-    fn empty_input_renders_three_empty_sections() {
-        let html = render(&[]);
-        assert!(html.contains("0 accounts scored"));
-        assert!(html.contains("Unfollow <span class=\"count\">(0)</span>"));
-        assert!(html.contains("No accounts in this bucket"));
-    }
-
-    #[test]
     fn escapes_double_quote_in_display_name() {
-        // The attribute-context guard. The existing escape test covers
-        // < > & but not the `"` arm — deleting that arm from `escape`
+        // The attribute-context guard. Deleting the `"` arm from `escape`
         // would let a display name break out of an HTML attribute.
         let mut s = baseline("alice", Bucket::Keep, 0.9);
         s.features.display_name = Some("Sarah \"Q\" Connor".to_owned());
@@ -545,12 +926,10 @@ mod tests {
 
     #[test]
     fn escapes_special_characters_in_handle_href() {
-        // The handle flows into the `href` attribute via `profile_url`. The
-        // displayed `@handle` text is escaped, but the URL in the attribute
-        // must be too — a handle carrying `"` (schema drift / a corrupted
-        // export; IG's own charset never emits it) would otherwise break out
-        // of the attribute. Pin the attribute-context escape on the handle
-        // side, mirroring the display-name guard.
+        // The handle flows into the `href` attribute AND the `data-h`
+        // attribute via `escape`. A handle carrying `"` (schema drift / a
+        // corrupted export; IG's own charset never emits it) would
+        // otherwise break out of either attribute. Pin both.
         let s = baseline("a\"b", Bucket::Keep, 0.9);
         let html = render(&[s]);
         assert!(
@@ -561,24 +940,17 @@ mod tests {
             !html.contains("/a\"b/"),
             "raw double-quote must not reach the href attribute: {html}",
         );
+        assert!(
+            !html.contains("data-h=\"a\"b\""),
+            "raw double-quote must not break the data-h attribute: {html}",
+        );
     }
 
     #[test]
-    fn header_stat_tiles_show_per_bucket_counts() {
-        // The summary tiles compute keep/review/unfollow via `== Bucket::X`.
-        // Asymmetric counts (3/1/1) so a `==`→`!=` mutation changes each
-        // displayed number — the section-count test alone leaves the tile
-        // computation unpinned.
-        let scored = vec![
-            baseline("k1", Bucket::Keep, 0.90),
-            baseline("k2", Bucket::Keep, 0.92),
-            baseline("k3", Bucket::Keep, 0.95),
-            baseline("r1", Bucket::Review, 0.50),
-            baseline("u1", Bucket::Unfollow, 0.10),
-        ];
-        let html = render(&scored);
-        assert!(html.contains("<div class=\"stat keep\"><div class=\"num\">3</div>"));
-        assert!(html.contains("<div class=\"stat review\"><div class=\"num\">1</div>"));
-        assert!(html.contains("<div class=\"stat unfollow\"><div class=\"num\">1</div>"));
+    fn empty_input_renders_three_empty_sections() {
+        let html = render(&[]);
+        assert!(html.contains("0 accounts scored"));
+        assert!(html.contains("Unfollow <span class=\"pill\">0</span>"));
+        assert!(html.contains("Nothing in this bucket"));
     }
 }

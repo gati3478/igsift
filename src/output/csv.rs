@@ -35,8 +35,11 @@ struct CsvRow<'a> {
     bucket: &'static str,
     /// Three-decimal float matching the stdout summary so a user can
     /// cross-reference CSV rows with the printed top-10 / bottom-10
-    /// without arithmetic.
-    #[serde(serialize_with = "fmt_three_decimals")]
+    /// without arithmetic. Kept a raw `0.0–1.0` float (not a percent
+    /// string) so spreadsheet math — `AVERAGE`, conditional formatting,
+    /// sorting — works without stripping a `%`; the human-friendly
+    /// percentage treatment lives in the Markdown / HTML reports.
+    #[serde(rename = "keep_score", serialize_with = "fmt_three_decimals")]
     keep_prob: f64,
     dm_msgs: u32,
     last_dm_days: Option<u32>,
@@ -53,7 +56,10 @@ struct CsvRow<'a> {
     mutual: bool,
     /// The `dominant_feature` from scoring — the term with the largest
     /// signed contribution to `score_raw`. Tells the user **why** this
-    /// account landed where it did at a glance.
+    /// account landed where it did at a glance. Header is `top_signal`:
+    /// it's a single signal token (`tenure`, `likes`, `dm`, …), not the
+    /// free-form note the struct field name might imply.
+    #[serde(rename = "top_signal")]
     notes: Cow<'a, str>,
 }
 
@@ -196,10 +202,10 @@ mod tests {
         let header = csv.lines().next().expect("at least one line");
         assert_eq!(
             header,
-            "username,display_name,profile_url,bucket,keep_prob,dm_msgs,last_dm_days,\
+            "username,display_name,profile_url,bucket,keep_score,dm_msgs,last_dm_days,\
              reactions_given_180d,reactions_received_180d,\
              likes_given_90d,comments_given_90d,follow_tenure_days,\
-             account_class,mutual,notes",
+             account_class,mutual,top_signal",
             "CSV header must match DESIGN.md 'Output' section verbatim",
         );
     }

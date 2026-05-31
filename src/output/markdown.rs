@@ -25,7 +25,7 @@ use std::io::Write;
 use anyhow::{Context, Result};
 
 use super::csv::profile_url;
-use super::{contributions_inline, decision_hint};
+use super::{HINT_ONE_SIDED, contributions_inline, decision_hint};
 use crate::features::AccountFeatures;
 use crate::scoring::{Bucket, ScoredAccount};
 
@@ -38,7 +38,11 @@ const REVIEW_CARDS: usize = 30;
 /// saturated middle is omitted by design.
 const KEEP_EDGE_N: usize = 20;
 
+/// Width (in cells) of the ASCII proportion bars in the Summary block.
+const BAR_WIDTH: usize = 30;
+
 pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> {
+    let total = scored.len();
     let keep_count = scored.iter().filter(|s| s.bucket == Bucket::Keep).count();
     let review_count = scored.iter().filter(|s| s.bucket == Bucket::Review).count();
     let unfollow_count = scored
@@ -46,21 +50,56 @@ pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> 
         .filter(|s| s.bucket == Bucket::Unfollow)
         .count();
 
-    writeln!(writer, "# igsift following audit").context("md header")?;
+    let date = jiff::Zoned::now().date();
+    writeln!(writer, "# Instagram following audit").context("md header")?;
+    writeln!(writer).context("md")?;
+    writeln!(writer, "_Generated {date} · igsift_").context("md")?;
     writeln!(writer).context("md")?;
     writeln!(writer, "## Summary").context("md")?;
     writeln!(writer).context("md")?;
-    writeln!(writer, "- Accounts scored: **{}**", scored.len()).context("md")?;
-    writeln!(writer, "- Keep: **{keep_count}**").context("md")?;
-    writeln!(writer, "- Review: **{review_count}**").context("md")?;
-    writeln!(writer, "- Unfollow: **{unfollow_count}**").context("md")?;
+    writeln!(writer, "**{total} accounts scored**").context("md")?;
     writeln!(writer).context("md")?;
+    // Proportion bars give the keep/review/unfollow split a shape the eye
+    // reads at a glance — four flat bullets couldn't. Skipped at total=0 so
+    // the bar math never divides by zero (and an empty run has no shape).
+    if total > 0 {
+        writeln!(writer, "```text").context("md")?;
+        for (label, count) in [
+            ("Keep", keep_count),
+            ("Review", review_count),
+            ("Unfollow", unfollow_count),
+        ] {
+            writeln!(writer, "{}", proportion_line(label, count, total)).context("md")?;
+        }
+        writeln!(writer, "```").context("md")?;
+        writeln!(writer).context("md")?;
+    }
 
     write_unfollow_section(&mut writer, scored)?;
     write_review_section(&mut writer, scored)?;
     write_keep_section(&mut writer, scored)?;
 
     Ok(())
+}
+
+/// `keep_prob ∈ [0, 1]` → an integer percentage for human-facing display.
+/// The CSV keeps the raw float for spreadsheet math; cards and tables here
+/// read better as `keep 26%` than `keep_prob=0.256`.
+fn pct(p: f64) -> u32 {
+    (p * 100.0).round() as u32
+}
+
+/// One Summary proportion row: `Label ███░░  count  pct%`. `count` is
+/// right-aligned so the numbers form a column across the three rows.
+fn proportion_line(label: &str, count: usize, total: usize) -> String {
+    let share = count as f64 / total as f64;
+    let filled = (share * BAR_WIDTH as f64).round() as usize;
+    let filled = filled.min(BAR_WIDTH);
+    let bar: String = "█".repeat(filled) + &"░".repeat(BAR_WIDTH - filled);
+    format!(
+        "{label:<9}{bar}  {count:>4}  {}%",
+        (share * 100.0).round() as u32
+    )
 }
 
 fn write_unfollow_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> Result<()> {
@@ -83,7 +122,54 @@ fn write_unfollow_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> 
         writeln!(writer).context("md")?;
         return Ok(());
     }
-    for s in &rows {
+    writeln!(writer, "_Strongest unfollow signal first._").context("md")?;
+    writeln!(writer).context("md")?;
+
+    // Droplisted accounts land in Unfollow because the user hand-flagged
+    // them, not because they scored low — several sit at keep_prob ≈ 1.0.
+    // Sorting them into the score-ordered list makes those high scores read
+    // like anomalies. Quarantine them under their own subhead so the score
+    // column stops appearing to contradict the bucket. Only split when at
+    // least one forced row exists; the common (no-droplist) case stays flat.
+    let forced: Vec<&ScoredAccount> = rows
+        .iter()
+        .copied()
+        .filter(|s| s.features.is_droplisted)
+        .collect();
+    if forced.is_empty() {
+        for s in &rows {
+            write_card(writer, s)?;
+        }
+        return Ok(());
+    }
+
+    let scored_low: Vec<&ScoredAccount> = rows
+        .iter()
+        .copied()
+        .filter(|s| !s.features.is_droplisted)
+        .collect();
+    writeln!(writer, "### Scored low ({})", scored_low.len()).context("md")?;
+    writeln!(writer).context("md")?;
+    if scored_low.is_empty() {
+        writeln!(
+            writer,
+            "_None — every Unfollow here was forced by the droplist._"
+        )
+        .context("md")?;
+        writeln!(writer).context("md")?;
+    }
+    for s in &scored_low {
+        write_card(writer, s)?;
+    }
+    writeln!(writer, "### Forced by droplist ({})", forced.len()).context("md")?;
+    writeln!(writer).context("md")?;
+    writeln!(
+        writer,
+        "_These overrode their score — you flagged them in `config/droplist.txt`._"
+    )
+    .context("md")?;
+    writeln!(writer).context("md")?;
+    for s in &forced {
         write_card(writer, s)?;
     }
     Ok(())
@@ -146,6 +232,13 @@ fn write_keep_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> Resu
         writeln!(writer, "_None._").context("md")?;
         return Ok(());
     }
+    let intro = if rows.len() > KEEP_EDGE_N * 2 {
+        "_The confident keeps. The saturated middle is omitted — only the boundary and the top are shown._"
+    } else {
+        "_The confident keeps — closest to the boundary first._"
+    };
+    writeln!(writer, "{intro}").context("md")?;
+    writeln!(writer).context("md")?;
 
     if rows.len() <= KEEP_EDGE_N * 2 {
         // Few enough to render in one table — skip the top/bottom split.
@@ -176,10 +269,10 @@ fn write_card(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
     };
     writeln!(
         writer,
-        "### [`@{handle}`]({url}){display_segment} — keep_prob={prob:.3}",
+        "### [`@{handle}`]({url}){display_segment} — keep {pct}%",
         handle = f.username,
         url = profile_url(&f.username),
-        prob = s.keep_prob,
+        pct = pct(s.keep_prob),
     )
     .context("md card header")?;
 
@@ -190,7 +283,14 @@ fn write_card(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
         contributions_inline(s, "no non-zero terms")
     )
     .context("md card why")?;
-    writeln!(writer, "- Hint: _{}_", decision_hint(f, s.bucket)).context("md card hint")?;
+    // Suppress the hint when it would only restate the `one-sided` badge
+    // already on the attribute line above — pure redundancy on the most
+    // common card shape. Every other hint (dormant, droplist, restricted,
+    // recent engagement, …) carries information the badges don't, so it stays.
+    let hint = decision_hint(f, s.bucket);
+    if hint != HINT_ONE_SIDED {
+        writeln!(writer, "- Hint: _{hint}_").context("md card hint")?;
+    }
     writeln!(writer).context("md")?;
     Ok(())
 }
@@ -266,18 +366,18 @@ where
 {
     writeln!(
         writer,
-        "| handle | display name | keep_prob | mutual | dominant |"
+        "| handle | display name | keep | mutual | top signal |"
     )
     .context("md table header")?;
     writeln!(writer, "|---|---|---|---|---|").context("md table sep")?;
     for s in rows {
         writeln!(
             writer,
-            "| [`{handle}`]({url}) | {display} | {prob:.3} | {mutual} | `{dom}` |",
+            "| [`{handle}`]({url}) | {display} | {pct}% | {mutual} | {dom} |",
             handle = s.features.username,
             url = profile_url(&s.features.username),
             display = md_escape(s.features.display_name.as_deref().unwrap_or("")),
-            prob = s.keep_prob,
+            pct = pct(s.keep_prob),
             mutual = if s.features.is_mutual { "yes" } else { "no" },
             dom = s.dominant_feature,
         )
@@ -355,7 +455,8 @@ mod tests {
     #[test]
     fn empty_input_renders_three_empty_sections() {
         let md = render(&[]);
-        assert!(md.contains("Accounts scored: **0**"));
+        // Zero accounts must not panic the proportion bars (no div-by-zero).
+        assert!(md.contains("**0 accounts scored**"));
         assert!(md.contains("## Unfollow (0)"));
         assert!(md.contains("## Review (0)"));
         assert!(md.contains("## Keep (0)"));
@@ -381,13 +482,34 @@ mod tests {
     }
 
     #[test]
-    fn unfollow_card_includes_link_class_and_hint() {
+    fn unfollow_card_includes_link_class_and_percentage() {
         let scored = vec![make_scored("dormant_acct", 0.20, Bucket::Unfollow)];
         let md = render(&scored);
         assert!(md.contains("[`@dormant_acct`](https://www.instagram.com/dormant_acct/)"));
+        // keep_prob is rendered as a human percentage, not a bare float.
+        assert!(md.contains("keep 20%"), "{md}");
         assert!(md.contains("personal · one-sided · 1.0y follow"));
         assert!(md.contains("Why: tenure (+0.50), dm (-0.20), likes (-0.10)"));
-        assert!(md.contains("Hint:"));
+        // The baseline account is one-sided, so its hint
+        // ("one-sided — …") merely restates the `one-sided` badge already
+        // on the attribute line and must be suppressed.
+        assert!(
+            !md.contains("Hint:"),
+            "redundant one-sided hint must be suppressed: {md}"
+        );
+    }
+
+    #[test]
+    fn card_shows_non_redundant_hint() {
+        // A mutual but dormant account: the "dormant" hint carries info the
+        // attribute line (personal · mutual · …) does NOT, so it must render.
+        let mut s = make_scored("dormant_mutual", 0.30, Bucket::Unfollow);
+        s.features.is_mutual = true;
+        let md = render(std::slice::from_ref(&s));
+        assert!(
+            md.contains("Hint: _dormant"),
+            "non-redundant hint must render: {md}",
+        );
     }
 
     // Comprehensive decision_hint branch coverage lives in
@@ -421,8 +543,32 @@ mod tests {
             make_scored("u1", 0.10, Bucket::Unfollow),
         ];
         let md = render(&scored);
-        assert!(md.contains("- Keep: **2**"), "{md}");
-        assert!(md.contains("- Review: **1**"), "{md}");
-        assert!(md.contains("- Unfollow: **1**"), "{md}");
+        // New Summary: headline + proportion bars carrying count + share.
+        // 2 keep / 1 review / 1 unfollow of 4 → 50% / 25% / 25%.
+        assert!(md.contains("**4 accounts scored**"), "{md}");
+        assert!(md.contains("Keep"), "{md}");
+        assert!(md.contains("2  50%"), "{md}");
+        assert!(md.contains("1  25%"), "{md}");
+    }
+
+    #[test]
+    fn droplisted_unfollow_rows_are_quarantined_under_their_own_subhead() {
+        // A high-scoring account forced into Unfollow by the droplist must
+        // not sit in the score-sorted list looking like a score anomaly.
+        // It belongs under a "Forced by droplist" subsection.
+        let mut forced = make_scored("forced_high", 0.99, Bucket::Unfollow);
+        forced.features.is_droplisted = true;
+        let lowscore = make_scored("genuinely_low", 0.15, Bucket::Unfollow);
+        let md = render(&[forced, lowscore]);
+        assert!(md.contains("### Scored low"), "{md}");
+        assert!(md.contains("### Forced by droplist"), "{md}");
+        // The forced row appears after the "Forced by droplist" heading,
+        // not in the scored-low block.
+        let pos_forced_head = md.find("Forced by droplist").expect("subhead");
+        let pos_forced_card = md.find("@forced_high").expect("forced card");
+        assert!(
+            pos_forced_card > pos_forced_head,
+            "forced row must be under its subhead: {md}"
+        );
     }
 }

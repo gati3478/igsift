@@ -400,8 +400,17 @@ labels being clean. See [`docs/specs/2026-05-30-reciprocity-aware-scoring.md`](s
 **Primary: CSV** — sortable, filterable, easy to diff between runs.
 
 ```
-username,display_name,profile_url,bucket,keep_prob,dm_msgs,last_dm_days,reactions_given_180d,reactions_received_180d,likes_given_90d,comments_given_90d,follow_tenure_days,account_class,mutual,notes
+username,display_name,profile_url,bucket,keep_score,dm_msgs,last_dm_days,reactions_given_180d,reactions_received_180d,likes_given_90d,comments_given_90d,follow_tenure_days,account_class,mutual,top_signal
 ```
+
+`keep_score` is the `keep_prob` sigmoid output (§ Scoring), kept as a raw
+`0.0–1.0` three-decimal float — **not** a percentage string — so spreadsheet
+math (`AVERAGE`, conditional formatting, sorting) works without stripping a
+`%`. The human-friendly percentage treatment is a Markdown / HTML concern.
+`top_signal` is the single dominant scoring term (`tenure`, `likes`, `dm`, …),
+the largest signed contribution to the raw score. (Both columns were renamed
+from `keep_prob` / `notes` in the v2 header; the row order and column
+positions are unchanged.)
 
 `profile_url` is `https://www.instagram.com/<username>/` — handles are
 ASCII-restricted by Instagram, so no URL encoding is needed.

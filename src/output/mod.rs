@@ -54,6 +54,13 @@ use crate::scoring::{Bucket, ScoredAccount};
 /// (a pinned SSOT consumed identically by the Markdown and HTML writers).
 const LONG_STANDING_MUTUAL_HINT_DAYS: u32 = 730;
 
+/// The one-sided decision hint string. Surfaced as a named const so the
+/// Markdown writer can suppress this specific hint when it would merely
+/// restate the `one-sided` badge already on the card's attribute line —
+/// comparing against this const instead of a copy-pasted literal keeps
+/// the two sites from silently drifting apart.
+pub(super) const HINT_ONE_SIDED: &str = "one-sided — you follow, no reciprocation";
+
 /// One-line characterization of an account's "shape" — what kind of
 /// follow it is and why it landed in the bucket. Lives at the output
 /// module level so the Markdown and HTML writers share the same
@@ -114,7 +121,7 @@ pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str
         return "long-standing mutual follow";
     }
     if !f.is_mutual {
-        return "one-sided — you follow, no reciprocation";
+        return HINT_ONE_SIDED;
     }
     if matches!(f.account_class, AccountClass::Brand) {
         return "brand follow — review intent";

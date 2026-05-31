@@ -607,20 +607,25 @@ fn writes_csv_and_markdown_at_out_path() {
     // HTML self-contained: doctype, three bucket sections, at least
     // one canonical profile link, and the embedded script/style blocks.
     assert!(html.starts_with("<!DOCTYPE html>"));
-    assert!(html.contains("Unfollow <span class=\"count\">"));
-    assert!(html.contains("Review <span class=\"count\">"));
-    assert!(html.contains("Keep <span class=\"count\">"));
+    assert!(html.contains("data-bucket=\"unfollow\""));
+    assert!(html.contains("data-bucket=\"review\""));
+    assert!(html.contains("data-bucket=\"keep\""));
     assert!(html.contains("href=\"https://www.instagram.com/"));
     assert!(html.contains("<style>") && html.contains("<script>"));
+    // The triage feature: per-row keep/drop toggles + the client-side
+    // selection store the export bar reads from.
+    assert!(html.contains("data-toggle=\"keep\""));
+    assert!(html.contains("data-toggle=\"drop\""));
+    assert!(html.contains("igsift.triage.v1"));
 
     // CSV header must match DESIGN.md verbatim — this is the diff contract.
     let header = csv.lines().next().expect("CSV has at least one line");
     assert_eq!(
         header,
-        "username,display_name,profile_url,bucket,keep_prob,dm_msgs,last_dm_days,\
+        "username,display_name,profile_url,bucket,keep_score,dm_msgs,last_dm_days,\
          reactions_given_180d,reactions_received_180d,\
          likes_given_90d,comments_given_90d,follow_tenure_days,\
-         account_class,mutual,notes",
+         account_class,mutual,top_signal",
     );
     // 1 header + 4 rows (fixture has 4 followings: alice/bob/carol_synth
     // + nytimes_official as the brand-gate test case).
@@ -660,11 +665,11 @@ fn writes_csv_and_markdown_at_out_path() {
         "bob_synth must be mutual=false: {bob_row}",
     );
 
-    // Markdown self-documents the run.
-    assert!(md.contains("# igsift following audit"));
-    assert!(md.contains("Accounts scored: **4**"));
-    assert!(md.contains("Keep: **3**"));
-    assert!(md.contains("Review: **1**"));
+    // Markdown self-documents the run. (Per-bucket count formatting is
+    // pinned precisely by the markdown.rs unit tests; here we just confirm
+    // the H1 + the run-scale headline survive the wire-through.)
+    assert!(md.contains("# Instagram following audit"));
+    assert!(md.contains("**4 accounts scored**"));
     // `carol_synth` has a `display_name` populated via the NameResolver
     // reverse map (she appears in `favorited` with Name "Carol Synth").
     // The Markdown writer surfaces that — pinning it here means a
