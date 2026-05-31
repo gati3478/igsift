@@ -31,6 +31,7 @@ pub mod lists;
 pub mod output;
 pub mod progress;
 pub mod scoring;
+pub mod term_style;
 pub mod text;
 
 use std::path::{Path, PathBuf};
