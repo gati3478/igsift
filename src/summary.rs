@@ -40,6 +40,10 @@ fn render_to_string(scored: &[ScoredAccount], meta: &RunMeta, caps: &Caps) -> St
     // --- Bucket panel ---
     let (keep, review, unfollow) = bucket_counts(scored);
     let max = keep.max(review).max(unfollow).max(1);
+    // Bar shrinks to fit narrow terminals (chrome around the bar is 27 cols:
+    // glyph/label/count on the left, two gutters, and ` 100.0%` on the right),
+    // capped at 26 so it doesn't sprawl on wide ones.
+    let bar_w = caps.width.saturating_sub(27).min(26);
     o.push_str("  Buckets\n");
     for (bucket, label, count) in [
         (Bucket::Keep, "keep", keep),
@@ -48,7 +52,7 @@ fn render_to_string(scored: &[ScoredAccount], meta: &RunMeta, caps: &Caps) -> St
     ] {
         let glyph = caps.paint(caps.bucket_glyph(bucket), caps.bucket_style(bucket));
         let pct = 100.0 * f64::from(count) / (meta.total.max(1) as f64);
-        let bar = caps.paint(&caps.bar(count, max, 26), caps.bucket_style(bucket));
+        let bar = caps.paint(&caps.bar(count, max, bar_w), caps.bucket_style(bucket));
         let _ = writeln!(o, "  {glyph} {label:<8} {count:>4}  {bar}  {pct:>4.1}%");
     }
     o.push('\n');
@@ -125,11 +129,14 @@ fn histogram(scored: &[ScoredAccount], caps: &Caps) -> String {
     }
     let max = counts.iter().copied().max().unwrap_or(0);
     let first = counts.iter().position(|&c| c > 0).unwrap_or(0);
+    // Chrome around the bar is 12 cols (`  0.9  ` prefix + ` 9999` suffix);
+    // shrink to fit, capped at 28.
+    let bar_w = caps.width.saturating_sub(12).min(28);
 
     let mut o = String::from("  keep_prob distribution\n");
     for (i, &c) in counts.iter().enumerate().skip(first) {
         let lo = i as f64 / 10.0;
-        let bar = caps.bar(c, max, 28);
+        let bar = caps.bar(c, max, bar_w);
         let _ = writeln!(o, "  {lo:.1}  {bar} {c:>4}");
     }
     o
@@ -183,6 +190,26 @@ mod tests {
         assert!(out.contains("Unfollow candidates"));
         assert!(out.contains("alice"));
         assert!(out.contains("carol"));
+    }
+
+    #[test]
+    fn panels_fit_within_narrow_width() {
+        // At the width floor (Caps::detect clamps to 40), every line —
+        // banner, bucket panel, histogram, stacked cards — must stay within
+        // the budget so nothing soft-wraps and garbles the dashboard.
+        let caps = Caps {
+            color: false,
+            unicode: true,
+            width: 40,
+        };
+        let out = render_to_string(&sample(), &meta(), &caps);
+        for line in out.lines() {
+            assert!(
+                line.chars().count() <= 40,
+                "line exceeds width 40 ({} cols): {line:?}",
+                line.chars().count(),
+            );
+        }
     }
 
     #[test]
