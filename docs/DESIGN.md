@@ -438,13 +438,36 @@ Option<String>` onto `AccountFeatures` from those same pairs (single
 > `display_name_for(handle)` accessor.
 
 **Secondary: Markdown summary** alongside the CSV — grouped per-bucket
-cards (Unfollow + Review) with dominant features and decision hints, plus
+cards (Unfollow + Review) with the top signal and a decision hint, plus
 top/bottom Keep tables. Built for "decide whether to open the CSV at all".
+Human-facing details that differ from the CSV's machine layer:
+
+- `keep_prob` renders as an integer percentage (`keep 87%`), not the raw
+  float — the CSV keeps the float for spreadsheet math.
+- The **Summary** block is a proportion bar (`Keep ███░░ 572 88%`); the
+  three percentages use largest-remainder rounding so they sum to exactly 100.
+- A decision hint is **suppressed** when it would only restate an attribute
+  badge already on the card — specifically the `one-sided` hint, which the
+  attribute line already shows (`HINT_ONE_SIDED` in `output/mod.rs` is the
+  shared string both the hint and the suppression check compare against).
+- Droplist-forced Unfollow rows are quarantined under a **"Forced by
+  droplist"** subhead, split from the score-sorted "Scored low" list, so a
+  hand-flagged account at `keep 100%` doesn't read as a score anomaly.
 
 **Tertiary: HTML report** alongside the CSV+MD — single self-contained
-file (inline CSS+JS, no deps, no server). Sortable + filterable
-per-bucket tables for browser-based triage. Built for the "open in a
-browser, type to filter, click to sort" workflow.
+file (inline CSS+JS, no deps, no server). Sortable + filterable per-bucket
+tables for browser-based triage; "Keep likelihood" shows the percentage
+plus a bucket-keyed bar (raw float in the cell `title`, exact float in
+`data-p` so rounding never reorders a sort). Built for the "open in a
+browser, type to filter, click to sort" workflow — plus **in-report
+triage**: each row has Keep / Drop toggles (mutually exclusive, mirroring
+`lists::ensure_disjoint`) that persist in `localStorage`; a floating bar
+then **Copies** or **Downloads** the appendable handle lists to paste into
+`config/keeplist.txt` / `config/droplist.txt`. A `file://` page can't write
+to disk, so collect-and-paste is the model — nothing leaves the browser.
+Rows are server-rendered with HTML-escaping as the security boundary; the
+JS reads handles back from `data-` attributes only to build the export
+text, never as `innerHTML`.
 
 Filenames: `following-audit_YYYY-MM-DD.{csv,md,html}`, written next to
 the input by default, overridable via `--out`.
