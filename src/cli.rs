@@ -35,6 +35,17 @@ pub enum Preset {
     Tenure,
 }
 
+/// When to emit ANSI color in the run summary.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ColorChoice {
+    /// Color when stdout is a TTY, `NO_COLOR` is unset, and `TERM != dumb`.
+    Auto,
+    /// Always emit color, even when piped (useful for `| less -R`).
+    Always,
+    /// Never emit color.
+    Never,
+}
+
 /// Score Instagram followings from a personal data export and rank who to
 /// unfollow vs. keep.
 #[derive(Debug, Parser)]
@@ -113,6 +124,11 @@ pub struct RunArgs {
     /// already-extracted directory.
     #[arg(long)]
     pub rebuild_cache: bool,
+
+    /// When to colorize the run summary. `auto` (default) enables color
+    /// only on an interactive terminal with `NO_COLOR` unset.
+    #[arg(long, value_enum, value_name = "WHEN", default_value = "auto")]
+    pub color: ColorChoice,
 }
 
 #[derive(Debug, Subcommand)]

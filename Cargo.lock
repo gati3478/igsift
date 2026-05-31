@@ -283,9 +283,11 @@ name = "igsift"
 version = "0.1.0"
 dependencies = [
  "aho-corasick",
+ "anstyle",
  "anyhow",
  "assert_cmd",
  "clap",
+ "console",
  "csv",
  "indicatif",
  "jiff",
