@@ -4,8 +4,21 @@
 //! a real terminal. The single styling site for `summary` and `labels` —
 //! they share this module so their output cannot drift apart.
 
+use crate::cli::ColorChoice;
 use crate::scoring::Bucket;
 use anstyle::{AnsiColor, Style};
+
+/// True when the active locale env vars advertise UTF-8.
+fn locale_is_utf8() -> bool {
+    ["LC_ALL", "LC_CTYPE", "LANG"].iter().any(|k| {
+        std::env::var(k)
+            .map(|v| {
+                let v = v.to_ascii_lowercase();
+                v.contains("utf-8") || v.contains("utf8")
+            })
+            .unwrap_or(false)
+    })
+}
 
 /// Rendering capabilities, resolved once at the edge from the environment
 /// and the `--color` choice.
@@ -17,6 +30,44 @@ pub struct Caps {
 }
 
 impl Caps {
+    /// Resolve capabilities once from stdout + environment + `--color`.
+    ///
+    /// - `color`: `Always` → true; `Never` → false; `Auto` → stdout is a
+    ///   TTY AND `NO_COLOR` is unset AND `TERM != "dumb"`.
+    /// - `unicode`: a UTF-8 locale is advertised (`LC_ALL`/`LC_CTYPE`/`LANG`
+    ///   contains "UTF-8"/"utf8"), or on Windows when `WT_SESSION` is set
+    ///   (Windows Terminal). Otherwise ASCII.
+    /// - `width`: terminal width via `console`, clamped to `[40, 100]`,
+    ///   defaulting to 80 when undetectable (piped / non-TTY).
+    pub fn detect(choice: ColorChoice) -> Self {
+        use std::io::IsTerminal as _;
+
+        let is_tty = std::io::stdout().is_terminal();
+        let color = match choice {
+            ColorChoice::Always => true,
+            ColorChoice::Never => false,
+            ColorChoice::Auto => {
+                is_tty
+                    && std::env::var_os("NO_COLOR").is_none()
+                    && std::env::var("TERM").map(|t| t != "dumb").unwrap_or(true)
+            }
+        };
+
+        let unicode = locale_is_utf8() || std::env::var_os("WT_SESSION").is_some();
+
+        let width = console::Term::stdout()
+            .size_checked()
+            .map(|(_h, w)| usize::from(w))
+            .unwrap_or(80)
+            .clamp(40, 100);
+
+        Self {
+            color,
+            unicode,
+            width,
+        }
+    }
+
     /// Style for a bucket's glyph + emphasis. Green/yellow/red, semantic.
     pub fn bucket_style(&self, bucket: Bucket) -> Style {
         let c = match bucket {
@@ -158,6 +209,28 @@ fn truncate_with_ellipsis(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detect_never_disables_color() {
+        let caps = Caps::detect(ColorChoice::Never);
+        assert!(!caps.color);
+    }
+
+    #[test]
+    fn detect_always_enables_color() {
+        let caps = Caps::detect(ColorChoice::Always);
+        assert!(caps.color);
+    }
+
+    #[test]
+    fn detect_width_is_sane() {
+        let caps = Caps::detect(ColorChoice::Never);
+        assert!(
+            (40..=100).contains(&caps.width),
+            "width clamped: {}",
+            caps.width
+        );
+    }
 
     #[test]
     fn glyphs_flip_with_unicode() {
