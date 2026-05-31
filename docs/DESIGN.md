@@ -317,17 +317,19 @@ One-sided-them is reciprocity in the inbound direction, not over-extension
 prevents 1-message threads with `balance = 1.0` from dominating: a fresh
 thread isn't a relationship signal yet.
 
-#### Dominant feature label (Markdown summary)
+#### Top signal label (dominant feature)
 
-The Markdown summary's "dominant feature" column is the term with the
-largest **signed** contribution to `score_raw`: positive engagement terms
-compete in their natural sign, while penalty terms enter the comparison
+The "top signal" — the `dominant_feature` on `ScoredAccount` — is the term
+with the largest **signed** contribution to `score_raw`: positive engagement
+terms compete in their natural sign, while penalty terms enter the comparison
 as **negative** of their `weight * value` product. This surfaces
 "hide_story_penalty" or "dm_balance_penalty" by name when a penalty
 dominates, rather than burying the negative driver under a smaller
 positive term. Labels match the corresponding `WeightsConfig` field
 (and `[weights]` TOML key) verbatim so a call-out traces back to one
-line of code and one line of config.
+line of code and one line of config. It is materialized into the CSV
+`top_signal` column (renamed from `notes` in the v2 header) and the
+Markdown "top signal" table column / card "Why" line.
 
 ### Buckets
 
