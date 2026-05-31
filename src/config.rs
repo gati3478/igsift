@@ -104,6 +104,24 @@ pub struct ScoringParams {
     /// relationship. `0` disables the floor. Default 730 (2 years).
     #[serde(default = "default_deep_mutual_keep_days")]
     pub deep_mutual_keep_days: u32,
+    /// Evidence guard for the effort-skew gate: the gate only acts on a
+    /// thread with at least this many owner-side (non-shadow) messages —
+    /// see [`crate::scoring`]'s `dm_out`. **`0` disables the entire gate**
+    /// (sentinel; mirrors
+    /// `deep_mutual_keep_days == 0`) — it is NOT "evidence bar of zero",
+    /// which would fire on every thread. See
+    /// `docs/specs/2026-05-31-effort-skew-gate-design.md`.
+    #[serde(default = "default_effort_skew_min_dm_out")]
+    pub effort_skew_min_dm_out: u32,
+    /// SOFT tier: an unmarked personal account scoring into Keep whose
+    /// `dm_balance` (post-dedup reply skew) is ≥ this is demoted to Review.
+    #[serde(default = "default_effort_skew_soft")]
+    pub effort_skew_soft: f64,
+    /// HARD tier: any account whose reply skew is ≥ this is demoted to
+    /// Review even with a close-friend / favorite / mutual marker (keeplist
+    /// and the restricted floor still win).
+    #[serde(default = "default_effort_skew_hard")]
+    pub effort_skew_hard: f64,
 }
 
 fn default_require_reciprocity_for_keep() -> bool {
@@ -116,6 +134,20 @@ fn default_require_reciprocity_for_keep() -> bool {
 
 fn default_deep_mutual_keep_days() -> u32 {
     730
+}
+
+fn default_effort_skew_min_dm_out() -> u32 {
+    // Disabled by default: the gate can override IG keep markers, so it must
+    // be opt-in. The owner's config/scoring.toml turns it on.
+    0
+}
+
+fn default_effort_skew_soft() -> f64 {
+    0.85
+}
+
+fn default_effort_skew_hard() -> f64 {
+    0.95
 }
 
 /// Read and parse the scoring config, following the documented resolution
@@ -240,6 +272,23 @@ fn validate(cfg: &ScoringConfig) -> Result<()> {
          otherwise the review band collapses.",
         cfg.scoring.keep_min,
         cfg.scoring.unfollow_max,
+    );
+
+    for (name, v) in [
+        ("effort_skew_soft", cfg.scoring.effort_skew_soft),
+        ("effort_skew_hard", cfg.scoring.effort_skew_hard),
+    ] {
+        ensure!(
+            (0.0..=1.0).contains(&v),
+            "scoring.{name} must lie in [0, 1] (got {v}); it is a reply-skew ratio.",
+        );
+    }
+    ensure!(
+        cfg.scoring.effort_skew_hard >= cfg.scoring.effort_skew_soft,
+        "scoring.effort_skew_hard ({}) must be >= scoring.effort_skew_soft ({}); \
+         the hard (marker-overriding) tier cannot be easier to trip than the soft tier.",
+        cfg.scoring.effort_skew_hard,
+        cfg.scoring.effort_skew_soft,
     );
 
     Ok(())
@@ -454,5 +503,40 @@ unfollow_max = 0.3
             msg.contains("keep_min"),
             "error must mention `keep_min`: {msg}",
         );
+    }
+
+    #[test]
+    fn effort_skew_defaults_to_disabled() {
+        // A config body with no effort-skew keys must parse, with the gate
+        // OFF by default (min_dm_out == 0 sentinel) so presets / binary-only
+        // installs keep current behavior.
+        let cfg = parse_str(VALID_BODY, "/synthetic.toml").expect("parses");
+        validate(&cfg).expect("validates");
+        assert_eq!(cfg.scoring.effort_skew_min_dm_out, 0);
+        assert_eq!(cfg.scoring.effort_skew_soft, 0.85);
+        assert_eq!(cfg.scoring.effort_skew_hard, 0.95);
+    }
+
+    #[test]
+    fn effort_skew_hard_below_soft_is_rejected() {
+        let body = format!(
+            "{VALID_BODY}effort_skew_min_dm_out = 8\n\
+             effort_skew_soft = 0.9\neffort_skew_hard = 0.8\n"
+        );
+        let cfg: ScoringConfig = toml::from_str(&body).expect("toml parses");
+        let err = validate(&cfg).expect_err("hard < soft must be rejected");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("effort_skew_hard") && msg.contains("effort_skew_soft"),
+            "error must reference both thresholds: {msg}",
+        );
+    }
+
+    #[test]
+    fn effort_skew_threshold_out_of_range_is_rejected() {
+        let body = format!("{VALID_BODY}effort_skew_soft = 1.5\n");
+        let cfg: ScoringConfig = toml::from_str(&body).expect("toml parses");
+        let err = validate(&cfg).expect_err("soft > 1 must be rejected");
+        assert!(format!("{err:#}").contains("effort_skew_soft"));
     }
 }

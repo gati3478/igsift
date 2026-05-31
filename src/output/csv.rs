@@ -61,10 +61,25 @@ struct CsvRow<'a> {
     /// free-form note the struct field name might imply.
     #[serde(rename = "top_signal")]
     notes: Cow<'a, str>,
+    /// Reply skew == post-dedup `dm_balance`: owner messages / total real
+    /// messages in resolved 1:1 threads. `1.0` = owner does all the talking.
+    /// Empty when there is no resolvable thread. Decision support — surfaced
+    /// on every row with a thread, not only gate-demoted ones.
+    #[serde(serialize_with = "fmt_opt_three_decimals")]
+    reply_skew: Option<f32>,
+    /// The other party's real (non-shadow) message count.
+    dm_inbound_replies: u32,
 }
 
 fn fmt_three_decimals<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&format!("{v:.3}"))
+}
+
+fn fmt_opt_three_decimals<S: Serializer>(v: &Option<f32>, s: S) -> Result<S::Ok, S::Error> {
+    match v {
+        Some(x) => s.serialize_str(&format!("{x:.3}")),
+        None => s.serialize_str(""),
+    }
 }
 
 /// Guard against CSV formula injection (CWE-1236). Excel, Google Sheets,
@@ -120,6 +135,8 @@ pub fn write_to(scored: &[ScoredAccount], writer: impl Write) -> Result<()> {
             account_class: s.features.account_class.as_str(),
             mutual: s.features.is_mutual,
             notes: sanitize_cell(s.dominant_feature),
+            reply_skew: s.features.dm_balance,
+            dm_inbound_replies: s.features.dm_inbound_replies,
         };
         wtr.serialize(&row).context("serializing CSV row")?;
     }
@@ -165,6 +182,7 @@ mod tests {
                 dm_messages_total: 0,
                 dm_recency_days: None,
                 dm_balance: None,
+                dm_inbound_replies: 0,
                 dm_reactions_given: 0,
                 dm_reactions_received: 0,
                 inbound_dm_request: false,
@@ -205,7 +223,7 @@ mod tests {
             "username,display_name,profile_url,bucket,keep_score,dm_msgs,last_dm_days,\
              reactions_given_180d,reactions_received_180d,\
              likes_given_90d,comments_given_90d,follow_tenure_days,\
-             account_class,mutual,top_signal",
+             account_class,mutual,top_signal,reply_skew,dm_inbound_replies",
             "CSV header must match DESIGN.md 'Output' section verbatim",
         );
     }

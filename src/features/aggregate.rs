@@ -58,11 +58,24 @@ use jiff::Timestamp;
 
 use crate::config::DecayConfig;
 use crate::export::{
-    CommentEntry, DmThread, FollowerEntry, FollowingEntry, MeIdentity, ShapeAEntry, ShapeCEntry,
-    owner_username,
+    CommentEntry, DmMessage, DmThread, FollowerEntry, FollowingEntry, MeIdentity, ShapeAEntry,
+    ShapeCEntry, owner_username,
 };
 use crate::features::account_class::Classifier;
 use crate::features::name_resolution::NameResolver;
+
+/// Instagram serializes a message *like* (double-tap heart) twice: in the
+/// target message's `reactions[]` AND as a standalone message with this exact
+/// content from the reactor. The reaction is the canonical record; this
+/// standalone "shadow" is a duplicate and must not count as a conversational
+/// message (it inflates `dm_messages_total` and corrupts `dm_balance`). Exact
+/// match, not substring — a real reply containing the phrase is not a shadow.
+/// Single chokepoint for the rule; a future IG variant extends here.
+const LIKE_SHADOW_CONTENT: &str = "Liked a message";
+
+fn is_like_shadow(msg: &DmMessage) -> bool {
+    msg.content.as_deref() == Some(LIKE_SHADOW_CONTENT)
+}
 
 /// Account class — DESIGN.md gates the `Unfollow` bucket on
 /// `account_class == Personal`. The brand-detection heuristic lives in
@@ -160,6 +173,13 @@ pub struct AccountFeatures {
     /// volume (`dm_messages_total`) — `Some(0.5)` over 2 greetings is
     /// not the same relationship as `Some(0.5)` over 1000 messages.
     pub dm_balance: Option<f32>,
+    /// The other party's **real** messages in resolved 1:1 threads —
+    /// `dm_messages_total` minus the owner's outbound and minus the
+    /// "Liked a message" reaction-shadows (see `LIKE_SHADOW_CONTENT`).
+    /// Separates "they reply" from "they tap a heart": a thread whose entire
+    /// inbound is taps has `dm_inbound_replies == 0`. Feeds the effort-skew
+    /// gate's evidence/skew computation in [`crate::scoring`].
+    pub dm_inbound_replies: u32,
     pub dm_reactions_given: u32,
     pub dm_reactions_received: u32,
     pub inbound_dm_request: bool,
@@ -304,6 +324,7 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
             dm_messages_total: 0,
             dm_recency_days: None,
             dm_balance: None,
+            dm_inbound_replies: 0,
             dm_reactions_given: 0,
             dm_reactions_received: 0,
             inbound_dm_request: false,
@@ -517,29 +538,11 @@ fn walk_inbox_thread(
     tau_dm: u32,
 ) {
     for msg in &thread.messages {
-        // Reactions don't carry their own timestamps in the export — the
-        // parent message's timestamp drives both the decay weight and the
-        // 180d window predicate. A reaction is approximately contemporaneous
-        // with the message it's on, so the message's decay weight is reused
-        // for the message total AND every reaction on it (one `exp()` per
-        // message, not one per message plus one per reaction-loop entry).
+        // Reactions don't carry their own timestamps — the parent message's
+        // timestamp drives both decay and the 180d window. reactions[] is the
+        // canonical like record and is processed for EVERY message, including
+        // the shadow we drop below, so a like is never lost.
         let decayed = decay_weight(msg.timestamp, now, tau_dm);
-        features.dm_messages_total += 1;
-        features.dm_messages_total_decayed += decayed;
-
-        match msg.sender.as_deref() {
-            Some(s) if s == me_name => acc.outbound += 1,
-            Some(_) => acc.inbound += 1,
-            None => {}
-        }
-
-        if let Some(ts) = msg.timestamp {
-            acc.latest = Some(match acc.latest {
-                Some(prev) if prev >= ts => prev,
-                _ => ts,
-            });
-        }
-
         let in_180d = within_window(msg.timestamp, now, 180);
         for r in &msg.reactions {
             match r.actor.as_deref() {
@@ -559,6 +562,30 @@ fn walk_inbox_thread(
                 }
                 None => {}
             }
+        }
+
+        // "Liked a message" is the duplicate shadow of a reaction already
+        // counted above — exclude it from message volume, balance, recency,
+        // and the real-reply count. See LIKE_SHADOW_CONTENT.
+        if is_like_shadow(msg) {
+            continue;
+        }
+
+        features.dm_messages_total += 1;
+        features.dm_messages_total_decayed += decayed;
+        match msg.sender.as_deref() {
+            Some(s) if s == me_name => acc.outbound += 1,
+            Some(_) => {
+                acc.inbound += 1;
+                features.dm_inbound_replies += 1;
+            }
+            None => {}
+        }
+        if let Some(ts) = msg.timestamp {
+            acc.latest = Some(match acc.latest {
+                Some(prev) if prev >= ts => prev,
+                _ => ts,
+            });
         }
     }
 }
@@ -689,6 +716,7 @@ pub(crate) fn fake_features(username: &str) -> AccountFeatures {
         dm_messages_total: 0,
         dm_recency_days: None,
         dm_balance: None,
+        dm_inbound_replies: 0,
         dm_reactions_given: 0,
         dm_reactions_received: 0,
         inbound_dm_request: false,
@@ -1917,6 +1945,59 @@ mod tests {
         let alice = &by_username(aggregate(&inputs, now))["alice"];
         assert!(!alice.is_mutual);
         assert_eq!(alice.mutual_age_days, None);
+    }
+
+    #[test]
+    fn like_shadows_excluded_from_volume_and_balance() {
+        use crate::export::{DmMessage, DmReaction, DmThread};
+        let me = "Me";
+        // Owner sends 3 real messages; the other party sends 1 real reply
+        // and "likes" 2 of the owner's messages. IG serializes each like
+        // BOTH as a reaction on the owner's message AND as a standalone
+        // "Liked a message" from the other party. Post-dedup we want:
+        //   dm_messages_total   = 4 (3 owner + 1 real reply; shadows dropped)
+        //   dm_inbound_replies  = 1 (the real reply only)
+        //   dm_reactions_received = 2 (from reactions[], still counted)
+        let msg = |sender: &str, content: &str, reactions: Vec<DmReaction>| DmMessage {
+            sender: Some(sender.to_owned()),
+            timestamp: Some(Timestamp::from_second(1_700_000_000).unwrap()),
+            content: Some(content.to_owned()),
+            reactions,
+        };
+        let heart = || DmReaction {
+            reaction: Some("❤".to_owned()),
+            actor: Some("Them".to_owned()),
+        };
+        let thread = DmThread {
+            folder: "them_1".to_owned(),
+            title: Some("Them".to_owned()),
+            participants: vec!["Them".to_owned(), me.to_owned()],
+            messages: vec![
+                msg(me, "hi", vec![heart()]),
+                msg("Them", "Liked a message", vec![]),
+                msg(me, "you there?", vec![heart()]),
+                msg("Them", "Liked a message", vec![]),
+                msg(me, "ok", vec![]),
+                msg("Them", "yes!", vec![]),
+            ],
+        };
+
+        let mut features = fake_features("them");
+        let mut acc = DmAccum::default();
+        let now = Timestamp::from_second(1_700_500_000).unwrap();
+        walk_inbox_thread(&thread, &mut features, &mut acc, me, now, 180);
+
+        assert_eq!(
+            features.dm_messages_total, 4,
+            "shadows excluded from volume"
+        );
+        assert_eq!(features.dm_inbound_replies, 1, "only the real reply counts");
+        assert_eq!(acc.outbound, 3, "owner real messages");
+        assert_eq!(acc.inbound, 1, "their real messages (shadows excluded)");
+        assert_eq!(
+            features.dm_reactions_received, 2,
+            "reactions[] still counted"
+        );
     }
 
     #[test]

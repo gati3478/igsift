@@ -450,6 +450,7 @@ mod tests {
             dm_messages_total: 0,
             dm_recency_days: None,
             dm_balance: None,
+            dm_inbound_replies: 0,
             dm_reactions_given: 0,
             dm_reactions_received: 0,
             inbound_dm_request: false,

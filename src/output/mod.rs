@@ -54,6 +54,14 @@ use crate::scoring::{Bucket, ScoredAccount};
 /// (a pinned SSOT consumed identically by the Markdown and HTML writers).
 const LONG_STANDING_MUTUAL_HINT_DAYS: u32 = 730;
 
+/// Presentation thresholds for the "owner does the talking" shape in
+/// [`decision_hint`]. Fixed shape descriptors, decoupled from the live
+/// `effort_skew_*` gate config — same rationale as
+/// [`LONG_STANDING_MUTUAL_HINT_DAYS`]: the hint is a true characterization of
+/// an owner-dominated thread whether or not the gate is enabled or retuned.
+const EFFORT_SKEW_HINT_BALANCE: f32 = 0.85;
+const EFFORT_SKEW_HINT_MIN_OUT: u32 = 8;
+
 /// The one-sided decision hint string. Surfaced as a named const so the
 /// Markdown writer can suppress this specific hint when it would merely
 /// restate the `one-sided` badge already on the card's attribute line —
@@ -100,6 +108,14 @@ pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str
     }
     if f.is_hide_story_from {
         return "story hidden — negative signal";
+    }
+    // Owner-dominated thread: the owner sustained it while the other party
+    // rarely replied (taps excluded — dm_inbound_replies counts real messages
+    // only). More informative than "active DM partner" for these.
+    if f.dm_balance.is_some_and(|b| b >= EFFORT_SKEW_HINT_BALANCE)
+        && f.dm_messages_total.saturating_sub(f.dm_inbound_replies) >= EFFORT_SKEW_HINT_MIN_OUT
+    {
+        return "you do the talking — they rarely reply";
     }
     if f.dm_messages_total_decayed > 0.0 {
         return "active DM partner";
@@ -219,6 +235,7 @@ mod tests {
             dm_messages_total: 0,
             dm_recency_days: None,
             dm_balance: None,
+            dm_inbound_replies: 0,
             dm_reactions_given: 0,
             dm_reactions_received: 0,
             inbound_dm_request: false,
@@ -332,6 +349,20 @@ mod tests {
                 mutate: |f| {
                     f.is_hide_story_from = true;
                     f.dm_messages_total_decayed = 5.0;
+                },
+                bucket: Bucket::Review,
+            },
+            Case {
+                // Effort-skew shape beats the generic "active DM partner":
+                // an owner-dominated thread (skew 0.9, my_dm_out 9) is better
+                // characterized as one-sided talking. Sits below hide_story.
+                label: "effort-skew beats active DM",
+                expected: "you do the talking — they rarely reply",
+                mutate: |f| {
+                    f.dm_balance = Some(0.9);
+                    f.dm_messages_total = 10;
+                    f.dm_inbound_replies = 1; // my_dm_out = 9 >= 8
+                    f.dm_messages_total_decayed = 5.0; // would otherwise say "active DM partner"
                 },
                 bucket: Bucket::Review,
             },
@@ -465,5 +496,24 @@ mod tests {
             decision_hint(&f, Bucket::Keep),
             "tenure-only — no engagement signal"
         );
+    }
+
+    #[test]
+    fn effort_skew_hint_needs_volume_and_skew() {
+        // Below the presentation volume floor, or below the skew floor, the
+        // arm does not fire — falls through to the active-DM arm.
+        let mut f = baseline();
+        f.dm_balance = Some(0.99);
+        f.dm_messages_total = 6;
+        f.dm_inbound_replies = 1; // my_dm_out = 5 < 8
+        f.dm_messages_total_decayed = 5.0;
+        assert_eq!(decision_hint(&f, Bucket::Keep), "active DM partner");
+
+        let mut f = baseline();
+        f.dm_balance = Some(0.5); // balanced, below skew floor
+        f.dm_messages_total = 20;
+        f.dm_inbound_replies = 10;
+        f.dm_messages_total_decayed = 5.0;
+        assert_eq!(decision_hint(&f, Bucket::Keep), "active DM partner");
     }
 }

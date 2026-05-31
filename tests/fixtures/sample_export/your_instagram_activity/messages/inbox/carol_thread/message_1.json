@@ -16,6 +16,14 @@
       "reactions": [{ "reaction": "heart", "actor": "Carol Synth" }],
       "is_geoblocked_for_viewer": false,
       "is_unsent_image_by_messenger_kid_parent": false
+    },
+    {
+      "sender_name": "Carol Synth",
+      "timestamp_ms": 1700200120000,
+      "content": "Liked a message",
+      "reactions": [],
+      "is_geoblocked_for_viewer": false,
+      "is_unsent_image_by_messenger_kid_parent": false
     }
   ],
   "title": "Carol Synth",

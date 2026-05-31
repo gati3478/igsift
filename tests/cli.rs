@@ -489,7 +489,7 @@ fn fixture_counts_match_expected() {
         .stdout(contains("following count: 4"))
         .stdout(contains("followers count: 2"))
         .stdout(contains("DM thread count: 3"))
-        .stdout(contains("total DM messages: 9"))
+        .stdout(contains("total DM messages: 10"))
         .stdout(contains("close friends count: 1"))
         .stdout(contains("favorited count: 2"))
         .stdout(contains("blocked count: 1"))
@@ -625,7 +625,7 @@ fn writes_csv_and_markdown_at_out_path() {
         "username,display_name,profile_url,bucket,keep_score,dm_msgs,last_dm_days,\
          reactions_given_180d,reactions_received_180d,\
          likes_given_90d,comments_given_90d,follow_tenure_days,\
-         account_class,mutual,top_signal",
+         account_class,mutual,top_signal,reply_skew,dm_inbound_replies",
     );
     // 1 header + 4 rows (fixture has 4 followings: alice/bob/carol_synth
     // + nytimes_official as the brand-gate test case).

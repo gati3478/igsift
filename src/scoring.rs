@@ -293,6 +293,42 @@ fn has_inbound_signal(f: &AccountFeatures) -> bool {
         || matches!(f.dm_balance, Some(b) if b < 1.0)
 }
 
+/// Owner-side message count in resolved 1:1 threads (post-dedup): every
+/// non-shadow message NOT attributed to the other party. Both
+/// `dm_messages_total` and `dm_inbound_replies` are shadow-free, so the
+/// difference is the owner's contribution PLUS any message with no
+/// classifiable sender (a rare export-drift artifact, normally zero). For the
+/// evidence guard that over-count is the conservative direction — it can only
+/// trip the volume bar slightly early, and a demotion still requires the
+/// independent `reply_skew` check, which is computed from the clean
+/// outbound/inbound split. `saturating_sub` defends against underflow.
+fn dm_out(f: &AccountFeatures) -> u32 {
+    f.dm_messages_total.saturating_sub(f.dm_inbound_replies)
+}
+
+/// The effort-skew gate only acts where IG gives bidirectional evidence: a
+/// thread the owner genuinely invested in. `min_dm_out == 0` is the disable
+/// sentinel — NOT an evidence bar of zero (which is always satisfied).
+fn effort_skew_has_evidence(f: &AccountFeatures, p: &ScoringParams) -> bool {
+    p.effort_skew_min_dm_out > 0 && dm_out(f) >= p.effort_skew_min_dm_out
+}
+
+/// Reply skew — an alias for the post-dedup `dm_balance` viewed as `f64`
+/// (owner messages / total real messages). `None` when the thread has no
+/// classifiable messages. Named at the call site so the gate reads as a skew
+/// check; the underlying value is exactly `dm_balance`.
+fn reply_skew(f: &AccountFeatures) -> Option<f64> {
+    f.dm_balance.map(f64::from)
+}
+
+/// Exemptions from the SOFT tier: the user keep-markers (`is_close_friend`,
+/// `is_favorited`) and the structural brand classification (`account_class
+/// != Personal`). `is_mutual` is deliberately excluded — a non-deep mutual
+/// who never replies in a high-volume thread is the target, not an exception.
+fn effort_skew_soft_exempt(f: &AccountFeatures) -> bool {
+    f.is_close_friend || f.is_favorited || f.account_class != AccountClass::Personal
+}
+
 fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Bucket {
     // Restricted floors the bucket at `review`, regardless of `keep_prob`
     // — DESIGN.md treats "restricted" as a manual signal that the
@@ -311,6 +347,16 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
     if f.is_droplisted {
         return Bucket::Unfollow;
     }
+    // HARD effort-skew tier: extreme owner-dominated one-sidedness overrides
+    // stale IG keep markers (close-friend / favorite / mutual) AND the
+    // deep-mutual floor below — but never keeplist (explicit intent) or the
+    // restricted floor above. Monotonic: Keep/anything → Review only.
+    if !f.is_keeplisted
+        && effort_skew_has_evidence(f, p)
+        && reply_skew(f).is_some_and(|s| s >= p.effort_skew_hard)
+    {
+        return Bucket::Review;
+    }
     // Deep-mutual keep-floor: a long reciprocal history is a real
     // relationship worth keeping even with no recent engagement. Floors to
     // Keep from any score. `deep_mutual_keep_days == 0` disables it. Sits
@@ -325,6 +371,15 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
         return Bucket::Keep;
     }
     if keep_prob >= p.keep_min {
+        // SOFT effort-skew tier: demote an UNMARKED personal Keep that scored
+        // on the owner's outbound but draws near-zero real replies back.
+        if !f.is_keeplisted
+            && !effort_skew_soft_exempt(f)
+            && effort_skew_has_evidence(f, p)
+            && reply_skew(f).is_some_and(|s| s >= p.effort_skew_soft)
+        {
+            return Bucket::Review;
+        }
         // Reciprocity keep-ceiling: refuse to auto-keep a personal account
         // whose entire relationship is one-directional consumption (you
         // follow them, they don't follow back, never messaged or reacted to
@@ -391,6 +446,7 @@ mod tests {
             dm_messages_total: 0,
             dm_recency_days: None,
             dm_balance: None,
+            dm_inbound_replies: 0,
             dm_reactions_given: 0,
             dm_reactions_received: 0,
             inbound_dm_request: false,
@@ -440,6 +496,9 @@ mod tests {
                 unfollow_max: 0.3,
                 require_reciprocity_for_keep: true,
                 deep_mutual_keep_days: 730,
+                effort_skew_min_dm_out: 0,
+                effort_skew_soft: 0.85,
+                effort_skew_hard: 0.95,
             },
         }
     }
@@ -1083,5 +1142,194 @@ mod tests {
         acct.is_restricted = true;
         let scored = score(std::slice::from_ref(&acct), &cfg);
         assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    // ── effort-skew gate (Rule 3) ─────────────────────────────────────────
+    //
+    // Two-tier monotonic gate: when the owner sent many more messages than
+    // they received replies, a high-scoring Keep is demoted to Review.
+    // SOFT tier (>= soft, < hard): exempt IG keep markers (close_friend,
+    // favorited, non-Personal). HARD tier (>= hard): overrides those
+    // markers. Neither tier yields Unfollow; keeplist is never overridden.
+    // Evidence guard (min_dm_out > 0) prevents firing on thin threads;
+    // min_dm_out == 0 disables the gate entirely.
+
+    /// A Keep-scoring account with a high-volume, owner-dominated DM thread:
+    /// 10 owner messages, 1 real reply → reply_skew (dm_balance) per `balance`,
+    /// my_dm_out = 9. Scores into Keep on outbound likes.
+    fn skewed_keeper(handle: &str, balance: f32) -> AccountFeatures {
+        let mut a = baseline_account(handle);
+        a.likes_given_decayed = 5.0; // keep_prob ≈ 0.97
+        a.dm_messages_total = 10;
+        a.dm_inbound_replies = 1; // my_dm_out = 10 - 1 = 9
+        a.dm_balance = Some(balance);
+        a
+    }
+
+    fn skew_cfg() -> ScoringConfig {
+        let mut cfg = baseline_cfg();
+        cfg.scoring.effort_skew_min_dm_out = 8;
+        cfg.scoring.effort_skew_soft = 0.85;
+        cfg.scoring.effort_skew_hard = 0.95;
+        cfg
+    }
+
+    #[test]
+    fn soft_tier_demotes_unmarked_skewed_keeper() {
+        let cfg = skew_cfg();
+        let acct = skewed_keeper("talker", 0.90); // soft ≤ 0.90 < hard
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(
+            scored[0].keep_prob >= cfg.scoring.keep_min,
+            "scores into Keep first"
+        );
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn soft_tier_respects_close_friend() {
+        let cfg = skew_cfg();
+        let mut acct = skewed_keeper("bff", 0.90);
+        acct.is_close_friend = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(
+            scored[0].bucket,
+            Bucket::Keep,
+            "soft_exempt: close friend stays Keep"
+        );
+    }
+
+    #[test]
+    fn soft_tier_demotes_non_deep_mutual() {
+        // Mutual is NOT in soft_exempt — a follow-back who never replies in a
+        // high-volume thread is the target. (Not deep: mutual_age stays None.)
+        let cfg = skew_cfg();
+        let mut acct = skewed_keeper("mutual_ghost", 0.90);
+        acct.is_mutual = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn hard_tier_demotes_close_friend() {
+        let cfg = skew_cfg();
+        let mut acct = skewed_keeper("ghost_bff", 0.97); // ≥ hard
+        acct.is_close_friend = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(
+            scored[0].bucket,
+            Bucket::Review,
+            "hard tier overrides close friend"
+        );
+    }
+
+    #[test]
+    fn hard_tier_beats_deep_mutual_floor() {
+        let cfg = skew_cfg();
+        let mut acct = skewed_keeper("old_ghost", 0.97);
+        acct.is_mutual = true;
+        acct.mutual_age_days = Some(3000); // would floor to Keep at rung 4
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(
+            scored[0].bucket,
+            Bucket::Review,
+            "hard tier sits above deep-mutual floor"
+        );
+    }
+
+    #[test]
+    fn keeplist_survives_both_tiers() {
+        let cfg = skew_cfg();
+        let mut acct = skewed_keeper("kept", 0.99);
+        acct.is_keeplisted = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(
+            scored[0].bucket,
+            Bucket::Keep,
+            "keeplist is explicit intent, never overridden by skew"
+        );
+    }
+
+    #[test]
+    fn evidence_guard_blocks_thin_thread() {
+        // reply_skew is extreme but my_dm_out (5) is below min_dm_out (8):
+        // no evidence → no demotion.
+        let cfg = skew_cfg();
+        let mut acct = baseline_account("thin");
+        acct.likes_given_decayed = 5.0;
+        acct.dm_messages_total = 6;
+        acct.dm_inbound_replies = 1; // my_dm_out = 5 < 8
+        acct.dm_balance = Some(0.99);
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(
+            scored[0].bucket,
+            Bucket::Keep,
+            "below evidence bar → gate cannot fire"
+        );
+    }
+
+    #[test]
+    fn gate_disabled_when_min_is_zero() {
+        // The sentinel: min_dm_out == 0 must NOT fire the gate on every thread.
+        let cfg = baseline_cfg(); // effort_skew_min_dm_out = 0
+        let acct = skewed_keeper("loud", 0.99);
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(
+            scored[0].bucket,
+            Bucket::Keep,
+            "min_dm_out=0 disables the gate"
+        );
+    }
+
+    #[test]
+    fn gate_never_yields_unfollow() {
+        // Monotonicity: a LOW-scoring unmarked personal account (keep_prob
+        // below unfollow_max → would be Unfollow) that is also high-skew with
+        // evidence is intercepted by the HARD tier ABOVE the unfollow branch
+        // and lands in Review — the gate never *produces* Unfollow.
+        let cfg = skew_cfg();
+        let mut acct = baseline_account("loud_lowscore");
+        acct.is_hide_story_from = true; // score_raw -2.0 → keep_prob ≈ 0.12 < unfollow_max
+        acct.dm_messages_total = 10;
+        acct.dm_inbound_replies = 1; // my_dm_out = 9 ≥ 8 (evidence)
+        acct.dm_balance = Some(0.99); // ≥ effort_skew_hard
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(
+            scored[0].keep_prob < cfg.scoring.unfollow_max,
+            "must score into the Unfollow range without the gate: {}",
+            scored[0].keep_prob,
+        );
+        assert_eq!(
+            scored[0].bucket,
+            Bucket::Review,
+            "gate yields Review, never Unfollow"
+        );
+
+        // Control: identical account, gate disabled → reaches its natural
+        // Unfollow. Proves the gate caused the Review above (didn't coincide)
+        // and confirms the gate is what stands between this account and Unfollow.
+        let off = baseline_cfg(); // effort_skew_min_dm_out = 0 (gate off), same threshold
+        let scored_off = score(std::slice::from_ref(&acct), &off);
+        assert_eq!(
+            scored_off[0].bucket,
+            Bucket::Unfollow,
+            "gate off → natural Unfollow"
+        );
+    }
+
+    #[test]
+    fn soft_tier_boundary_is_inclusive() {
+        // 0.5 is exactly representable in both f32 and f64, so
+        // f64::from(dm_balance) == effort_skew_soft holds precisely — this
+        // pins the `>=` boundary at true equality, not soft+ε from an f32 cast.
+        let mut cfg = skew_cfg();
+        cfg.scoring.effort_skew_soft = 0.5;
+        let acct = skewed_keeper("edge", 0.5); // skew 0.5 == soft, < hard (no HARD fire)
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(
+            scored[0].bucket,
+            Bucket::Review,
+            "reply_skew == soft must demote (>=)"
+        );
     }
 }

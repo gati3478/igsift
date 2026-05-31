@@ -10,6 +10,64 @@ The methodology choice for this pass was the **hybrid** in DESIGN.md's
 with `config/labels.txt` (when laid down) serving as a held-out accuracy
 floor. The labels file is not committed — it's a per-user artifact.
 
+## 2026-06-01 — effort-skew gate shipped (round 9, structural)
+
+Not a TOML weights edit — a new monotonic gate and its three config knobs
+(`effort_skew_min_dm_out`, `effort_skew_soft`, `effort_skew_hard`). Like
+the round-6 reciprocity gates entry, it shifts the bucket distribution on
+the real export and the design rationale belongs here.
+
+### What changed
+
+The gate ships **DISABLED** in all three presets (`balanced` / `engagement` /
+`tenure`) via the `serde` default `effort_skew_min_dm_out = 0` — a
+zero evidence bar disables both tiers. It is **ENABLED** in the owner's
+`config/scoring.toml` at:
+
+```toml
+effort_skew_min_dm_out = 6     # owner real messages required as evidence
+effort_skew_soft = 0.80        # unmarked personal Keep -> Review at this skew
+effort_skew_hard = 0.85        # overrides close-friend/favorite/mutual at this skew
+```
+
+The `reply_skew` and `dm_inbound_replies` columns (emitted in the CSV since
+the output v2 header) are the per-row evidence surface for manual review.
+
+### Calibration finding (same-day labeled pass)
+
+Initial guess was `min=8 / soft=0.85 / hard=0.95`; against the real export
+that demoted **0 accounts** — the thresholds didn't bind. The reason is
+specific to this following style: the owner's skewed-but-kept accounts are
+**all close friends**, so the SOFT tier (which exempts markers) is **inert at
+any threshold down to 0.70**, and HARD at 0.95 was above the actual skew
+cluster. The over-messaged accounts sit tightly at `reply_skew ≈ 0.857`
+(owner sent 6–12 real messages, got 1 reply back).
+
+Tuned to `min=6 / soft=0.80 / hard=0.85` — HARD just below the 0.857 cluster
+does the work; SOFT stays a dormant safety net for any future unmarked case.
+This surfaces **3 close-friend, owner-over-messaged accounts** (Keep → Review),
+moving the split to keep 569 / review 43 / unfollow 37 with **0 hard
+mismatches** vs `labels.txt` (agreement steady at 79.3%). The gate fires only
+where the export shows both sides of a 1:1 thread and the owner sent far more
+than they received; off-platform relationships (no DM evidence) are untouched.
+
+### Monotonic safety
+
+Both tiers (SOFT and HARD) are Keep → Review only; neither manufactures an
+Unfollow. The HARD tier overrides close-friend / favorite / mutual + the
+deep-mutual floor — it is the strongest demotion path in the precedence
+chain after `is_droplisted`, but its evidence guard (`min_dm_out`) means
+it only fires for threads where the export actually shows the owner's
+investment.
+
+### Why gates, not weights
+
+Same reasoning as round 6: a weight tuned to the labeled set inherits its
+noise; a monotonic gate encodes a one-sentence principle whose correctness
+does not depend on the calibration labels being clean. See
+[`docs/specs/2026-05-31-effort-skew-gate-design.md`](specs/2026-05-31-effort-skew-gate-design.md)
+for full design rationale.
+
 ## 2026-05-30 — decay sensitivity: `tau_content_days` 365 → 730 (round 8)
 
 First decay-constant edit (the τ defaults had been first-pass guesses since the

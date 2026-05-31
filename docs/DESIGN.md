@@ -351,12 +351,15 @@ lists bracket the inferred score:
 ```
 1. is_restricted        → Review     hard floor; the manual "look first" signal
 2. is_droplisted       → Unfollow   config/droplist.txt — forces drop
-3. deep-mutual floor    → Keep        mutual & mutual_age_days ≥ deep_mutual_keep_days
-4. keep_prob ≥ keep_min → Keep        …unless the reciprocity gate fires → Review
-5. keep_prob < unfollow_max:
+3. effort-skew HARD     → Review     !keeplisted & DM evidence & reply_skew ≥ effort_skew_hard
+                                      — overrides close-friend / favorite / mutual + the deep-mutual floor
+4. deep-mutual floor    → Keep        mutual & mutual_age_days ≥ deep_mutual_keep_days
+5. keep_prob ≥ keep_min → Keep        …unless effort-skew SOFT (unmarked & DM evidence &
+                                      reply_skew ≥ effort_skew_soft) or the reciprocity gate fires → Review
+6. keep_prob < unfollow_max:
      is_close_friend | is_favorited | is_keeplisted | non-Personal → Review
      else → Unfollow
-6. otherwise            → Review
+7. otherwise            → Review
 ```
 
 `is_restricted` floors at `review` even when `keep_prob` is below
@@ -368,24 +371,33 @@ the keeplist: a listed handle is forced to `unfollow` regardless of
 score, close-friend/favorited boosts, or brand class. A handle present in
 **both** lists is a contradiction and is rejected at load
 (`lists::ensure_disjoint`) before scoring, so rung 2 never competes with
-rung 5's keeplist gate by construction.
+rung 6's keeplist gate by construction.
 
-**Two relationship gates bracket the score (rungs 3–4), both monotonic — each
+The **effort-skew gate** (rungs 3 + 5) is evidence-guarded: both tiers only act
+inside a 1:1 DM thread the owner invested in (`my_dm_out ≥ effort_skew_min_dm_out`,
+where `my_dm_out` = post-dedup outbound messages). `effort_skew_min_dm_out = 0`
+disables it. It is monotonic (Keep → Review only, never Unfollow) and is the
+evidence-based successor to the `require_reciprocity_for_keep` ceiling — acting
+only where Instagram actually exports both sides of the conversation, so it never
+touches relationships that live off-platform. Full design:
+[`docs/specs/2026-05-31-effort-skew-gate-design.md`](specs/2026-05-31-effort-skew-gate-design.md).
+
+**Two relationship gates bracket the score (rungs 4–5), both monotonic — each
 can only move an account one direction, so neither can manufacture a wrongful
 `unfollow`.** They encode the core principle that _keep = relationship, not
 consumption_:
 
-- **Deep-mutual keep-floor** (rung 3, `deep_mutual_keep_days`, default 730):
+- **Deep-mutual keep-floor** (rung 4, `deep_mutual_keep_days`, default 730):
   a mutual account whose **reciprocal age** (`mutual_age_days` — days since the
   later of {you followed them, they followed you back}) is ≥ the threshold
   floors to `keep`. A long two-way history is a real relationship worth keeping
   even with no recent engagement. Only moves up to `keep`; `0` disables it.
-- **Reciprocity keep-ceiling** (rung 4, `require_reciprocity_for_keep`, default
+- **Reciprocity keep-ceiling** (rung 5, `require_reciprocity_for_keep`, default
   **off** — opt-in): when enabled, an account that scored into `keep` is
   demoted to `review` when its _entire_ relationship is one-directional
   consumption — `account_class == Personal`, not mutual, no inbound signal
   (`inbound_dm_request`, `dm_reactions_received`, or a two-way DM thread), and
-  no explicit keep override. The exact mirror of rung 5's brand/favorite
+  no explicit keep override. The exact mirror of rung 6's brand/favorite
   `unfollow` gate; only moves down to `review`. **Off by default**: the only
   labeled data to date (docs/TUNING.md round 7) showed it demotes
   deliberately-curated one-way creator/brand follows, halving agreement. It
@@ -402,7 +414,7 @@ labels being clean. See [`docs/specs/2026-05-30-reciprocity-aware-scoring.md`](s
 **Primary: CSV** — sortable, filterable, easy to diff between runs.
 
 ```
-username,display_name,profile_url,bucket,keep_score,dm_msgs,last_dm_days,reactions_given_180d,reactions_received_180d,likes_given_90d,comments_given_90d,follow_tenure_days,account_class,mutual,top_signal
+username,display_name,profile_url,bucket,keep_score,dm_msgs,last_dm_days,reactions_given_180d,reactions_received_180d,likes_given_90d,comments_given_90d,follow_tenure_days,account_class,mutual,top_signal,reply_skew,dm_inbound_replies
 ```
 
 `keep_score` is the `keep_prob` sigmoid output (§ Scoring), kept as a raw
@@ -421,6 +433,12 @@ ASCII-restricted by Instagram, so no URL encoding is needed.
 `followers_*.json`). Decision support only — scoring intentionally
 does not penalize one-sided follows (see `one_sided_them_is_not_a_penalty`
 in scoring tests).
+
+`reply_skew` is the post-dedup `dm_balance` (owner messages ÷ total real
+messages in resolved 1:1 DM threads); `1.0` means the owner does all the
+talking. `dm_inbound_replies` is the other party's real message count, taps
+("Liked a message") excluded. Both are decision support for the effort-skew
+gate and appear on every row with a resolvable thread.
 
 > **Two aggregations — don't conflate them.** `keep_prob` is computed from
 > exponential-decay-weighted signals (continuous τ). The `*_90d` / `*_180d`
