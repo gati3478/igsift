@@ -152,12 +152,11 @@ commit/push; CI runs them as the authoritative gate. See
 ## Tech stack
 
 Rust (edition 2024) — a single self-contained binary (Linux builds are fully
-static via musl), no async, network, or database. `clap`, `serde` / `serde_json`
-
-- `serde_path_to_error` (drift-tolerant parsing), `toml`, `jiff`, `aho-corasick`,
-  `zip`, `indicatif`, `csv`, `tracing`, `anyhow`. The HTML report is hand-rolled
-  markup — no template engine. Full rationale and the
-  deliberately-not-used list are in [`docs/DESIGN.md`](docs/DESIGN.md).
+static via musl), no async, network, or database. `clap`, `serde` / `serde_json`,
+`serde_path_to_error` (drift-tolerant parsing), `toml`, `jiff`, `aho-corasick`,
+`zip`, `indicatif`, `csv`, `tracing`, `anyhow`. The HTML report is hand-rolled
+markup — no template engine. Full rationale and the deliberately-not-used list
+are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Non-goals
 

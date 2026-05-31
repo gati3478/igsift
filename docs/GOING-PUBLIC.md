@@ -14,6 +14,10 @@ recorded for auditability.
 > Verified: `gh api .../git/blobs/08d58c4c…` returns **404**, and
 > `git ls-remote origin` shows only `refs/heads/main` — no `dependabot/*`, no
 > `refs/pull/*`. The blob is gone from the remote.
+>
+> _(Update: Dependabot PRs #1–3 opened after the recreation re-introduce
+> `refs/pull/{1,2,3}/*`. Those branches were cut from the clean recreated
+> `main`, so they never reach the blob — the 404 above still holds.)_
 
 A real audit report (`following-audit_2026-05-27.html`, ~643 real handles + the
 maintainer's keep/drop intent, blob `08d58c4`) was accidentally committed in
