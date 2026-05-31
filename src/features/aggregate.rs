@@ -660,6 +660,53 @@ fn shape_c_timestamp(entry: &ShapeCEntry) -> Option<Timestamp> {
     entry.timestamp.and_then(|s| Timestamp::from_second(s).ok())
 }
 
+/// Construct an [`AccountFeatures`] with all fields zeroed/false/None
+/// and only `username` set. Used by sibling test modules so every test
+/// builds the same zeroed base and overrides only what it cares about.
+#[cfg(test)]
+pub(crate) fn fake_features(username: &str) -> AccountFeatures {
+    AccountFeatures {
+        username: username.to_owned(),
+        display_name: None,
+        account_class: AccountClass::Personal,
+        follow_tenure_days: None,
+        mutual_age_days: None,
+        is_close_friend: false,
+        is_favorited: false,
+        is_blocked: false,
+        is_restricted: false,
+        is_hide_story_from: false,
+        is_removed_suggestion: false,
+        recently_unfollowed: false,
+        is_mutual: false,
+        is_keeplisted: false,
+        is_droplisted: false,
+        likes_given: 0,
+        comments_given: 0,
+        story_interactions_out: 0,
+        stories_viewed: 0,
+        saved_their_content: 0,
+        dm_messages_total: 0,
+        dm_recency_days: None,
+        dm_balance: None,
+        dm_reactions_given: 0,
+        dm_reactions_received: 0,
+        inbound_dm_request: false,
+        likes_given_decayed: 0.0,
+        comments_given_decayed: 0.0,
+        story_interactions_out_decayed: 0.0,
+        stories_viewed_decayed: 0.0,
+        saved_their_content_decayed: 0.0,
+        dm_messages_total_decayed: 0.0,
+        dm_reactions_given_decayed: 0.0,
+        dm_reactions_received_decayed: 0.0,
+        likes_given_90d: 0,
+        comments_given_90d: 0,
+        dm_reactions_given_180d: 0,
+        dm_reactions_received_180d: 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Structural tests on synthetic parser outputs — no fixture I/O.

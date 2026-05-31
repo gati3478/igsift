@@ -31,6 +31,7 @@ pub mod lists;
 pub mod output;
 pub mod progress;
 pub mod scoring;
+pub mod summary;
 pub mod term_style;
 pub mod text;
 
