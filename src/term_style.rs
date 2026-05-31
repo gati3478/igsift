@@ -178,7 +178,7 @@ impl Caps {
         let title_seg = format!("{h} {title} ");
         // Guard: clamp to `inner` so an overlong title never widens the top border.
         let title_seg = if title_seg.chars().count() > inner {
-            truncate_with_ellipsis(&title_seg, inner)
+            truncate_with_ellipsis(&title_seg, inner, self.unicode)
         } else {
             title_seg
         };
@@ -192,7 +192,7 @@ impl Caps {
         // the two side borders; we subtract the leading space).
         let body_width = inner.saturating_sub(1); // space before body is fixed
         for line in lines {
-            let body = truncate_with_ellipsis(line, body_width);
+            let body = truncate_with_ellipsis(line, body_width, self.unicode);
             let body_len = body.chars().count();
             let pad = body_width.saturating_sub(body_len);
             rows.push(format!("{v} {body}{}{v}", " ".repeat(pad)));
@@ -204,16 +204,20 @@ impl Caps {
     }
 }
 
-/// Truncate `s` to at most `max` columns, appending `…` when cut.
-fn truncate_with_ellipsis(s: &str, max: usize) -> String {
+/// Truncate `s` to at most `max` columns, appending an ellipsis marker
+/// when cut (`…` under unicode, `...` under ASCII).
+fn truncate_with_ellipsis(s: &str, max: usize, unicode: bool) -> String {
     if s.chars().count() <= max {
         return s.to_owned();
     }
-    if max == 0 {
-        return String::new();
+    let marker = if unicode { "…" } else { "..." };
+    let marker_len = marker.chars().count(); // 1 or 3
+    if max <= marker_len {
+        // No room for content; emit as much of the marker as fits.
+        return marker.chars().take(max).collect();
     }
-    let kept: String = s.chars().take(max.saturating_sub(1)).collect();
-    format!("{kept}…")
+    let kept: String = s.chars().take(max - marker_len).collect();
+    format!("{kept}{marker}")
 }
 
 #[cfg(test)]
@@ -361,6 +365,25 @@ mod tests {
         assert!(rows[0].starts_with('+') && rows[0].contains('-'));
         assert!(rows[2].starts_with('+'));
         assert!(rows[1].starts_with('|'));
+    }
+
+    #[test]
+    fn boxed_ascii_truncation_uses_dots_not_ellipsis() {
+        let caps = Caps {
+            color: false,
+            unicode: false,
+            width: 80,
+        };
+        let rows = caps.boxed("T", &["x".repeat(40)], 14);
+        assert!(
+            rows[1].contains("..."),
+            "ascii truncation uses '...': {:?}",
+            rows[1]
+        );
+        assert!(!rows[1].contains('…'), "no unicode ellipsis in ascii mode");
+        // all rows still equal width
+        let w = rows[0].chars().count();
+        assert!(rows.iter().all(|r| r.chars().count() == w));
     }
 
     #[test]

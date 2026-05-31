@@ -27,8 +27,9 @@ fn render_to_string(scored: &[ScoredAccount], meta: &RunMeta, caps: &Caps) -> St
     let w = caps.width;
 
     // --- Header banner ---
+    let sep = if caps.unicode { "·" } else { "-" };
     let header = format!(
-        "{} followings · {} · {}",
+        "{} followings {sep} {} {sep} {}",
         meta.total, meta.config_label, meta.date
     );
     for row in caps.boxed("igsift", &[header], w.min(64)) {
@@ -193,6 +194,23 @@ mod tests {
         };
         let out = render_to_string(&sample(), &meta(), &caps);
         assert!(!out.contains('\u{1b}'), "no ESC bytes when color off");
+    }
+
+    #[test]
+    fn ascii_header_is_pure_ascii() {
+        let caps = Caps {
+            color: false,
+            unicode: false,
+            width: 80,
+        };
+        let out = render_to_string(&sample(), &meta(), &caps);
+        // The banner line (first non-empty content) must be ASCII-only —
+        // no `·`, no box-drawing, no `…`.
+        let banner = out.lines().find(|l| l.contains("followings")).unwrap();
+        assert!(
+            banner.is_ascii(),
+            "ascii-mode banner must be pure ASCII: {banner:?}"
+        );
     }
 
     #[test]
