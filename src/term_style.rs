@@ -7,7 +7,7 @@
 use crate::cli::ColorChoice;
 use crate::scoring::Bucket;
 use anstyle::{AnsiColor, Style};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 /// True when the active locale advertises UTF-8. Honors POSIX precedence for
 /// the character-encoding category: `LC_ALL` overrides `LC_CTYPE` overrides
@@ -226,9 +226,15 @@ pub(crate) fn display_width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
 
-/// Display width of a single char in columns (0 for control/combining).
-fn char_width(ch: char) -> usize {
-    UnicodeWidthChar::width(ch).unwrap_or(0)
+/// Replace control characters (TAB, newline, ESC, …) in arbitrary display
+/// content with `?`. Such bytes are legal in Unix paths (e.g. a `--config`
+/// path), but rendered raw they break a box — a newline splits the line, a
+/// TAB jumps to a tab stop, neither matching any column count. Sanitize at the
+/// boundary so both our width math and the terminal stay honest.
+pub(crate) fn sanitize_display(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect()
 }
 
 /// Truncate `s` to at most `max` DISPLAY columns, appending an ellipsis
@@ -250,17 +256,18 @@ fn truncate_with_ellipsis(s: &str, max: usize, unicode: bool) -> String {
 }
 
 /// Greedily take whole chars from `s` until adding the next would exceed
-/// `budget` display columns. Never splits a multi-column char.
+/// `budget` display columns. Measures via [`display_width`] — the same metric
+/// `boxed` re-measures with — so the two never disagree (a per-char width
+/// table would diverge from the string-level one on control chars and
+/// grapheme clusters). Never splits a multi-column char.
 fn take_columns(s: &str, budget: usize) -> String {
-    let mut used = 0;
     let mut out = String::new();
     for ch in s.chars() {
-        let cw = char_width(ch);
-        if used + cw > budget {
+        out.push(ch);
+        if display_width(&out) > budget {
+            out.pop();
             break;
         }
-        used += cw;
-        out.push(ch);
     }
     out
 }
@@ -481,6 +488,32 @@ mod tests {
         );
         assert!(!b.contains('█'), "too small for a full block: {b:?}");
         assert_eq!(b.chars().count(), 10);
+    }
+
+    #[test]
+    fn sanitize_display_replaces_control_chars() {
+        assert_eq!(sanitize_display("a\tb\nc"), "a?b?c");
+        assert_eq!(sanitize_display("normal/path.toml"), "normal/path.toml");
+        assert_eq!(sanitize_display("配置.toml"), "配置.toml"); // non-control unicode kept
+        assert_eq!(sanitize_display("x\u{1b}[0m"), "x?[0m"); // ESC stripped
+    }
+
+    #[test]
+    fn boxed_stays_rectangular_with_control_chars() {
+        // Defense-in-depth: even if a control char reaches boxed, take_columns
+        // and the re-measure share one metric, so rows stay equal display width
+        // (content is sanitized upstream, but the primitive must not break).
+        let caps = Caps {
+            color: false,
+            unicode: true,
+            width: 80,
+        };
+        let rows = caps.boxed("T", &["aa\tbb\tcc\tdd\tee\tff\tgg\thh".to_string()], 16);
+        let widths: Vec<usize> = rows.iter().map(|r| display_width(r)).collect();
+        assert!(
+            widths.iter().all(|&w| w == 16),
+            "rows must share one display width: {widths:?}"
+        );
     }
 
     #[test]

@@ -643,7 +643,9 @@ fn config_label(args: &RunArgs) -> String {
     if let Some(p) = args.preset {
         format!("{} preset", p.name())
     } else if let Some(c) = &args.config {
-        c.display().to_string()
+        // The path is arbitrary external input; strip control chars (legal in
+        // Unix paths) so a TAB/newline can't break the header box.
+        crate::term_style::sanitize_display(&c.display().to_string())
     } else {
         "default config".to_string()
     }
