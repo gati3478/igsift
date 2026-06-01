@@ -25,7 +25,7 @@ use std::io::Write;
 use anyhow::{Context, Result};
 
 use super::csv::profile_url;
-use super::{HINT_ONE_SIDED, contributions_inline, decision_hint};
+use super::{HINT_ONE_SIDED, contributions_inline, decision_hint, is_review_inert};
 use crate::features::AccountFeatures;
 use crate::scoring::{Bucket, ScoredAccount};
 
@@ -40,6 +40,9 @@ const KEEP_EDGE_N: usize = 20;
 
 /// Width (in cells) of the ASCII proportion bars in the Summary block.
 const BAR_WIDTH: usize = 30;
+
+/// Intro line shown above any decision-difficulty-sorted Review listing.
+const SORTED_BY_DIFFICULTY: &str = "_Sorted by decision difficulty — hardest calls first._";
 
 pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> {
     let total = scored.len();
@@ -224,24 +227,85 @@ fn write_review_section(writer: &mut impl Write, scored: &[ScoredAccount]) -> Re
 
     writeln!(writer, "## Review ({})", rows.len()).context("md")?;
     writeln!(writer).context("md")?;
-    writeln!(
-        writer,
-        "_Sorted by decision difficulty — hardest calls first._"
-    )
-    .context("md")?;
-    writeln!(writer).context("md")?;
     if rows.is_empty() {
+        // No sort-intro here: "sorted by difficulty" above "_None._" reads as a
+        // sort description for zero rows. Mirrors the empty-faded subsection.
         writeln!(writer, "_None._").context("md")?;
         writeln!(writer).context("md")?;
         return Ok(());
     }
 
+    // Stable partition preserves the decision-difficulty order in `faded`.
+    let (mut inert, faded): (Vec<&ScoredAccount>, Vec<&ScoredAccount>) = rows
+        .iter()
+        .copied()
+        .partition(|s| is_review_inert(&s.features, s.bucket));
+
+    // No inert accounts → flat list, exactly as before the split.
+    if inert.is_empty() {
+        writeln!(writer, "{SORTED_BY_DIFFICULTY}").context("md")?;
+        writeln!(writer).context("md")?;
+        write_review_cards_and_tail(writer, &faded, "###")?;
+        return Ok(());
+    }
+
+    // Faded subsection — the judgment calls, full card treatment.
+    writeln!(
+        writer,
+        "### Faded — once engaged, now cold ({})",
+        faded.len()
+    )
+    .context("md")?;
+    writeln!(writer).context("md")?;
+    if faded.is_empty() {
+        writeln!(writer, "_None._").context("md")?;
+        writeln!(writer).context("md")?;
+    } else {
+        writeln!(writer, "{SORTED_BY_DIFFICULTY}").context("md")?;
+        writeln!(writer).context("md")?;
+        write_review_cards_and_tail(writer, &faded, "####")?;
+    }
+
+    // Inert subsection — zero-signal accounts, compact table to skim in bulk.
+    // Sorted keep_prob ascending (most-droppable first; Unfollow-adjacent).
+    inert.sort_by(|a, b| {
+        a.keep_prob
+            .partial_cmp(&b.keep_prob)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.features.username.cmp(&b.features.username))
+    });
+    writeln!(writer, "### Inert — never engaged ({})", inert.len()).context("md")?;
+    writeln!(writer).context("md")?;
+    writeln!(
+        writer,
+        "_Zero interaction in any direction — skim and bulk-act._"
+    )
+    .context("md")?;
+    writeln!(writer).context("md")?;
+    write_table(writer, inert.iter().copied())?;
+    writeln!(writer).context("md")?;
+    Ok(())
+}
+
+/// The Faded/flat Review rendering: top [`REVIEW_CARDS`] full cards, the
+/// remainder as a one-line table. Shared by the no-inert flat path and the
+/// Faded subsection so the card/tail split lives in one place.
+///
+/// `tail_heading` is the Markdown heading prefix for the overflow table —
+/// `"###"` on the flat (no-inert) path so it sits correctly under `## Review`,
+/// `"####"` inside the Faded subsection so it nests under `### Faded` rather
+/// than reading as a sibling of `### Inert`.
+fn write_review_cards_and_tail(
+    writer: &mut impl Write,
+    rows: &[&ScoredAccount],
+    tail_heading: &str,
+) -> Result<()> {
     let (cards, tail) = rows.split_at(rows.len().min(REVIEW_CARDS));
     for s in cards {
         write_card(writer, s)?;
     }
     if !tail.is_empty() {
-        writeln!(writer, "### Remaining {} (one-line)", tail.len()).context("md")?;
+        writeln!(writer, "{tail_heading} Remaining {} (one-line)", tail.len()).context("md")?;
         writeln!(writer).context("md")?;
         write_table(writer, tail.iter().copied())?;
         writeln!(writer).context("md")?;
@@ -492,16 +556,30 @@ mod tests {
         assert!(md.contains("## Unfollow (0)"));
         assert!(md.contains("## Review (0)"));
         assert!(md.contains("## Keep (0)"));
+        // An empty Review shows "_None._" with no sort-intro above it (a sort
+        // description for zero rows reads wrong) — mirrors the empty-faded path.
+        assert!(
+            !md.contains("Sorted by decision difficulty"),
+            "empty Review must not print the sort intro:\n{md}"
+        );
+    }
+
+    /// A Review account with real (decayed) engagement → faded, not inert.
+    fn make_faded(handle: &str, keep_prob: f64) -> ScoredAccount {
+        let mut s = make_scored(handle, keep_prob, Bucket::Review);
+        s.features.likes_given = 3;
+        s.features.likes_given_decayed = 1.0;
+        s
     }
 
     #[test]
     fn review_section_sorts_by_decision_difficulty() {
-        // Three Review accounts: 0.40 (|Δ|=0.10), 0.49 (|Δ|=0.01), 0.65 (|Δ|=0.15).
-        // Hardest first → 0.49, 0.40, 0.65.
+        // Three FADED Review accounts: 0.40 (|Δ|=0.10), 0.49 (|Δ|=0.01),
+        // 0.65 (|Δ|=0.15). Hardest first → 0.49, 0.40, 0.65.
         let scored = vec![
-            make_scored("far_high", 0.65, Bucket::Review),
-            make_scored("close", 0.49, Bucket::Review),
-            make_scored("far_low", 0.40, Bucket::Review),
+            make_faded("far_high", 0.65),
+            make_faded("close", 0.49),
+            make_faded("far_low", 0.40),
         ];
         let md = render(&scored);
         let pos_close = md.find("`@close`").expect("close present");
@@ -511,6 +589,54 @@ mod tests {
             pos_close < pos_far_low && pos_far_low < pos_far_high,
             "Review must be sorted by |p - 0.5| ascending:\n{md}",
         );
+    }
+
+    #[test]
+    fn review_splits_into_faded_and_inert_when_inert_present() {
+        // make_scored produces an inert account; make_faded adds a signal.
+        let scored = vec![
+            make_faded("faded_acct", 0.48),
+            make_scored("inert_acct", 0.30, Bucket::Review),
+        ];
+        let md = render(&scored);
+        assert!(
+            md.contains("### Faded — once engaged, now cold (1)"),
+            "faded subhead missing:\n{md}"
+        );
+        assert!(
+            md.contains("### Inert — never engaged (1)"),
+            "inert subhead missing:\n{md}"
+        );
+        // Faded precedes Inert.
+        let pos_faded = md.find("### Faded").expect("faded subhead");
+        let pos_inert = md.find("### Inert").expect("inert subhead");
+        assert!(pos_faded < pos_inert, "Faded must precede Inert:\n{md}");
+        // The faded account renders as a card (### card header); the inert
+        // account renders in the inert one-line table (not as a card).
+        // Note: cards prepend `@` to the handle, but the shared `write_table`
+        // format does not — so the table row matches `` [`inert_acct`] ``.
+        let pos_faded_card = md.find("[`@faded_acct`]").expect("faded present");
+        let pos_inert_row = md.find("`inert_acct`").expect("inert present");
+        assert!(
+            pos_faded_card < pos_inert && pos_inert < pos_inert_row,
+            "faded card above the Inert subhead, inert row below it:\n{md}"
+        );
+    }
+
+    #[test]
+    fn review_stays_flat_when_no_inert() {
+        // All Review accounts have signal → no Inert subhead, flat card list.
+        let scored = vec![make_faded("a", 0.48), make_faded("b", 0.52)];
+        let md = render(&scored);
+        assert!(
+            !md.contains("### Inert"),
+            "no inert subhead when flat:\n{md}"
+        );
+        assert!(
+            !md.contains("### Faded"),
+            "no faded subhead when flat:\n{md}"
+        );
+        assert!(md.contains("## Review (2)"), "{md}");
     }
 
     #[test]
@@ -703,5 +829,58 @@ mod tests {
             "explanatory line for the empty scored-low block: {md}",
         );
         assert!(md.contains("### Forced by droplist (2)"), "{md}");
+    }
+
+    #[test]
+    fn faded_overflow_tail_nests_under_faded_as_h4() {
+        // > REVIEW_CARDS (30) faded accounts + ≥1 inert forces the split AND the
+        // faded tail table. The tail heading must be h4 (#### Remaining) so it
+        // nests under ### Faded, not h3 (which would read as a sibling of the
+        // ### Inert subhead).
+        let mut scored: Vec<ScoredAccount> = (0..31)
+            .map(|i| make_faded(&format!("faded_{i:02}"), 0.45 + (i as f64) * 0.001))
+            .collect();
+        scored.push(make_scored("inert_acct", 0.30, Bucket::Review));
+        let md = render(&scored);
+        // Split fired.
+        assert!(
+            md.contains("### Faded — once engaged, now cold (31)"),
+            "{md}"
+        );
+        assert!(md.contains("### Inert — never engaged (1)"), "{md}");
+        // The faded tail heading is h4, nested under Faded.
+        assert!(
+            md.lines().any(|l| l.starts_with("#### Remaining ")),
+            "faded tail must be an h4 heading:\n{md}"
+        );
+        // It must NOT be an h3 sibling (an h4 line does not start with the h3 prefix).
+        assert!(
+            !md.lines().any(|l| l.starts_with("### Remaining ")),
+            "faded tail must not be an h3 sibling of Faded/Inert:\n{md}"
+        );
+    }
+
+    #[test]
+    fn review_all_inert_renders_empty_faded_subhead_without_sort_intro() {
+        // Every Review account is inert → Faded subhead renders with (0) and
+        // _None._, but NOT the "sorted by difficulty" intro (no rows to sort).
+        let scored = vec![
+            make_scored("inert_a", 0.30, Bucket::Review),
+            make_scored("inert_b", 0.35, Bucket::Review),
+        ];
+        let md = render(&scored);
+        assert!(
+            md.contains("### Faded — once engaged, now cold (0)"),
+            "empty faded subhead must still render:\n{md}"
+        );
+        assert!(
+            md.contains("### Inert — never engaged (2)"),
+            "inert subhead with count:\n{md}"
+        );
+        // The sort intro must NOT appear (it would sit under the (0) Faded subhead).
+        assert!(
+            !md.contains("Sorted by decision difficulty"),
+            "no sort intro when faded is empty:\n{md}"
+        );
     }
 }

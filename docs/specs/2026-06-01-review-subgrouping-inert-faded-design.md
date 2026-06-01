@@ -1,7 +1,7 @@
 # Review sub-grouping — inert vs faded — design
 
 **Date:** 2026-06-01
-**Status:** approved (design)
+**Status:** implemented
 **Related:** [`2026-06-01-inert-account-floor-design.md`](2026-06-01-inert-account-floor-design.md),
 [`2026-06-01-dead-mutual-review-gate-design.md`](2026-06-01-dead-mutual-review-gate-design.md)
 

@@ -199,6 +199,13 @@ pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str
     }
 }
 
+/// `true` when a Review-bucket account has no behavioural signal in any direction
+/// (the "inert" half of the inert/faded split). Wraps [`scoring::is_inert`] with a
+/// bucket gate; "faded" is the complement, so the two halves can't double-count.
+pub(super) fn is_review_inert(f: &AccountFeatures, bucket: Bucket) -> bool {
+    bucket == Bucket::Review && crate::scoring::is_inert(f)
+}
+
 /// Render the top-3 signed score contributions as an inline string —
 /// e.g. `tenure (+0.21), dm (-0.18)`. Shared by the Markdown and HTML
 /// writers (same drift-prevention rationale as [`decision_hint`]); the
@@ -301,6 +308,33 @@ mod tests {
             dm_reactions_given_180d: 0,
             dm_reactions_received_180d: 0,
         }
+    }
+
+    #[test]
+    fn is_review_inert_requires_review_bucket_and_zero_signal() {
+        // baseline() is a zero-signal mutual personal account → inert.
+        let f = baseline();
+        assert!(
+            is_review_inert(&f, Bucket::Review),
+            "zero-signal account in Review must be review-inert"
+        );
+        // Same features, wrong bucket → not review-inert (the gate is honest).
+        assert!(
+            !is_review_inert(&f, Bucket::Keep),
+            "Keep bucket must not be review-inert"
+        );
+        assert!(
+            !is_review_inert(&f, Bucket::Unfollow),
+            "Unfollow bucket must not be review-inert"
+        );
+
+        // Any single behavioural signal breaks inertness, even in Review.
+        let mut engaged = baseline();
+        engaged.likes_given = 1;
+        assert!(
+            !is_review_inert(&engaged, Bucket::Review),
+            "one like is behavioural signal → faded, not inert"
+        );
     }
 
     /// Each row builds a feature shape where TWO branches could fire

@@ -44,7 +44,7 @@ use std::io::Write;
 use anyhow::{Context, Result};
 
 use super::csv::profile_url;
-use super::{contributions_inline, decision_hint};
+use super::{contributions_inline, decision_hint, is_review_inert};
 use crate::scoring::{Bucket, ScoredAccount};
 
 /// `keep_prob ∈ [0, 1]` → integer percentage for display. Matches the
@@ -287,6 +287,20 @@ fn write_section(
         rows.len()
     )
     .context("html")?;
+    // Review-only: a one-click collapse for the zero-signal pile. The
+    // count auto-gates — is_review_inert is false outside Review, so
+    // keep/unfollow sections compute 0 and skip the toggle.
+    let inert_n = rows
+        .iter()
+        .filter(|s| is_review_inert(&s.features, s.bucket))
+        .count();
+    if inert_n > 0 {
+        writeln!(
+            writer,
+            "<label class=\"hide-inert\"><input type=\"checkbox\" data-hide-inert> Hide never-engaged ({inert_n})</label>"
+        )
+        .context("html")?;
+    }
     writeln!(writer, "</div>").context("html")?;
 
     if rows.is_empty() {
@@ -355,18 +369,20 @@ fn write_row(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
     let why = contributions_inline(s, "—");
     let hint = decision_hint(f, s.bucket);
     let p = pct(s.keep_prob);
+    let inert = is_review_inert(f, s.bucket);
 
     // data- attributes drive typed sort + the export payload. The handle
     // is HTML-escaped into the attribute; the browser un-escapes it on
     // `dataset` read, so the JS recovers the exact handle for the file.
     writeln!(
         writer,
-        "<tr data-b=\"{bucket}\" data-h=\"{h}\" data-p=\"{raw}\" data-t=\"{t}\" data-m=\"{m}\">",
+        "<tr data-b=\"{bucket}\" data-h=\"{h}\" data-p=\"{raw}\" data-t=\"{t}\" data-m=\"{m}\" data-inert=\"{i}\">",
         bucket = s.bucket.as_str(),
         h = escape(handle),
         raw = s.keep_prob,
         t = tenure.map(|d| d.to_string()).unwrap_or_default(),
         m = u8::from(mutual),
+        i = u8::from(inert),
     )
     .context("html")?;
     writeln!(
@@ -409,7 +425,16 @@ fn write_row(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
     )
     .context("html")?;
     writeln!(writer, "<td class=\"why\">{}</td>", escape(&why)).context("html")?;
-    writeln!(writer, "<td class=\"hint\">{}</td>", escape(hint)).context("html")?;
+    if inert {
+        writeln!(
+            writer,
+            "<td class=\"hint\"><span class=\"tag inert\">never engaged</span> {}</td>",
+            escape(hint)
+        )
+        .context("html")?;
+    } else {
+        writeln!(writer, "<td class=\"hint\">{}</td>", escape(hint)).context("html")?;
+    }
     writeln!(
         writer,
         "<td class=\"actions\"><span class=\"seg\" role=\"group\" aria-label=\"Triage @{h}\"><button class=\"keep\" data-toggle=\"keep\" aria-pressed=\"false\">{keep_icon}Keep</button><button class=\"drop\" data-toggle=\"drop\" aria-pressed=\"false\">{drop_icon}Drop</button></span></td>",
@@ -676,6 +701,10 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; white-space:nowr
 .tag { display:inline-flex; align-items:center; gap:4px; font-size:.75rem; padding: 1px 8px;
   border-radius: 999px; border:1px solid var(--border); color: var(--fg-2);
   background: var(--surface-2); white-space:nowrap; }
+.tag.inert { background: var(--border-soft); color: var(--muted); }
+.hide-inert { display:inline-flex; align-items:center; gap:6px; font-size:.8125rem;
+  color: var(--muted); white-space:nowrap; cursor:pointer; }
+.hide-inert input { accent-color: var(--review-line); cursor:pointer; }
 .mutual-yes { color: var(--keep-fg); border-color: var(--keep-line); background: var(--keep-bg); }
 .why { font-family: var(--mono); font-size: .75rem; color: var(--muted); white-space: nowrap; }
 .hint { color: var(--muted); max-width: 22rem; }
@@ -789,16 +818,20 @@ var sel = loadSel();
 document.querySelectorAll('section').forEach(function(sec){
   var input = sec.querySelector('input[type=search]');
   var shown = sec.querySelector('[data-shown]');
+  var hideInert = sec.querySelector('input[data-hide-inert]');
   if(!input) return;
-  input.addEventListener('input', function(){
-    var q = input.value.toLowerCase(), n = 0;
+  function apply(){
+    var q = input.value.toLowerCase(), hi = hideInert && hideInert.checked, n = 0;
     sec.querySelectorAll('tbody tr').forEach(function(tr){
-      var hit = tr.textContent.toLowerCase().indexOf(q) !== -1;
+      var hit = tr.textContent.toLowerCase().indexOf(q) !== -1
+        && !(hi && tr.dataset.inert === '1');
       tr.style.display = hit ? '' : 'none';
       if(hit) n++;
     });
     if(shown) shown.textContent = n + ' shown';
-  });
+  }
+  input.addEventListener('input', apply);
+  if(hideInert) hideInert.addEventListener('change', apply);
 });
 
 /* sort */
@@ -995,10 +1028,89 @@ mod tests {
         }
     }
 
+    /// A Review account with real engagement → faded (not inert).
+    fn faded(handle: &str, keep_prob: f64) -> ScoredAccount {
+        let mut s = baseline(handle, Bucket::Review, keep_prob);
+        s.features.likes_given = 3;
+        s.features.likes_given_decayed = 1.0;
+        s
+    }
+
     fn render(scored: &[ScoredAccount]) -> String {
         let mut buf: Vec<u8> = Vec::new();
         write_to(scored, &mut buf).expect("write");
         String::from_utf8(buf).expect("utf-8 html")
+    }
+
+    #[test]
+    fn inert_review_row_is_tagged_and_pilled() {
+        let scored = vec![
+            baseline("inert_acct", Bucket::Review, 0.30), // zero-signal → inert
+            faded("faded_acct", 0.48),
+        ];
+        let html = render(&scored);
+        // The inert row carries data-inert="1" and the muted pill.
+        assert!(
+            html.contains("data-inert=\"1\""),
+            "inert row must carry data-inert=1: {html}"
+        );
+        assert!(
+            html.contains("<span class=\"tag inert\">never engaged</span>"),
+            "inert row must show the never-engaged pill: {html}"
+        );
+        // The faded row carries data-inert="0" and no pill.
+        assert!(
+            html.contains("data-inert=\"0\""),
+            "faded row must carry data-inert=0: {html}"
+        );
+        // Exactly one pill (only the inert row).
+        assert_eq!(
+            html.matches("tag inert").count(),
+            1,
+            "exactly one never-engaged pill: {html}"
+        );
+    }
+
+    #[test]
+    fn review_with_inert_renders_hide_toggle_only_there() {
+        let scored = vec![
+            baseline("inert_acct", Bucket::Review, 0.30),
+            faded("faded_acct", 0.48),
+            baseline("keep_acct", Bucket::Keep, 0.95), // zero-signal but Keep
+        ];
+        let html = render(&scored);
+        // The checkbox renders, labelled with the inert count (1).
+        assert!(
+            html.contains("Hide never-engaged (1)"),
+            "hide toggle with count missing: {html}"
+        );
+        // The visible label appears exactly once — only the Review section
+        // renders the toggle (is_review_inert is false outside Review, so
+        // Keep/Unfollow compute 0 inert and skip it). "Hide never-engaged"
+        // does not occur in SCRIPT, so this counts only rendered checkboxes.
+        assert_eq!(
+            html.matches("Hide never-engaged").count(),
+            1,
+            "hide toggle must render in exactly one (Review) section: {html}"
+        );
+        // The composed filter predicate is wired in the script.
+        assert!(
+            SCRIPT.contains("data-hide-inert"),
+            "filter JS must read the hide-inert checkbox"
+        );
+    }
+
+    #[test]
+    fn review_without_inert_has_no_hide_toggle() {
+        let scored = vec![faded("a", 0.48), faded("b", 0.52)];
+        let html = render(&scored);
+        // No inert rows anywhere → the toggle label never renders. (SCRIPT
+        // still contains the data-hide-inert selector, so we assert on the
+        // user-visible label, which SCRIPT does not contain.)
+        assert!(
+            !html.contains("Hide never-engaged"),
+            "no hide toggle when Review has no inert rows: {html}"
+        );
     }
 
     #[test]

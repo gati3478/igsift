@@ -111,8 +111,8 @@ src/
   output/
     mod.rs                      # write() dispatcher (CSV+MD+HTML) + shared writer SSOT (decision_hint, HINT_ONE_SIDED, contributions_inline)
     csv.rs                      # CSV row writer (DESIGN.md "Output" header is the contract: keep_score, top_signal, reply_skew)
-    markdown.rs                 # decision-oriented MD: keep-% cards + proportion-bar summary + droplist quarantine
-    html.rs                     # self-contained HTML report (inline CSS+JS, no deps) + per-row keep/drop triage → localStorage → copy/paste to lists
+    markdown.rs                 # decision-oriented MD: keep-% cards + proportion-bar summary + droplist quarantine + Review faded/inert split
+    html.rs                     # self-contained HTML report (inline CSS+JS, no deps) + per-row keep/drop triage → localStorage → copy/paste to lists + Review never-engaged filter
 tests/
   cli.rs                        # binary integration tests + fixture-count assertions (locked-in)
   fixtures/sample_export/       # sanitized synthetic export

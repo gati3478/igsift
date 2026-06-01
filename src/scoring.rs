@@ -346,7 +346,7 @@ fn is_dead_mutual(f: &AccountFeatures, p: &ScoringParams) -> bool {
 /// guard would be dead weight there; and keeping the predicate class-free lets
 /// it serve as the SSOT for the deferred Review inert/faded sub-grouping, where
 /// a zero-engagement Brand parked in Review genuinely *is* inert.
-fn is_inert(f: &AccountFeatures) -> bool {
+pub(crate) fn is_inert(f: &AccountFeatures) -> bool {
     !f.is_hide_story_from
         && !f.is_removed_suggestion
         && f.likes_given == 0

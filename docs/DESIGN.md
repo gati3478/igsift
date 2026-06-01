@@ -515,6 +515,14 @@ Human-facing details that differ from the CSV's machine layer:
 - Droplist-forced Unfollow rows are quarantined under a **"Forced by
   droplist"** subhead, split from the score-sorted "Scored low" list, so a
   hand-flagged account at `keep 100%` doesn't read as a score anomaly.
+- The **Review** section splits into a **Faded — once engaged, now cold**
+  subsection (full cards, hardest-call-first) and an **Inert — never engaged**
+  subsection (compact table, skim in bulk), gated on `is_review_inert`
+  (`output/mod.rs`, reusing `scoring::is_inert`). The split fires only when at
+  least one inert account exists; an inert-free Review stays flat. The HTML
+  report carries the same split as a per-row `data-inert` flag plus a
+  "Hide never-engaged" filter toggle. The CSV is unchanged — an inert account
+  is already `bucket=review, top_signal=tenure` with a low `keep_score`.
 
 **Tertiary: HTML report** alongside the CSV+MD — single self-contained
 file (inline CSS+JS, no deps, no server). Sortable + filterable per-bucket
