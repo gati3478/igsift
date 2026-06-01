@@ -62,6 +62,14 @@ const BRAND_LEXICON: &[&str] = &[
     // Round-4 expansion, 4 chars (same 0-export-FP guard; the relaxed
     // floor is justified per-token in docs/TUNING.md).
     "zine", "shop", "cafe",
+    // Round-12 expansion (inert-floor companion, docs/TUNING.md round 12).
+    // Candidates were `design` / `studies` / `project`; the 0-FP grep dropped
+    // the first two — `design` matched a personal design-creator the owner
+    // engages with (a real FP), `studies` matched an ambiguous `name.studies`
+    // portfolio. With the inert floor live their bucketing value was already
+    // subsumed (the no-engagement brand cases floor to Review regardless), so
+    // only the verified-clean `project` ships — ≥ 4 chars, 0 export-FP.
+    "project",
 ];
 
 /// Bundle of the brand-detection automaton + the two user-maintained
@@ -251,6 +259,17 @@ mod tests {
         assert_eq!(c.classify("danarti_zine", None), AccountClass::Brand);
         assert_eq!(c.classify("blackdogshoptbilisi", None), AccountClass::Brand);
         assert_eq!(c.classify("estupendacafebar", None), AccountClass::Brand);
+    }
+
+    #[test]
+    fn round12_project_token_matches_real_handles() {
+        // Round-12 expansion (inert-floor companion). Only `project` shipped:
+        // the `design` / `studies` candidates were dropped on the 0-FP grep
+        // (design hit a personal creator; studies was ambiguous). `project`'s
+        // real-export hits are both genuine project pages, 0 false positives.
+        let c = empty();
+        assert_eq!(c.classify("projectfungus", None), AccountClass::Brand);
+        assert_eq!(c.classify("thebarewytchproject", None), AccountClass::Brand);
     }
 
     #[test]
