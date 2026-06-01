@@ -139,6 +139,16 @@ pub struct ScoringParams {
     /// personal) and never produces Unfollow.
     #[serde(default = "default_demote_nonmutual_close_ties")]
     pub demote_nonmutual_close_ties: bool,
+    /// A personal mutual younger than this many days that shows no
+    /// interaction in either direction (no DM sent or received, no inbound
+    /// reaction, ≤ 1 like/comment in 90d) is floored at `review` instead of
+    /// auto-keeping on undecayed mutual + tenure alone — a follow-back that
+    /// never became a relationship. `0` disables (sentinel; mirrors
+    /// `deep_mutual_keep_days`). Monotonic: Keep → Review only. Default 437
+    /// (≈ p25 of a content-consumer's kept-mutual tenure). See
+    /// `docs/specs/2026-06-01-dead-mutual-review-gate-design.md`.
+    #[serde(default = "default_dead_mutual_review_max_tenure_days")]
+    pub dead_mutual_review_max_tenure_days: u32,
 }
 
 fn default_require_reciprocity_for_keep() -> bool {
@@ -171,6 +181,13 @@ fn default_demote_nonmutual_close_ties() -> bool {
     // On by default — see docs/specs/2026-06-01-nonmutual-close-tie-gate-design.md.
     // High-precision (explicit marker + non-mutual + personal), Review-only.
     true
+}
+
+fn default_dead_mutual_review_max_tenure_days() -> u32 {
+    // On by default at the p25 of the owner's kept-mutual tenure — see
+    // docs/specs/2026-06-01-dead-mutual-review-gate-design.md. Review-only,
+    // zero measured labels.txt regression. 0 disables.
+    437
 }
 
 /// Read and parse the scoring config, following the documented resolution
@@ -577,6 +594,24 @@ unfollow_max = 0.3
         let cfg = parse_str(VALID_BODY, "/synthetic.toml").expect("parses");
         validate(&cfg).expect("validates");
         assert!(cfg.scoring.demote_nonmutual_close_ties);
+    }
+
+    #[test]
+    fn dead_mutual_review_max_tenure_defaults_to_437() {
+        // A config body with no `dead_mutual_review_max_tenure_days` key
+        // parses with the gate ON by default at the p25 tenure threshold —
+        // like the close-tie gate, this ships live (Review-only). Mirror of
+        // `deep_mutual_keep_days` wiring; 0 disables.
+        let cfg = parse_str(VALID_BODY, "/synthetic.toml").expect("parses");
+        validate(&cfg).expect("validates");
+        assert_eq!(cfg.scoring.dead_mutual_review_max_tenure_days, 437);
+    }
+
+    #[test]
+    fn dead_mutual_review_max_tenure_zero_disables() {
+        let body = format!("{VALID_BODY}dead_mutual_review_max_tenure_days = 0\n");
+        let cfg = parse_str(&body, "/synthetic.toml").expect("parses");
+        assert_eq!(cfg.scoring.dead_mutual_review_max_tenure_days, 0);
     }
 
     #[test]

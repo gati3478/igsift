@@ -140,10 +140,19 @@ close-tie hint does).
 - `tests/cli.rs`: re-pin fixture counts if the synthetic fixture exercises
   the gate (diagnose, don't relax, per CLAUDE.md).
 
-## Companion change (separate, scoring.toml-only)
+## Companion change — DROPPED (analysis was wrong)
 
-Lower `effort_skew_soft` 0.80 → 0.75 in `config/scoring.toml` only (presets
-ship effort-skew off). Catches a faded, outbound-skewed mutual thread
-(`reply_skew = 0.769`) that misses the current 0.80 bar by 0.031; +2
-accounts on the owner export, 0 label regressions. Not part of the gate;
-bundled because it closes the second account from the same triage pass.
+The original plan lowered `effort_skew_soft` 0.80 → 0.75 to catch a faded,
+outbound-skewed mutual (`reply_skew = 0.769`). **This does not work:** that
+account is in `close_friends.json`, and the effort-skew **SOFT** tier
+_exempts_ markers (`effort_skew_soft_exempt` returns true for
+`is_close_friend`). Only the **HARD** tier overrides markers, and `0.769 <
+hard (0.85)`. The earlier "+2, 0 regressions" measurement counted by
+`reply_skew` alone without the marker exemption, so it was incorrect.
+
+Catching that account via effort-skew would require lowering **HARD** to
+≤ 0.769 — a global change that overrides _every_ marker/mutual in
+`[0.75, 0.85)`, not a surgical tweak. Deferred to a separate decision with
+its own blast-radius measurement; not bundled with this gate. The account is
+a close-friend mutual with a real (if faded) DM history, so it is **not** a
+dead mutual and this gate does not touch it.

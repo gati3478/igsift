@@ -62,6 +62,13 @@ const LONG_STANDING_MUTUAL_HINT_DAYS: u32 = 730;
 const EFFORT_SKEW_HINT_BALANCE: f32 = 0.85;
 const EFFORT_SKEW_HINT_MIN_OUT: u32 = 8;
 
+/// Tenure ceiling for the "inactive mutual" shape in [`decision_hint`].
+/// Fixed descriptor decoupled from the live `dead_mutual_review_max_tenure_days`
+/// gate config — same rationale as [`LONG_STANDING_MUTUAL_HINT_DAYS`]: an inert
+/// short-tenure mutual is a true characterization whether or not the gate is
+/// enabled or retuned. Mirrors the gate's 437d default.
+const DEAD_MUTUAL_HINT_MAX_TENURE_DAYS: u32 = 437;
+
 /// The one-sided decision hint string. Surfaced as a named const so the
 /// Markdown writer can suppress this specific hint when it would merely
 /// restate the `one-sided` badge already on the card's attribute line —
@@ -132,6 +139,29 @@ pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str
     }
     if f.dm_messages_total_decayed > 0.0 {
         return "active DM partner";
+    }
+    // Inert short-tenure mutual that the dead-mutual gate demoted: they
+    // followed back but nothing developed — no DM either way, no inbound,
+    // ≤1 like/comment in 90d. Gated on `bucket == Review` so this alarming
+    // framing appears only when the account was actually flagged; the same
+    // shape left in Keep (gate disabled) falls through to the neutral
+    // "tenure-only" tail, which honestly describes a borderline keep.
+    // Surfaced above the engagement arm so a lone stray like doesn't read as
+    // "engaged". Mirrors `scoring::is_dead_mutual` by shape (that predicate is
+    // private to `scoring`, with its tenure threshold in config; the const
+    // here is the decoupled descriptor). Short tenure (< 437d) excludes the
+    // long-standing mutuals below by construction.
+    if bucket == Bucket::Review
+        && f.is_mutual
+        && matches!(f.account_class, AccountClass::Personal)
+        && f.dm_messages_total == 0
+        && !f.inbound_dm_request
+        && f.dm_reactions_received == 0
+        && f.likes_given_90d + f.comments_given_90d <= 1
+        && f.follow_tenure_days
+            .is_some_and(|d| d < DEAD_MUTUAL_HINT_MAX_TENURE_DAYS)
+    {
+        return "inactive mutual — no contact either way";
     }
     if f.likes_given_90d > 0 || f.comments_given_90d > 0 {
         return "engaged with their content in last 90 days";
@@ -421,6 +451,40 @@ mod tests {
                     f.likes_given_90d = 10;
                 },
                 bucket: Bucket::Keep,
+            },
+            Case {
+                // Dead-mutual arm: a Review'd inert short-tenure mutual with a
+                // lone stray like reads as "inactive", NOT "engaged" — the arm
+                // sits above the engagement arm. baseline is a tenure-365
+                // personal mutual with dm=0, so the like is the only signal.
+                label: "inactive mutual beats recent likes (Review)",
+                expected: "inactive mutual — no contact either way",
+                mutate: |f| {
+                    f.likes_given_90d = 1;
+                },
+                bucket: Bucket::Review,
+            },
+            Case {
+                // Guard: the SAME shape left in Keep (gate disabled) falls
+                // through to the engagement arm — the dead-mutual hint is gated
+                // on the Review bucket, so it can't mislabel a kept account.
+                label: "same shape in Keep reads as engaged",
+                expected: "engaged with their content in last 90 days",
+                mutate: |f| {
+                    f.likes_given_90d = 1;
+                },
+                bucket: Bucket::Keep,
+            },
+            Case {
+                // Guard: a Review'd inert mutual with LONG tenure skips the
+                // dead-mutual arm (tenure >= 437) and falls through — the arm
+                // targets short-tenure follows that never developed.
+                label: "long-tenure inert mutual is not 'inactive'",
+                expected: "tenure-only — no engagement signal",
+                mutate: |f| {
+                    f.follow_tenure_days = Some(500);
+                },
+                bucket: Bucket::Review,
             },
             Case {
                 label: "recent likes beats old DM history",

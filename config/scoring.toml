@@ -92,3 +92,11 @@ effort_skew_hard = 0.85        # overrides close-friend/favorite/mutual at this 
                                # min=6 surfaces the 3 over-messaged close friends to
                                # Review; 0 hard mismatches vs labels.txt.
 demote_nonmutual_close_ties = true # floor an unreciprocated close-friend/favorite at review
+
+# Dead-mutual gate (docs/specs/2026-06-01-dead-mutual-review-gate-design.md):
+# a personal mutual younger than this many days with zero interaction in
+# either direction (no DM sent/received, no inbound, <=1 like/comment in 90d)
+# floors at Review — a follow-back that never became a relationship. Markers
+# don't exempt; a real DM/inbound signal does. 0 disables. 437 = p25 of this
+# owner's kept-mutual tenure.
+dead_mutual_review_max_tenure_days = 437

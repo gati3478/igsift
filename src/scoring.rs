@@ -304,6 +304,31 @@ fn is_nonreciprocal_close_tie(f: &AccountFeatures) -> bool {
         && !f.is_keeplisted
 }
 
+/// `true` when a personal mutual is **inert in both directions**: they
+/// followed you back but the relationship never developed — no DM sent
+/// (`dm_out == 0`) or received (`!has_inbound_signal`), and ≤ 1 like/comment
+/// in 90d — and the follow is younger than
+/// `dead_mutual_review_max_tenure_days`, so it is riding a high `keep_prob`
+/// on undecayed mutual + tenure alone, not a deep history. `0` disables.
+/// Markers do **not** exempt: a stale close-friend/favorite flag with zero
+/// interaction behind it is exactly the case to surface — a real DM or
+/// inbound signal is what spares an account, folded into the predicate.
+/// Story replies are intentionally excluded from the engagement cap (a
+/// one-sided story-reply pattern is itself Review-worthy). Drives the
+/// dead-mutual keep-ceiling gate. See
+/// docs/specs/2026-06-01-dead-mutual-review-gate-design.md.
+fn is_dead_mutual(f: &AccountFeatures, p: &ScoringParams) -> bool {
+    p.dead_mutual_review_max_tenure_days > 0
+        && f.account_class == AccountClass::Personal
+        && f.is_mutual
+        && !f.is_keeplisted
+        && !has_inbound_signal(f)
+        && dm_out(f) == 0
+        && f.likes_given_90d + f.comments_given_90d <= 1
+        && f.follow_tenure_days
+            .is_some_and(|d| d < p.dead_mutual_review_max_tenure_days)
+}
+
 /// Any signal that the other party engaged toward you — the inbound directions
 /// Instagram ships. A fully one-sided outbound thread (`dm_balance == 1.0`)
 /// does **not** count: it is you talking into the void, not reciprocity.
@@ -408,6 +433,17 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
         // below. keeplist is folded into the predicate, so an explicit keep
         // opts out. See docs/specs/2026-06-01-nonmutual-close-tie-gate-design.md.
         if p.demote_nonmutual_close_ties && is_nonreciprocal_close_tie(f) {
+            return Bucket::Review;
+        }
+        // Dead-mutual keep-ceiling: a personal mutual riding a high keep_prob
+        // on undecayed mutual + tenure with zero interaction in either
+        // direction — a follow-back that never became a relationship. Floors
+        // at Review. Monotonic (Keep → Review only). The disable sentinel and
+        // every clause (markers don't exempt; a DM/inbound signal does) live
+        // in `is_dead_mutual`. Sits below the deep-mutual keep-floor above, so
+        // a long reciprocal history still wins. See
+        // docs/specs/2026-06-01-dead-mutual-review-gate-design.md.
+        if is_dead_mutual(f, p) {
             return Bucket::Review;
         }
         // Reciprocity keep-ceiling: refuse to auto-keep a personal account
@@ -529,6 +565,7 @@ mod tests {
                 effort_skew_soft: 0.85,
                 effort_skew_hard: 0.95,
                 demote_nonmutual_close_ties: false,
+                dead_mutual_review_max_tenure_days: 0,
             },
         }
     }
@@ -1549,5 +1586,130 @@ mod tests {
             Bucket::Review,
             "gate off: penalty alone cannot manufacture Unfollow",
         );
+    }
+
+    // ── dead-mutual Keep→Review gate ─────────────────────────────────────
+    //
+    // A personal mutual riding a high keep_prob on undecayed mutual + tenure
+    // with zero interaction in either direction (no DM sent/received, no
+    // inbound, ≤1 like/comment in 90d) and a short tenure is a follow-back
+    // that never became a relationship → Review. Monotonic; markers don't
+    // exempt; a real DM/inbound signal, long tenure, or keeplist does. See
+    // docs/specs/2026-06-01-dead-mutual-review-gate-design.md.
+
+    /// A personal mutual that scores into Keep on tenure alone
+    /// (0.3 * ln(373) ≈ 1.78 → keep_prob ≈ 0.86) with no interaction.
+    fn inert_mutual(handle: &str) -> AccountFeatures {
+        let mut f = baseline_account(handle);
+        f.account_class = AccountClass::Personal;
+        f.is_mutual = true;
+        f.follow_tenure_days = Some(372);
+        f
+    }
+
+    #[test]
+    fn dead_mutual_gate_demotes_inert_mutual() {
+        let mut cfg = baseline_cfg();
+        cfg.scoring.dead_mutual_review_max_tenure_days = 437;
+        let acct = inert_mutual("inert");
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(
+            scored[0].keep_prob >= cfg.scoring.keep_min,
+            "must score into Keep on tenure first: {}",
+            scored[0].keep_prob,
+        );
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn dead_mutual_gate_off_keeps() {
+        // Default-disabled baseline (max_tenure_days = 0): the inert mutual
+        // stays Keep, proving the demotion is the gate's doing.
+        let cfg = baseline_cfg();
+        assert_eq!(cfg.scoring.dead_mutual_review_max_tenure_days, 0);
+        let acct = inert_mutual("inert");
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Keep);
+    }
+
+    #[test]
+    fn dead_mutual_marker_does_not_exempt() {
+        // A stale close-friend marker on an inert mutual must NOT float it
+        // back to Keep. (is_nonreciprocal_close_tie can't fire here — it
+        // requires !is_mutual — so this isolates the dead-mutual rung.)
+        let mut cfg = baseline_cfg();
+        cfg.scoring.dead_mutual_review_max_tenure_days = 437;
+        let mut acct = inert_mutual("markedinert");
+        acct.is_close_friend = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(scored[0].keep_prob >= cfg.scoring.keep_min);
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn dead_mutual_spared_by_dm_activity() {
+        // Any DM the owner sent (dm_out > 0) is a relationship signal — not
+        // a dead mutual. Stays Keep (effort-skew is off in baseline).
+        let mut cfg = baseline_cfg();
+        cfg.scoring.dead_mutual_review_max_tenure_days = 437;
+        let mut acct = inert_mutual("talker");
+        acct.dm_messages_total = 5; // dm_out = 5
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Keep);
+    }
+
+    #[test]
+    fn dead_mutual_spared_by_inbound_signal() {
+        let mut cfg = baseline_cfg();
+        cfg.scoring.dead_mutual_review_max_tenure_days = 437;
+        let mut acct = inert_mutual("theyreplied");
+        acct.inbound_dm_request = true; // has_inbound_signal → true
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Keep);
+    }
+
+    #[test]
+    fn dead_mutual_spared_by_long_tenure() {
+        // tenure >= threshold → not a dead mutual (the deep relationships the
+        // gate must never touch). mutual_age_days unset so the deep-mutual
+        // floor doesn't fire; it stays Keep on score.
+        let mut cfg = baseline_cfg();
+        cfg.scoring.dead_mutual_review_max_tenure_days = 437;
+        let mut acct = inert_mutual("oldfriend");
+        acct.follow_tenure_days = Some(500);
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Keep);
+    }
+
+    #[test]
+    fn dead_mutual_spared_by_recent_engagement() {
+        // Above the ≤1 like/comment cap → an active liker, not inert.
+        let mut cfg = baseline_cfg();
+        cfg.scoring.dead_mutual_review_max_tenure_days = 437;
+        let mut acct = inert_mutual("liker");
+        acct.likes_given_90d = 2;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Keep);
+    }
+
+    #[test]
+    fn dead_mutual_spared_by_keeplist() {
+        let mut cfg = baseline_cfg();
+        cfg.scoring.dead_mutual_review_max_tenure_days = 437;
+        let mut acct = inert_mutual("kept");
+        acct.is_keeplisted = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Keep);
+    }
+
+    #[test]
+    fn dead_mutual_never_yields_unfollow() {
+        // The gate lives inside the keep_prob >= keep_min block and returns
+        // only Review — it can never manufacture an Unfollow.
+        let mut cfg = baseline_cfg();
+        cfg.scoring.dead_mutual_review_max_tenure_days = 437;
+        let acct = inert_mutual("inert");
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_ne!(scored[0].bucket, Bucket::Unfollow);
     }
 }
