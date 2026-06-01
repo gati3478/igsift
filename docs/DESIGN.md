@@ -204,7 +204,7 @@ one decision per account.
 | `follow_tenure_days`     | `following.json` per-account `timestamp`            | `log(days_since_follow + 1)`                                   | low                                       |
 | `is_close_friend`        | `close_friends.json`                                | boolean                                                        | hard boost                                |
 | `is_favorited`           | `profiles_you've_favorited.json`                    | boolean                                                        | hard boost (separate from close_friend)   |
-| `is_blocked`             | `blocked_profiles.json`                             | boolean                                                        | **excludes from input set**               |
+| `blocked`                | `blocked_profiles.json`                             | boolean                                                        | **excludes from input set**               |
 | `is_restricted`          | `restricted_profiles.json`                          | boolean                                                        | floor bucket to `review`                  |
 | `is_hide_story_from`     | `hide_story_from.json`                              | boolean                                                        | weak negative                             |
 | `is_removed_suggestion`  | `removed_suggestions.json`                          | boolean                                                        | very weak negative                        |
@@ -348,7 +348,7 @@ Markdown "top signal" table column / card "Why" line.
 - `unfollow` (`keep_prob < 0.3` **and** `account_class == personal` **and** not
   `is_close_friend`/`is_favorited`/`is_restricted`) — confident recommendation.
 
-`is_blocked` and `recently_unfollowed` filter the input set **entirely** — they
+`blocked` and `recently_unfollowed` filter the input set **entirely** — they
 never appear in output. Public figures / brands with low `keep_prob` get
 `review`, never `unfollow` — that decision criterion ("do I still care about
 their content?") is different and out of scope for v1.
