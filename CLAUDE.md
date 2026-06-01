@@ -116,6 +116,8 @@ src/
 tests/
   cli.rs                        # binary integration tests + fixture-count assertions (locked-in)
   fixtures/sample_export/       # sanitized synthetic export
+examples/
+  showcase.rs                   # synthetic-data generator for the README screenshots (real scorer + writers)
 config/
   scoring.toml                 # Gati's tuned weights + decay constants
   keeplist.txt.example         # per-user keeplist template (real .txt gitignored)
@@ -127,11 +129,16 @@ config/
     tenure.toml                # tenure-weighted preset
 scripts/
   walk_export_schema.sh        # JSON-schema walker; drift detector for IG exports
+  showcase-shots.sh            # regenerate docs/assets/ README screenshots (example → Chromium shots)
 .github/workflows/
   ci.yml                       # fmt/clippy/test/cargo-deny + Windows x64/arm64 runtime smoke-test
   release.yml                  # on `v*` tag: cross-compile 5 targets → GitHub Release
-docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
+docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  docs/specs/  docs/assets/  ROADMAP.md
 ```
+
+(`docs/specs/` holds the dated design specs linked from Conventions;
+`docs/assets/` holds the README screenshots; `docs/plans/` holds transient
+implementation plans.)
 
 ## Conventions
 
@@ -174,7 +181,7 @@ docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  ROADMAP.md
   pins this; don't relax it.
 - **Decision-hint SSOT.** The one-line account-shape characterization
   surfaced by both Markdown and HTML writers lives in
-  `src/output/mod.rs::decision_hint`. The 19-row precedence-chain test
+  `src/output/mod.rs::decision_hint`. The 18-row precedence-chain test
   is the contract; both writers call the shared function. Adding new
   rules: insert at the right precedence, extend the table-driven test.
   The one-sided hint string is hoisted to a `HINT_ONE_SIDED` const in
