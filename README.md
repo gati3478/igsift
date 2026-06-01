@@ -155,8 +155,11 @@ likes, comments, story interactions, how long you've followed, whether they
 follow you back — into a `keep_probability`, then buckets it into keep / review /
 unfollow. A few hard rules override the score: _restricted_ accounts never drop
 below review, keeplisted accounts are never unfollowed, and droplisted accounts
-are always unfollowed. Display names mangled by Instagram's exporter are repaired
-on the way in.
+are always unfollowed. Accounts you've never interacted with in any direction are
+floored to _review_ rather than _unfollow_ — an absence of evidence isn't
+evidence to drop — and the report splits those _never-engaged_ accounts out from
+the genuinely _faded_ ones so the review pile stays skimmable. Display names
+mangled by Instagram's exporter are repaired on the way in.
 
 Score-vs-intent agreement is **feature-ceilinged** — the export simply doesn't
 separate every keep from every drop, which is what the keeplist and droplist

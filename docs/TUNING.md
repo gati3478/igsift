@@ -117,14 +117,19 @@ The drop in the unfollow count (37 → 11) is the headline result: the audit
 output is now a trustworthy action list rather than a mixed bag of
 evidence-backed drops and zero-signal impulse-follows.
 
-### Deferred — inert/faded sub-grouping in output
+### Shipped — inert/faded sub-grouping in output (2026-06-02)
 
 The floor surfaces a structurally coherent subgroup (`is_inert` accounts)
-inside Review. A natural follow-up is an output-layer annotation — a
-"no signal" badge or sub-section in the Markdown/HTML report — so the
-human reviewer can triage the 26 inert-floored accounts separately from the
-scored Review accounts. Deferred; see the spec's "Deferred follow-up"
-section.
+inside Review. The follow-up shipped as an **output-only** change — no scoring
+or bucket move, so **no distribution shift from round 12** above. The Markdown
+report now splits Review into a **Faded — once engaged, now cold** card section
+and an **Inert — never engaged** compact table (skim in bulk); the HTML report
+tags inert rows (`data-inert` + a muted "never engaged" pill) behind a
+"Hide never-engaged" filter toggle. The shared `output::is_review_inert`
+predicate (gating `scoring::is_inert` on the Review bucket) is the SSOT; "faded"
+is its complement, never an independent predicate. The split fires only when at
+least one inert account exists; an inert-free Review stays flat. Full design:
+[`specs/2026-06-01-review-subgrouping-inert-faded-design.md`](specs/2026-06-01-review-subgrouping-inert-faded-design.md).
 
 ## 2026-06-01 — DM-attribution fix + dead-mutual gate (round 11)
 

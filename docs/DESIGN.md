@@ -4,10 +4,12 @@ The full design for the Instagram following-cleanup CLI. Status, build, and the
 short pitch live in the [README](../README.md); the task list in
 [ROADMAP.md](../ROADMAP.md). The full pipeline is implemented and tuned:
 parsers, feature aggregation, decay-weighted scoring with the relationship
-gates (deep-mutual keep-floor, reciprocity keep-ceiling) and the effort-skew
+gates (deep-mutual keep-floor, reciprocity keep-ceiling, non-reciprocal
+close-tie ceiling, dead-mutual gate, inert-account floor) and the effort-skew
 gate, the brand/public-figure account-class heuristic, the keeplist/droplist
-overrides, and the CSV/Markdown/HTML writers. The weight/decay calibration
-journal is [`docs/TUNING.md`](TUNING.md) (9 rounds through 2026-06-01).
+overrides, and the CSV/Markdown/HTML writers (the Review bucket sub-grouped
+into faded vs. inert). The weight/decay calibration
+journal is [`docs/TUNING.md`](TUNING.md) (12 rounds through 2026-06-01).
 
 ## Inputs
 

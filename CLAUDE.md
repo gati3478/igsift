@@ -109,7 +109,7 @@ src/
     account_class.rs            # brand-detection (aho-corasick lexicon) + keeplist / droplist gates
   scoring.rs                    # score_raw composition, sigmoid, bucket assignment (incl. effort-skew gate), top_terms
   output/
-    mod.rs                      # write() dispatcher (CSV+MD+HTML) + shared writer SSOT (decision_hint, HINT_ONE_SIDED, contributions_inline)
+    mod.rs                      # write() dispatcher (CSV+MD+HTML) + shared writer SSOT (decision_hint, HINT_ONE_SIDED, contributions_inline, is_review_inert)
     csv.rs                      # CSV row writer (DESIGN.md "Output" header is the contract: keep_score, top_signal, reply_skew)
     markdown.rs                 # decision-oriented MD: keep-% cards + proportion-bar summary + droplist quarantine + Review faded/inert split
     html.rs                     # self-contained HTML report (inline CSS+JS, no deps) + per-row keep/drop triage → localStorage → copy/paste to lists + Review never-engaged filter
@@ -183,7 +183,7 @@ implementation plans.)
   pins this; don't relax it.
 - **Decision-hint SSOT.** The one-line account-shape characterization
   surfaced by both Markdown and HTML writers lives in
-  `src/output/mod.rs::decision_hint`. The 18-row precedence-chain test
+  `src/output/mod.rs::decision_hint`. The table-driven precedence-chain test
   is the contract; both writers call the shared function. Adding new
   rules: insert at the right precedence, extend the table-driven test.
   The one-sided hint string is hoisted to a `HINT_ONE_SIDED` const in
@@ -259,8 +259,13 @@ implementation plans.)
   action) is floored Unfollow → Review — tenure alone is not a drop signal.
   `__deleted__` handles are exempt (a gone account is a safe, certain drop). The
   predicate `is_inert` is the SSOT; ships **on** in every preset (Review-only,
-  monotonic). See
-  [`docs/specs/2026-06-01-inert-account-floor-design.md`](docs/specs/2026-06-01-inert-account-floor-design.md).
+  monotonic). It is also reused by the output layer — `output::is_review_inert`
+  (Review-gated wrapper) drives the report's **faded/inert** Review
+  sub-grouping (Markdown subsections + HTML `data-inert`/pill + "Hide
+  never-engaged" filter); "faded" is its complement, never an independent
+  predicate. See
+  [`docs/specs/2026-06-01-inert-account-floor-design.md`](docs/specs/2026-06-01-inert-account-floor-design.md)
+  and [`docs/specs/2026-06-01-review-subgrouping-inert-faded-design.md`](docs/specs/2026-06-01-review-subgrouping-inert-faded-design.md).
   These gates are deliberately
   **gates not weights** — their correctness doesn't depend on the noisy
   `labels.txt` oracle. Full rationale (deep-mutual + reciprocity):

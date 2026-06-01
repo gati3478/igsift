@@ -184,3 +184,7 @@ never engaged" (reuse `is_inert`) vs "faded — had engagement, now cold" — so
 the inert accounts skim in bulk without drowning the genuinely-ambiguous
 faded ones. Pure presentation, no bucket/score change; its own spec → plan
 cycle in a later session.
+
+> **Implemented 2026-06-02** — shipped exactly as scoped (reusing `is_inert`
+> via the Review-gated `output::is_review_inert`, no bucket/score change). See
+> [`2026-06-01-review-subgrouping-inert-faded-design.md`](2026-06-01-review-subgrouping-inert-faded-design.md).

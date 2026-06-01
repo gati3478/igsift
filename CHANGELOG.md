@@ -25,9 +25,20 @@ account. Fully offline — no network, database, or automated unfollow.
   keep/review/unfollow bucketing.
 - Brand/public-figure classifier, restricted-account floor, and mirror
   keeplist / droplist overrides.
-- Relationship-aware bucket gates: a deep-mutual keep-floor and an opt-in
-  reciprocity keep-ceiling, both monotonic — they only refuse to auto-keep a
-  stranger or refuse to drop a years-deep mutual, never manufacture an unfollow.
+- Relationship-aware bucket gates, all monotonic — they only refuse to
+  auto-keep a stranger, refuse to drop a years-deep mutual, or floor a
+  no-evidence account to review, never manufacturing an unfollow: a deep-mutual
+  keep-floor; an opt-in reciprocity keep-ceiling; a non-reciprocal close-tie
+  ceiling (an explicit close-friend/favorite marker the followee never returned
+  with a follow-back — on by default, with a paired score penalty); a
+  dead-mutual gate (a short-tenure follow-back with zero interaction in either
+  direction); and an inert-account floor (a zero-signal account in the unfollow
+  band is floored to review — an absence of evidence isn't evidence to drop,
+  with `__deleted__` accounts exempt).
+- DM-attribution fix for accounts that never set an Instagram display name:
+  Instagram emits the handle itself as the DM `sender_name` for those, so an
+  identity `handle → handle` mapping recovers whole threads the display-name
+  resolver previously dropped, correcting their `dm_*` features.
 - Effort-skew gate: a monotonic two-tier `Keep → Review` demotion for accounts
   the owner over-invests in (high outbound DM volume, near-zero real replies),
   evidence-guarded on owner DM volume and disabled by default in the presets.
@@ -46,8 +57,9 @@ account. Fully offline — no network, database, or automated unfollow.
       diff contract.
     - **Markdown** — a decision-oriented skim: score rendered as `keep NN%`, a
       Summary proportion bar that sums to exactly 100%, the redundant one-sided
-      hint suppressed, and droplist-forced rows quarantined under their own
-      subheading.
+      hint suppressed, droplist-forced rows quarantined under their own
+      subheading, and the Review bucket split into **Faded** (full cards) vs.
+      **Inert — never engaged** (compact skim table) subsections.
     - **HTML** — a self-contained, sortable/filterable browser report
       ("Keep likelihood" as a percentage with a bucket-keyed bar), with
       **in-report triage**: per-row Keep / Drop toggles (mutually exclusive,
@@ -55,7 +67,9 @@ account. Fully offline — no network, database, or automated unfollow.
       segmented controls (green = keeplist, red = droplist) — that Copies or
       Downloads the appendable handle lists to paste into
       `config/keeplist.txt` / `config/droplist.txt`. Fully local; nothing
-      leaves the browser. Follows the OS light/dark setting with a header
+      leaves the browser. In the Review bucket, never-engaged ("inert") rows
+      carry a muted pill and can be collapsed with a **Hide never-engaged**
+      filter. Follows the OS light/dark setting with a header
       **Auto / Light / Dark** switcher (ARIA radiogroup, persisted in
       `localStorage`, anti-FOUC) to override it.
 - Polished terminal run-summary dashboard: boxed header banner, colored bucket
