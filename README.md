@@ -18,6 +18,25 @@ by hand.
 └──────────────────────────┘     └─────────────────┘     └────────────────────┘
 ```
 
+## What it looks like
+
+The run prints a dashboard to your terminal — bucket split, score
+distribution, and the strongest keeps next to the first accounts to drop:
+
+![igsift CLI dashboard — bucket panel, keep_prob histogram, and top keeps vs. unfollow candidates](docs/assets/cli-dashboard.png)
+
+The HTML report is the one you act from: sortable, filterable tables with a
+per-row **Keep / Drop** toggle. Your picks collect in a floating bar that
+copies or downloads the exact lines for your keeplist / droplist — nothing
+leaves the page. It ships with real dark mode (shown here to match your theme):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/html-report-dark.png">
+  <img alt="igsift HTML report — stat tiles, the Unfollow table with keep-likelihood bars and Keep/Drop triage, and the floating export bar" src="docs/assets/html-report-light.png">
+</picture>
+
+<sub>Synthetic sample, not a real export — personal accounts are fabricated; any brand pages shown are public. Regenerate with <code>scripts/showcase-shots.sh</code> (data from <code>examples/showcase.rs</code>, scored through the real pipeline).</sub>
+
 ## Quickstart
 
 ### 1. Get your data
