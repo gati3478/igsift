@@ -149,6 +149,18 @@ pub struct ScoringParams {
     /// `docs/specs/2026-06-01-dead-mutual-review-gate-design.md`.
     #[serde(default = "default_dead_mutual_review_max_tenure_days")]
     pub dead_mutual_review_max_tenure_days: u32,
+    /// When `true` (**default**), a personal account that would bucket
+    /// Unfollow but shows **no behavioural signal in any direction** — zero
+    /// engagement (likes/comments/story/stories-viewed/saves), no DM, no DM
+    /// reactions in or out, no inbound request, and no negative owner action
+    /// (`is_hide_story_from` / `is_removed_suggestion`) — is floored at
+    /// `review` instead. Tenure alone is not a drop signal: absence of
+    /// interaction is absence of evidence, not evidence to drop. Monotonic:
+    /// Unfollow → Review only. `__deleted__` accounts are exempt (a gone
+    /// account is the one safe, certain drop). `false` disables. See
+    /// `docs/specs/2026-06-01-inert-account-floor-design.md`.
+    #[serde(default = "default_floor_inert_to_review")]
+    pub floor_inert_to_review: bool,
 }
 
 fn default_require_reciprocity_for_keep() -> bool {
@@ -188,6 +200,13 @@ fn default_dead_mutual_review_max_tenure_days() -> u32 {
     // docs/specs/2026-06-01-dead-mutual-review-gate-design.md. Review-only,
     // zero measured labels.txt regression. 0 disables.
     437
+}
+
+fn default_floor_inert_to_review() -> bool {
+    // On by default — see docs/specs/2026-06-01-inert-account-floor-design.md.
+    // High-precision (zero positive signal AND no negative owner action),
+    // Review-only, monotonic. `__deleted__` accounts stay Unfollow.
+    true
 }
 
 /// Read and parse the scoring config, following the documented resolution
@@ -612,6 +631,23 @@ unfollow_max = 0.3
         let body = format!("{VALID_BODY}dead_mutual_review_max_tenure_days = 0\n");
         let cfg = parse_str(&body, "/synthetic.toml").expect("parses");
         assert_eq!(cfg.scoring.dead_mutual_review_max_tenure_days, 0);
+    }
+
+    #[test]
+    fn floor_inert_to_review_defaults_to_true() {
+        // A config body with no `floor_inert_to_review` key parses with the
+        // floor ON by default — like the dead-mutual / close-tie gates it ships
+        // live (high-precision, Review-only, monotonic). false disables.
+        let cfg = parse_str(VALID_BODY, "/synthetic.toml").expect("parses");
+        validate(&cfg).expect("validates");
+        assert!(cfg.scoring.floor_inert_to_review);
+    }
+
+    #[test]
+    fn floor_inert_to_review_false_disables() {
+        let body = format!("{VALID_BODY}floor_inert_to_review = false\n");
+        let cfg = parse_str(&body, "/synthetic.toml").expect("parses");
+        assert!(!cfg.scoring.floor_inert_to_review);
     }
 
     #[test]

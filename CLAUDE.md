@@ -252,6 +252,15 @@ implementation plans.)
   is the SSOT; the `decision_hint` "inactive mutual" row mirrors it and is
   gated on the Review bucket. (TUNING round 11.) See
   [`docs/specs/2026-06-01-dead-mutual-review-gate-design.md`](docs/specs/2026-06-01-dead-mutual-review-gate-design.md).
+  The **inert-account floor** (`scoring.floor_inert_to_review`, default
+  **true**, `false` disables) is the Unfollow-side mirror of these keep-side
+  gates: a personal account in the Unfollow band with **zero behavioural signal
+  in any direction** (no engagement, DM, reactions, inbound, or negative owner
+  action) is floored Unfollow → Review — tenure alone is not a drop signal.
+  `__deleted__` handles are exempt (a gone account is a safe, certain drop). The
+  predicate `is_inert` is the SSOT; ships **on** in every preset (Review-only,
+  monotonic). See
+  [`docs/specs/2026-06-01-inert-account-floor-design.md`](docs/specs/2026-06-01-inert-account-floor-design.md).
   These gates are deliberately
   **gates not weights** — their correctness doesn't depend on the noisy
   `labels.txt` oracle. Full rationale (deep-mutual + reciprocity):
