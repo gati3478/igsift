@@ -136,7 +136,9 @@ scripts/
 docs/DESIGN.md  docs/TUNING.md  docs/GOING-PUBLIC.md  docs/specs/  docs/assets/  ROADMAP.md
 ```
 
-(`docs/specs/` holds the dated design specs linked from Conventions;
+(`docs/specs/` holds the dated design specs: the reciprocity and effort-skew
+gates are linked from Conventions; the terminal run-summary dashboard is
+[`docs/specs/2026-05-31-terminal-summary-dashboard-design.md`](docs/specs/2026-05-31-terminal-summary-dashboard-design.md).
 `docs/assets/` holds the README screenshots; `docs/plans/` holds transient
 implementation plans.)
 
