@@ -329,6 +329,48 @@ fn is_dead_mutual(f: &AccountFeatures, p: &ScoringParams) -> bool {
             .is_some_and(|d| d < p.dead_mutual_review_max_tenure_days)
 }
 
+/// `true` when an account carries **no behavioural signal in any direction**:
+/// zero engagement (likes/comments/story-interactions/stories-viewed/saves),
+/// no DM at all, no DM reactions in or out, no inbound request, and no negative
+/// owner action (`is_hide_story_from` / `is_removed_suggestion`). Its
+/// `keep_prob` is pure tenure. Lifetime-zero — deliberately stricter than the
+/// dead-mutual core's `<= 1` tolerance: the claim is "never interacted in any
+/// way the export records." An account in Unfollow because of a negative owner
+/// action is NOT inert — it has real evidence to drop and stays eligible.
+/// Drives the inert-account Unfollow floor (Review, never Unfollow). See
+/// docs/specs/2026-06-01-inert-account-floor-design.md.
+///
+/// Intentionally **class-agnostic** — no `account_class == Personal` guard,
+/// unlike `is_parasocial` / `is_dead_mutual`. Inside `assign_bucket` a Brand is
+/// already deflected to Review by the carve-out above the floor rung, so the
+/// guard would be dead weight there; and keeping the predicate class-free lets
+/// it serve as the SSOT for the deferred Review inert/faded sub-grouping, where
+/// a zero-engagement Brand parked in Review genuinely *is* inert.
+fn is_inert(f: &AccountFeatures) -> bool {
+    !f.is_hide_story_from
+        && !f.is_removed_suggestion
+        && f.likes_given == 0
+        && f.comments_given == 0
+        && f.story_interactions_out == 0
+        && f.stories_viewed == 0
+        && f.saved_their_content == 0
+        && f.dm_messages_total == 0
+        && f.dm_reactions_given == 0
+        && f.dm_reactions_received == 0
+        && !f.inbound_dm_request
+}
+
+/// `true` when the handle is Instagram's redaction for a deleted / deactivated
+/// account (`__deleted__…`). Such an account is gone — Unfollow is the one safe,
+/// certain drop — so it is exempted from the inert floor and stays Unfollow.
+/// A real followee can never collide: Instagram disallows handles beginning with
+/// consecutive underscores, so the `__deleted__` prefix is unambiguous. Not
+/// igsift-emitted; if IG ever changes the prefix the account simply degrades to
+/// Review (the safe direction), never a wrongful keep.
+fn is_deleted(f: &AccountFeatures) -> bool {
+    f.username.starts_with("__deleted__")
+}
+
 /// Any signal that the other party engaged toward you — the inbound directions
 /// Instagram ships. A fully one-sided outbound thread (`dm_balance == 1.0`)
 /// does **not** count: it is you talking into the void, not reciprocity.
@@ -469,6 +511,17 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
             || f.is_keeplisted
             || f.account_class != AccountClass::Personal
         {
+            return Bucket::Review;
+        }
+        // Inert-account floor: a personal account reaching Unfollow purely for
+        // lack of positive signal — zero engagement in any direction, no DM, no
+        // reactions, no inbound, and no negative owner action — has no evidence
+        // FOR dropping, only an absence of data. Floor to Review. `__deleted__`
+        // accounts are exempt: a gone account is the one safe, certain drop.
+        // Monotonic (Unfollow → Review only). Sits below the droplist, which
+        // returns Unfollow at the top of this fn and never reaches here. See
+        // docs/specs/2026-06-01-inert-account-floor-design.md.
+        if p.floor_inert_to_review && is_inert(f) && !is_deleted(f) {
             return Bucket::Review;
         }
         return Bucket::Unfollow;
@@ -1712,5 +1765,134 @@ mod tests {
         let acct = inert_mutual("inert");
         let scored = score(std::slice::from_ref(&acct), &cfg);
         assert_ne!(scored[0].bucket, Bucket::Unfollow);
+    }
+
+    // ── inert-account Unfollow floor ─────────────────────────────────────
+    //
+    // A personal account with zero behavioural signal in any direction
+    // (no engagement, no DM, no reactions, no inbound, no negative owner
+    // action) has no evidence FOR dropping — silence is absence of data.
+    // Floor Unfollow → Review. `__deleted__` accounts are exempt.
+    // Monotonic (Unfollow → Review only). See
+    // docs/specs/2026-06-01-inert-account-floor-design.md.
+
+    /// baseline_cfg has threshold = 0, so a strictly-inert account (no
+    /// engagement, no penalties allowed) scores `score_raw = 0 → keep_prob =
+    /// 0.5` and cannot go lower. To exercise the Unfollow-block rung we widen
+    /// the band so 0.5 sits below unfollow_max, then turn the floor on.
+    fn inert_unfollow_cfg() -> ScoringConfig {
+        let mut cfg = baseline_cfg();
+        cfg.scoring.unfollow_max = 0.6; // 0.5 (inert keep_prob) now in the unfollow band
+        cfg.scoring.floor_inert_to_review = true;
+        cfg
+    }
+
+    #[test]
+    fn is_inert_each_signal_breaks_it() {
+        assert!(
+            is_inert(&baseline_account("z")),
+            "all-zero baseline is inert"
+        );
+        type Mutation = fn(&mut AccountFeatures);
+        let mutations: &[(&str, Mutation)] = &[
+            ("likes_given", |a| a.likes_given = 1),
+            ("comments_given", |a| a.comments_given = 1),
+            ("story_interactions_out", |a| a.story_interactions_out = 1),
+            ("stories_viewed", |a| a.stories_viewed = 1),
+            ("saved_their_content", |a| a.saved_their_content = 1),
+            ("dm_messages_total", |a| a.dm_messages_total = 1),
+            ("dm_reactions_given", |a| a.dm_reactions_given = 1),
+            ("dm_reactions_received", |a| a.dm_reactions_received = 1),
+            ("inbound_dm_request", |a| a.inbound_dm_request = true),
+            ("is_hide_story_from", |a| a.is_hide_story_from = true),
+            ("is_removed_suggestion", |a| a.is_removed_suggestion = true),
+        ];
+        for (name, mutate) in mutations {
+            let mut a = baseline_account("z");
+            mutate(&mut a);
+            assert!(!is_inert(&a), "{name} must break inertness");
+        }
+    }
+
+    #[test]
+    fn inert_floor_demotes_to_review() {
+        let cfg = inert_unfollow_cfg();
+        let acct = baseline_account("silent"); // all zero → inert, keep_prob 0.5
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(
+            scored[0].keep_prob < cfg.scoring.unfollow_max,
+            "must be in the unfollow band: {}",
+            scored[0].keep_prob,
+        );
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn inert_floor_off_unfollows() {
+        // Same account, floor disabled → reaches its natural Unfollow. Proves
+        // the demotion above is the floor's doing.
+        let mut cfg = inert_unfollow_cfg();
+        cfg.scoring.floor_inert_to_review = false;
+        let acct = baseline_account("silent");
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Unfollow);
+    }
+
+    #[test]
+    fn inert_floor_spared_by_a_single_like() {
+        // is_inert reads lifetime raw counts; the score reads decayed fields.
+        // One lifetime like breaks inertness WITHOUT moving keep_prob out of
+        // the band — isolating the predicate. Stays Unfollow.
+        let cfg = inert_unfollow_cfg();
+        let mut acct = baseline_account("oneliker");
+        acct.likes_given = 1;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(scored[0].keep_prob < cfg.scoring.unfollow_max);
+        assert_eq!(scored[0].bucket, Bucket::Unfollow);
+    }
+
+    #[test]
+    fn inert_floor_not_applied_with_negative_owner_action() {
+        // is_hide_story_from is a deliberate negative signal — real evidence to
+        // drop. Not inert; stays Unfollow even with the floor on.
+        let cfg = inert_unfollow_cfg();
+        let mut acct = baseline_account("hidden");
+        acct.is_hide_story_from = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Unfollow);
+    }
+
+    #[test]
+    fn inert_floor_exempts_deleted_accounts() {
+        // A __deleted__ account is gone — Unfollow is the safe, certain drop,
+        // so it is exempt from the floor even though it is inert.
+        let cfg = inert_unfollow_cfg();
+        let acct = baseline_account("__deleted__abc123");
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(scored[0].keep_prob < cfg.scoring.unfollow_max);
+        assert_eq!(scored[0].bucket, Bucket::Unfollow);
+    }
+
+    #[test]
+    fn inert_floor_applies_regardless_of_mutual() {
+        // Unlike dead-mutual, the inert floor doesn't key on mutuality — a
+        // non-deep mutual that is inert and in the unfollow band is floored too.
+        // (mutual_age_days unset → the deep-mutual keep-floor doesn't fire.)
+        let cfg = inert_unfollow_cfg();
+        let mut acct = baseline_account("mutualsilent");
+        acct.is_mutual = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn droplist_forces_unfollow_over_inert_floor() {
+        // The droplist returns Unfollow at the top of assign_bucket, before the
+        // inert floor can demote. An inert droplisted account stays Unfollow.
+        let cfg = inert_unfollow_cfg();
+        let mut acct = baseline_account("silentdrop");
+        acct.is_droplisted = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Unfollow);
     }
 }

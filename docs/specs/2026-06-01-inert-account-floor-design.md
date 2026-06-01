@@ -66,7 +66,8 @@ tolerance; the claim is "never interacted in any way the export records"):
 
 ```rust
 fn is_inert(f: &AccountFeatures) -> bool {
-    f.likes_given == 0 && f.comments_given == 0
+    !f.is_hide_story_from && !f.is_removed_suggestion
+        && f.likes_given == 0 && f.comments_given == 0
         && f.story_interactions_out == 0 && f.stories_viewed == 0
         && f.saved_their_content == 0
         && f.dm_messages_total == 0
@@ -74,6 +75,8 @@ fn is_inert(f: &AccountFeatures) -> bool {
         && !f.inbound_dm_request
 }
 ```
+
+`is_hide_story_from` / `is_removed_suggestion` are deliberate negative owner→them actions — real evidence to drop — so an account carrying either is not inert and stays a genuine Unfollow candidate.
 
 `dm_messages_total == 0` subsumes `dm_out == 0` and `dm_inbound_replies == 0`
 and forces `dm_balance == None`; combined with the reaction/request clauses
