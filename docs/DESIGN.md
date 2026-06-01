@@ -402,6 +402,15 @@ only where Instagram actually exports both sides of the conversation, so it neve
 touches relationships that live off-platform. Full design:
 [`docs/specs/2026-05-31-effort-skew-gate-design.md`](specs/2026-05-31-effort-skew-gate-design.md).
 
+**Inert-account floor.** A personal account reaching the Unfollow band purely
+for lack of positive signal — zero engagement in any direction, no DM, no
+reactions, no inbound, and no negative owner action (`hide_story` /
+`removed_suggestion`) — is floored to **Review**, not Unfollow. Tenure is not
+a drop signal: an account you have never interacted with is an absence of
+evidence, not evidence to drop. `__deleted__` accounts are exempt (gone =
+safe, certain drop). Config: `floor_inert_to_review` (default on); monotonic,
+Review-only. See `docs/specs/2026-06-01-inert-account-floor-design.md`.
+
 **Three relationship gates bracket the score (rungs 4–5), each monotonic — each
 can only move an account one direction, so none can manufacture a wrongful
 `unfollow`.** They encode the core principle that _keep = relationship, not
