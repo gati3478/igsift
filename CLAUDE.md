@@ -202,7 +202,7 @@ implementation plans.)
   on `AccountFeatures`, and gate in `scoring::assign_bucket`. Precedence
   (top wins): `is_restricted` (Review floor) → `is_droplisted` (Unfollow)
   → effort-skew HARD (Review) → deep-mutual floor (Keep) → `keep_min`
-  (+ effort-skew SOFT / non-reciprocal close-tie / reciprocity gate → Review) → keep-gates.
+  (+ effort-skew SOFT / non-reciprocal close-tie / dead-mutual / reciprocity gate → Review) → keep-gates.
   `is_restricted` is the one floor the droplist yields to. A handle on
   **both** lists is a contradiction — `lists::ensure_disjoint` rejects
   it loudly at load (in `run`), before scoring, so the two rungs never
@@ -241,6 +241,17 @@ implementation plans.)
   Review only and **evidence-guarded** on owner DM volume, so they act only
   inside a 1:1 thread the owner invested in; off by default in the presets.
   See [`docs/specs/2026-05-31-effort-skew-gate-design.md`](docs/specs/2026-05-31-effort-skew-gate-design.md).
+  The **dead-mutual gate** (`scoring.dead_mutual_review_max_tenure_days`,
+  default **437**, `0` disables) demotes Keep → Review a personal _mutual_
+  riding a high `keep_prob` on undecayed mutual + tenure with **zero
+  interaction in either direction** (no DM sent via `dm_out` or received via
+  `has_inbound_signal`, ≤1 like/comment in 90d) and tenure below the
+  threshold — a follow-back that never became a relationship. Pure gate (no
+  penalty term); markers do **not** exempt (a real DM/inbound signal does);
+  ships **on** in every preset (Review-only). The predicate `is_dead_mutual`
+  is the SSOT; the `decision_hint` "inactive mutual" row mirrors it and is
+  gated on the Review bucket. (TUNING round 11.) See
+  [`docs/specs/2026-06-01-dead-mutual-review-gate-design.md`](docs/specs/2026-06-01-dead-mutual-review-gate-design.md).
   These gates are deliberately
   **gates not weights** — their correctness doesn't depend on the noisy
   `labels.txt` oracle. Full rationale (deep-mutual + reciprocity):

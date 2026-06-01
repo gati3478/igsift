@@ -371,7 +371,10 @@ lists bracket the inferred score:
 4. deep-mutual floor    → Keep        mutual & mutual_age_days ≥ deep_mutual_keep_days
 5. keep_prob ≥ keep_min → Keep        …unless effort-skew SOFT (unmarked & DM evidence &
                                       reply_skew ≥ effort_skew_soft), the non-reciprocal close-tie
-                                      gate (personal & !mutual & marked & !keeplisted), or the
+                                      gate (personal & !mutual & marked & !keeplisted), the
+                                      dead-mutual gate (personal & mutual & no DM either way &
+                                      no inbound & ≤1 like/comment_90d & tenure <
+                                      dead_mutual_review_max_tenure_days), or the
                                       reciprocity gate fires → Review
 6. keep_prob < unfollow_max:
      is_close_friend | is_favorited | is_keeplisted | non-Personal → Review
