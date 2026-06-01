@@ -566,6 +566,7 @@ mod tests {
                 effort_skew_hard: 0.95,
                 demote_nonmutual_close_ties: false,
                 dead_mutual_review_max_tenure_days: 0,
+                floor_inert_to_review: false,
             },
         }
     }

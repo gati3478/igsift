@@ -50,3 +50,9 @@ deep_mutual_keep_days = 730
 # Dead-mutual gate: inert personal mutual younger than this -> Review. 0 disables.
 # See docs/specs/2026-06-01-dead-mutual-review-gate-design.md.
 dead_mutual_review_max_tenure_days = 437
+# Inert-account floor: a personal account with zero signal in any direction
+# (no engagement, DM, reactions, inbound, or negative owner action) that would
+# bucket Unfollow is floored to Review instead — tenure alone is not a drop
+# signal. __deleted__ accounts stay Unfollow. false disables. See
+# docs/specs/2026-06-01-inert-account-floor-design.md.
+floor_inert_to_review = true
