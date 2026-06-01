@@ -4,7 +4,7 @@
 # Designed to be re-runnable against any IG export to detect schema drift.
 
 set -u
-ROOT="${1:-/Users/gati3478/Desktop/social-network-project/ig/ig-exported-data}"
+ROOT="${1:-./ig-exported-data}"
 cd "$ROOT" || exit 1
 
 emit_one() {

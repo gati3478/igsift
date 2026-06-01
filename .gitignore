@@ -41,6 +41,11 @@ recommendations_*.md
 # `config/droplist.txt` to activate.
 /config/droplist.txt
 
+# Belt-and-suspenders: any future per-user list dropped at a new config/*.txt
+# name is ignored by default. The checked-in *.txt.example templates are NOT
+# matched (they end in .example, not .txt), so they still commit normally.
+/config/*.txt
+
 # cargo-mutants scratch output (regenerated each `cargo mutants` run)
 /mutants.out/
 /mutants.out.old/
