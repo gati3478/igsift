@@ -363,10 +363,13 @@ fn is_inert(f: &AccountFeatures) -> bool {
 /// `true` when the handle is Instagram's redaction for a deleted / deactivated
 /// account (`__deleted__…`). Such an account is gone — Unfollow is the one safe,
 /// certain drop — so it is exempted from the inert floor and stays Unfollow.
-/// A real followee can never collide: Instagram disallows handles beginning with
-/// consecutive underscores, so the `__deleted__` prefix is unambiguous. Not
-/// igsift-emitted; if IG ever changes the prefix the account simply degrades to
-/// Review (the safe direction), never a wrongful keep.
+/// `__deleted__` is IG's observed redaction prefix (not igsift-emitted). IG does
+/// permit leading/consecutive underscores in real handles, so a collision is
+/// conceivable but negligible and bounded: a real followee would have to be
+/// literally named `__deleted__…`, be inert, and sit in the Unfollow band — and
+/// even then the only effect is Unfollow instead of Review on a zero-interaction
+/// account. If IG ever changes the prefix the exemption simply stops firing and
+/// the account degrades to Review (the safe direction), never a wrongful keep.
 fn is_deleted(f: &AccountFeatures) -> bool {
     f.username.starts_with("__deleted__")
 }

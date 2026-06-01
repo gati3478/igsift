@@ -363,7 +363,7 @@ FOLLOWING=$(ls .igsift-extracted*/connections/followers_and_following/following.
 grep -ioE '"value": *"[^"]*(design|studies|project)[^"]*"' "$FOLLOWING" | sort -u
 ```
 
-Expected: every hit is a brand/creator/page (e.g. `amanita_design_`, `indiebydesign`, `jacksman.studies`, `projectfungus`, `thebarewytchproject`), zero personal handles. **If any personal handle matches a token, drop that token from this task** and note it in the Task 5 TUNING entry. (`design`/`studies`/`project` are each ≥4 chars; the deferred 3-char `art`/`bar` tokens and the word-boundary matcher rework stay out of scope per the spec.)
+Expected: every hit is a brand/creator/page (e.g. public brand pages like `amanita_design_`, `projectfungus`, `thebarewytchproject`), zero personal handles. **If any personal handle matches a token, drop that token from this task** and note it in the Task 5 TUNING entry. (Use structural descriptors, never a real personal handle, when recording a dropped token.) (`design`/`studies`/`project` are each ≥4 chars; the deferred 3-char `art`/`bar` tokens and the word-boundary matcher rework stay out of scope per the spec.)
 
 - [ ] **Step 2: Write the failing lexicon test**
 
@@ -372,12 +372,11 @@ Add to the `#[cfg(test)] mod tests` block in `src/features/account_class.rs`, af
 ```rust
     #[test]
     fn round12_tokens_match_real_handles() {
-        // Round-12 expansion (inert-floor companion). Each token's real-export
-        // brand hits — verified 0-false-positive on the owner's following list.
+        // Round-12 expansion (inert-floor companion). NOTE (as-built): on the
+        // 0-FP grep only `project` survived — the `design` / `studies` candidate
+        // tokens matched personal handles and were dropped (see TUNING round 12),
+        // so the shipped test asserts only the `project` hits (public brand pages).
         let c = empty();
-        assert_eq!(c.classify("amanita_design_", None), AccountClass::Brand);
-        assert_eq!(c.classify("indiebydesign", None), AccountClass::Brand);
-        assert_eq!(c.classify("jacksman.studies", None), AccountClass::Brand);
         assert_eq!(c.classify("projectfungus", None), AccountClass::Brand);
         assert_eq!(c.classify("thebarewytchproject", None), AccountClass::Brand);
     }
