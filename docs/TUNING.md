@@ -10,6 +10,122 @@ The methodology choice for this pass was the **hybrid** in DESIGN.md's
 with `config/labels.txt` (when laid down) serving as a held-out accuracy
 floor. The labels file is not committed — it's a per-user artifact.
 
+## 2026-06-01 — inert-account Unfollow floor + brand-lexicon `project` token (round 12)
+
+A monotonic Unfollow → Review floor for personal accounts that scored into the
+Unfollow band with **zero behavioural signal in any direction** — no engagement
+(likes, comments), no DM sent or received, no reactions, no inbound activity,
+and no negative owner action (hide-story) — plus a companion brand-lexicon
+token that reclassifies zero-engagement brand pages before scoring. Full
+design: [`specs/2026-06-01-inert-account-floor-design.md`](specs/2026-06-01-inert-account-floor-design.md).
+
+### What changed
+
+```toml
+# [scoring]
+floor_inert_to_review = true  # default on; 0-signal personal Unfollow → Review
+```
+
+The predicate `is_inert` is the pure zero-signal test — it checks **only** the
+full zero-signal conjunction (no engagement: likes, comments, stories, saves; no
+DM sent or received; no reactions either way; no inbound request; no negative
+owner action: hide-story / removed-suggestion). It is deliberately
+**class-agnostic** — no `account_class` clause — so it can be reused as the SSOT
+for the deferred Review sub-grouping below. The Personal restriction and the
+Unfollow-band restriction live in the _rung_, not the predicate: the floor rung
+in `assign_bucket` fires only when `keep_prob < unfollow_max` and sits **after**
+the brand / close-friend / favorite / keeplist carve-out, so only a personal
+account that scored into Unfollow ever reaches it. `__deleted__` handles are
+exempt (their zero-signal shape is structural, not a relationship choice). The
+floor is Review-only; it never promotes to Keep. Ships **on** in all presets.
+
+The companion brand-lexicon token `project` was added to
+`BRAND_LEXICON` in `src/features/account_class.rs` after a 0-FP grep
+against the real export (2 clean brand-page hits). With the inert floor live,
+the floor already catches zero-engagement brand-classified accounts — `project`
+adds upstream reclassification that surfaces the brand shape in the CSV
+`account_class` column and in report hints.
+
+### Lexicon token audit (candidates vs. shipped)
+
+Three tokens were evaluated against the real export via `grep -i <token>
+<handle_list>`:
+
+| Token     | Hits | FPs | Decision                                                                                                                  |
+| --------- | ---- | --- | ------------------------------------------------------------------------------------------------------------------------- |
+| `project` | 2    | 0   | **Shipped** — 2 clean public brand-page hits, 0 false positives                                                           |
+| `design`  | 4    | 1   | **Dropped** — 1 FP: a personal design-creator the owner actively likes (would be wrongly reclassified away from Personal) |
+| `studies` | 2    | 2   | **Dropped** — both hits are personal portfolio accounts (`name.studies` pattern); 100% FP rate                            |
+
+With the inert floor live, the dropped tokens' bucket value was already subsumed
+— a zero-engagement `design` or `studies` account scores into Unfollow and
+floors to Review regardless of its class. The FP risk (mis-classifying an
+engaged personal account) was not worth the marginal recall gain.
+
+### Distribution shift (real export, 649 followings)
+
+```
+round 11 (baseline): keep 522 / review 90  / unfollow 37
+round 12 (floor on): keep 522 / review 116 / unfollow 11
+```
+
+**26 accounts moved Unfollow → Review** — all zero-signal personal accounts with
+low `keep_prob` (review 90 → 116 = +26). None of the movers were `__deleted__`
+or droplisted; those are exactly the accounts the floor leaves in Unfollow. The
+surviving 11 Unfollow accounts are:
+
+- **5 `__deleted__`** — exempt; zero-signal shape is structural, not behavioural
+- **6 droplisted** — forced Unfollow by `config/droplist.txt` regardless of the floor
+
+Zero non-droplist personal accounts remain in Unfollow. The Unfollow band is now
+effectively **droplist + `__deleted__`** only.
+
+### Confusion matrix and agreement
+
+```
+                 bucket=keep  bucket=review  bucket=unfollow
+  label=keep              40             12                0
+  label=drop               0              3                3
+agreement: 43/58 (74.1%)  [down from 79.3% at round 11]
+hard mismatches: 0
+```
+
+The agreement drop (46 → 43 / 79.3% → 74.1%) is a direct and expected
+consequence of the floor: **3 labeled-drop accounts that were previously in
+Unfollow** (and counted as agreements) are now in Review because the inert
+floor caught them. All three are mutual accounts with `dm=0` and zero
+engagement — exactly the accounts the floor targets. They are not on the
+droplist, so the floor applies. This is the correct trade-off: the floor is
+deliberately conservative (Review, not auto-Unfollow) and the labels oracle
+is known-noisy.
+
+**Zero keep-labeled accounts moved toward Unfollow.** The `label=keep ∩
+bucket=unfollow` cell is 0, unchanged from round 11. The floor is
+monotonically Unfollow → Review; it cannot manufacture an Unfollow.
+
+### Why this is not a regression
+
+The agreement metric counts `label=drop ∩ bucket=unfollow` as an agreement
+hit. When the floor moves zero-signal labeled-drops from Unfollow to Review,
+the agreement _number_ falls — but the floor is correct: a personal account
+with no behavioural evidence in either direction should be triaged, not
+auto-unfollowed. The 3 affected accounts are candidates for `droplist.txt`
+if the owner wants to act on them; they are now in the Review band for manual
+decision rather than auto-unfollowed on no evidence.
+
+The drop in the unfollow count (37 → 11) is the headline result: the audit
+output is now a trustworthy action list rather than a mixed bag of
+evidence-backed drops and zero-signal impulse-follows.
+
+### Deferred — inert/faded sub-grouping in output
+
+The floor surfaces a structurally coherent subgroup (`is_inert` accounts)
+inside Review. A natural follow-up is an output-layer annotation — a
+"no signal" badge or sub-section in the Markdown/HTML report — so the
+human reviewer can triage the 26 inert-floored accounts separately from the
+scored Review accounts. Deferred; see the spec's "Deferred follow-up"
+section.
+
 ## 2026-06-01 — DM-attribution fix + dead-mutual gate (round 11)
 
 Two changes from one triage pass. First a **data-correctness fix**, then a
