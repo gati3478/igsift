@@ -1190,6 +1190,44 @@ mod tests {
     }
 
     #[test]
+    fn parse_error_names_the_offending_json_path() {
+        // The whole schema-drift posture (CLAUDE.md) rests on
+        // `serde_path_to_error` naming the offending *field path*, not just
+        // the file. The integration test in cli.rs only proves a corrupt
+        // file fails its source; this pins the in-message path. A refactor
+        // swapping `serde_path_to_error::deserialize` for a plain
+        // `serde_json::from_reader` would still fail loudly and pass every
+        // other test while silently dropping the path diagnostic — this is
+        // the only test that would then go red.
+        //
+        // `timestamp` is i64; a present string value is a type error (the
+        // `#[serde(default)]` only fills *absent* fields, so it can't mask
+        // this), and the error path must walk
+        // `relationships_following[0].string_list_data[0].timestamp`.
+        let dir = std::env::temp_dir().join(format!(
+            "igsift-parse-path-{}-{}",
+            std::process::id(),
+            jiff::Timestamp::now().as_nanosecond(),
+        ));
+        let following = dir.join(FOLLOWING_FILE);
+        std::fs::create_dir_all(following.parent().unwrap()).expect("mktemp");
+        std::fs::write(
+            &following,
+            r#"{"relationships_following":[{"title":"alice","string_list_data":[{"value":"alice","timestamp":"not-an-integer"}]}]}"#,
+        )
+        .expect("write following.json");
+
+        let err = read_following(&dir).expect_err("type-wrong timestamp must fail to parse");
+        let msg = err.to_string();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(
+            msg.contains("relationships_following[0].string_list_data[0].timestamp"),
+            "parse error must name the offending field path, got: {msg}"
+        );
+    }
+
+    #[test]
     fn me_identity_extracts_handle_and_name() {
         let me = read_me_identity(&fixture_root()).expect("fixture parse");
         // If "Username" or "Name" gets renamed in IG's export the

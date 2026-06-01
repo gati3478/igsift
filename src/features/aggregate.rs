@@ -4,9 +4,8 @@
 //! Folds the parsed [`crate::export`] outputs into one [`AccountFeatures`]
 //! record per followed account. Scope is the followings set per
 //! [`docs/DESIGN.md`](../../../docs/DESIGN.md) ("the ranking covers accounts
-//! **you follow**"); `is_blocked` and `recently_unfollowed` accounts are
-//! hard-excluded at input — they never appear in the output, the two
-//! eponymous fields are always `false`.
+//! **you follow**"); blocked and recently-unfollowed accounts are
+//! hard-excluded at input — they never appear in the output.
 //!
 //! Slice 7A landed:
 //! - boolean flags from the seven `label_values` files (outer-level `Username`,
@@ -129,11 +128,9 @@ pub struct AccountFeatures {
 
     pub is_close_friend: bool,
     pub is_favorited: bool,
-    pub is_blocked: bool,
     pub is_restricted: bool,
     pub is_hide_story_from: bool,
     pub is_removed_suggestion: bool,
-    pub recently_unfollowed: bool,
     /// `true` iff the followee also appears in `followers_*.json` —
     /// the relationship is reciprocal. Carried for decision support
     /// only (surfaces in CSV + MD card "one-sided?" hint); not used
@@ -308,11 +305,9 @@ pub fn aggregate(inputs: &AggregateInputs<'_>, now: Timestamp) -> Vec<AccountFea
             ),
             is_close_friend: close_friend.contains(handle),
             is_favorited: favorited.contains(handle),
-            is_blocked: false,
             is_restricted: restricted.contains(handle),
             is_hide_story_from: hide_story_target == Some(handle),
             is_removed_suggestion: removed_suggestion.contains(handle),
-            recently_unfollowed: false,
             is_mutual: follower_handles.contains(handle),
             is_keeplisted: inputs.classifier.is_keeplisted(handle),
             is_droplisted: inputs.classifier.is_droplisted(handle),
@@ -700,11 +695,9 @@ pub(crate) fn fake_features(username: &str) -> AccountFeatures {
         mutual_age_days: None,
         is_close_friend: false,
         is_favorited: false,
-        is_blocked: false,
         is_restricted: false,
         is_hide_story_from: false,
         is_removed_suggestion: false,
-        recently_unfollowed: false,
         is_mutual: false,
         is_keeplisted: false,
         is_droplisted: false,

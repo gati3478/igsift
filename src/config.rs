@@ -93,10 +93,11 @@ pub struct ScoringParams {
     pub scale: f64,
     pub keep_min: f64,
     pub unfollow_max: f64,
-    /// When `true` (default), a personal, non-mutual account with no inbound
-    /// signal cannot bucket `keep` on one-directional consumption alone — it
-    /// floors at `review`. See [`crate::scoring::assign_bucket`]. The
-    /// `engagement` preset disables this (it scores raw activity by design).
+    /// When `true` (opt-in; **off** by default), a personal, non-mutual
+    /// account with no inbound signal cannot bucket `keep` on
+    /// one-directional consumption alone — it floors at `review`. See
+    /// [`crate::scoring::assign_bucket`]. The `engagement` preset also
+    /// leaves this off (it scores raw activity by design).
     #[serde(default = "default_require_reciprocity_for_keep")]
     pub require_reciprocity_for_keep: bool,
     /// A mutual account whose reciprocal age (`mutual_age_days`) is ≥ this
