@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Initial development. `v0.1.0` is published as a pre-release (prebuilt binaries on
-the GitHub Releases page) for validation; the first full release will be `1.0.0`.
-`igsift` reads an Instagram personal-data export and writes a CSV + Markdown +
-HTML audit ranking who to unfollow vs. keep, with a `keep_probability` per
-account. Fully offline — no network, database, or automated unfollow.
+## [1.0.0] - 2026-06-02
+
+First stable release. `igsift` reads an Instagram personal-data export and writes
+a CSV + Markdown + HTML audit ranking who to unfollow vs. keep, with a
+`keep_probability` per account. Fully offline — no network, database, or
+automated unfollow.
 
 ### Added
 
@@ -108,3 +109,6 @@ account. Fully offline — no network, database, or automated unfollow.
   asserting all three output files are produced. The unit/integration suite
   still runs on Linux; this closes the gap where the Windows binaries were only
   cross-built, never executed.
+
+[Unreleased]: https://github.com/gati3478/igsift/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/gati3478/igsift/releases/tag/v1.0.0
