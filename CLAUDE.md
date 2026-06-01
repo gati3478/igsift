@@ -202,7 +202,7 @@ implementation plans.)
   on `AccountFeatures`, and gate in `scoring::assign_bucket`. Precedence
   (top wins): `is_restricted` (Review floor) → `is_droplisted` (Unfollow)
   → effort-skew HARD (Review) → deep-mutual floor (Keep) → `keep_min`
-  (+ effort-skew SOFT / reciprocity gate → Review) → keep-gates.
+  (+ effort-skew SOFT / non-reciprocal close-tie / reciprocity gate → Review) → keep-gates.
   `is_restricted` is the one floor the droplist yields to. A handle on
   **both** lists is a contradiction — `lists::ensure_disjoint` rejects
   it loudly at load (in `run`), before scoring, so the two rungs never
@@ -224,6 +224,16 @@ implementation plans.)
   The ceiling defaults off across all presets + the `serde` default — the only
   labeled pass (TUNING round 7) measured it as harmful for a content-consumer
   following style; it's preserved as a toggle for mutual-heavy users.
+  The **non-reciprocal close-tie ceiling** (`scoring.demote_nonmutual_close_ties`,
+  default **true** — the mirror-inverse of the reciprocity ceiling) demotes a
+  personal, non-mutual account the owner marked close-friend/favorited (and not
+  keeplisted) Keep → Review: an explicit marker the followee never reciprocated.
+  Unlike the other gates it ships **on** in every preset (high-precision +
+  Review-only, never `unfollow`). A paired always-on penalty weight
+  (`nonmutual_close_tie_penalty`) erodes `score_raw` so the report reflects the
+  flag; the predicate `is_nonreciprocal_close_tie` is the shared SSOT for the
+  penalty term + the gate rung (TUNING round 10). See
+  [`docs/specs/2026-06-01-nonmutual-close-tie-gate-design.md`](docs/specs/2026-06-01-nonmutual-close-tie-gate-design.md).
   The **effort-skew gate** (`scoring.effort_skew_min_dm_out` / `_soft` /
   `_hard`; `min_dm_out = 0` disables) adds two more monotonic rungs — a SOFT
   tier (demotes an unmarked personal Keep) and a HARD tier (overrides

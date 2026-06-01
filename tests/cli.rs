@@ -552,21 +552,29 @@ fn fixture_counts_match_expected() {
         .stdout(contains("DM reactions given total: 1"))
         .stdout(contains("DM reactions received total: 1"))
         .stdout(contains("inbound DM requests: 0"))
-        // First-pass scoring + brand gate:
-        //   - alice (close_friend, boost 5.0) → Keep
-        //   - bob (favorited, boost 3.0) → Keep
-        //   - carol (favorited, boost 3.0; faint DM signal) → Keep
-        //   - nytimes_official (no tenure, no engagement) scores below
-        //     unfollow_max; without the brand-class gate it would be
-        //     Unfollow, but `account_class == Brand` floors it at
-        //     Review per DESIGN.md "Public figures / brands with low
-        //     keep_prob get review, never unfollow."
-        // No fixture account is restricted or hide_story'd, so all
-        // three remaining buckets are accounted for by the above.
+        // First-pass scoring + brand gate + non-reciprocal close-tie gate:
+        //   - alice (close_friend, boost 5.0; MUTUAL) → Keep — the close-tie
+        //     gate requires non-mutuality, so a mutual close friend is untouched.
+        //   - bob (favorited, boost 3.0; NON-mutual) → Review: the
+        //     non-reciprocal close-tie penalty (6.0, on by default in the
+        //     balanced preset this cwd=temp_dir test loads) erodes the +3 boost
+        //     below unfollow_max, and the rung-6 favorited guard floors it at
+        //     Review — never Unfollow. `top_signal` reads
+        //     `nonmutual_close_tie_penalty` on this row.
+        //   - carol (favorited, boost 3.0; NON-mutual; faint DM signal) →
+        //     Review, same close-tie path as bob.
+        //   - nytimes_official (no tenure, no engagement; Brand) scores below
+        //     unfollow_max; `account_class == Brand` floors it at Review per
+        //     DESIGN.md "Public figures / brands with low keep_prob get review,
+        //     never unfollow." Brand is exempt from the close-tie gate, so this
+        //     path is unchanged.
+        // Only alice is mutual (followers ∩ followings = {alice_synth}), so the
+        // two non-mutual favorited accounts are the close-tie demotions. No
+        // fixture account is restricted or hide_story'd.
         // Spacing encodes `{label:<8} {count:>4}` from summary.rs's bucket panel —
         // update these substrings if that format string changes.
-        .stdout(contains("keep        3"))
-        .stdout(contains("review      1"))
+        .stdout(contains("keep        1"))
+        .stdout(contains("review      3"))
         .stdout(contains("unfollow    0"));
 }
 
@@ -574,7 +582,8 @@ fn fixture_counts_match_expected() {
 fn writes_csv_and_markdown_at_out_path() {
     // End-to-end pin for the output writer slice (extended for the
     // account-class slice). Runs the binary against the sample fixture
-    // (4 followings: 3 in Keep + nytimes_official in Review via the
+    // (4 followings: alice in Keep; bob + carol demoted to Review by the
+    // non-reciprocal close-tie gate; nytimes_official in Review via the
     // brand-class gate), asserts both files land at the `--out` stem
     // with the right extensions, and checks the load-bearing surface
     // in each: the CSV header (the inter-run diff contract per

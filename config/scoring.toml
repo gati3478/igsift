@@ -39,6 +39,11 @@ dm_balance_penalty = 1.0          # one-sided thread (I send, they don't)
 reaction_balance_penalty = 0.5    # one-sided reactions (I react, they don't)
 hide_story_penalty = 2.0          # I hid my stories from them
 removed_suggestion_penalty = 0.3  # I dismissed them from PYMK
+nonmutual_close_tie_penalty = 6.0 # personal + marked close-friend/favorited + they
+                                  # don't follow back: unreciprocated explicit tie.
+                                  # Tie-breaker weight (TUNING round 10): visible on
+                                  # low-engagement ties; the gate guarantees the bucket
+                                  # regardless of magnitude, so it stays small.
 
 # --- boolean boosts (added when the gate is on) ---
 close_friend_boost = 5.0          # close_friends.json — should land in `keep`
@@ -80,9 +85,10 @@ deep_mutual_keep_days = 730          # mutual & reciprocal age >= 2y -> keep flo
 effort_skew_min_dm_out = 6     # owner real messages required as evidence
 effort_skew_soft = 0.80        # unmarked personal Keep -> Review at this skew
 effort_skew_hard = 0.85        # overrides close-friend/favorite/mutual at this skew
-                               # Tuned 2026-06-01 (TUNING round 10): on this export
+                               # Tuned 2026-06-01 (TUNING round 9): on this export
                                # the skewed-but-kept accounts are all close friends,
                                # so SOFT is inert and HARD does the work. hard=0.85
                                # (just below the 0.857 = 6-sent/1-reply cluster) +
                                # min=6 surfaces the 3 over-messaged close friends to
                                # Review; 0 hard mismatches vs labels.txt.
+demote_nonmutual_close_ties = true # floor an unreciprocated close-friend/favorite at review

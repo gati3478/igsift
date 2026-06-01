@@ -118,7 +118,7 @@ fn score_one(f: &AccountFeatures, w: &WeightsConfig, p: &ScoringParams) -> Score
 /// `term_contributions` returns a fixed-size array and any future term
 /// addition fails to compile until both the const and the array literal
 /// move together.
-pub const NUM_TERMS: usize = 16;
+pub const NUM_TERMS: usize = 17;
 
 /// Per-term signed contributions to `score_raw`. Penalties surface negative
 /// so consumers (the dominant-feature pick, the `--trace` flag) can rank
@@ -162,6 +162,11 @@ pub fn term_contributions(
     };
     let dm_balance_term = w.dm_balance_penalty * dm_balance_penalty(f);
     let reaction_balance_term = w.reaction_balance_penalty * reaction_balance_penalty(f);
+    let nonmutual_close_tie = if is_nonreciprocal_close_tie(f) {
+        w.nonmutual_close_tie_penalty
+    } else {
+        0.0
+    };
 
     [
         ("dm", w.dm * f.dm_messages_total_decayed),
@@ -189,6 +194,7 @@ pub fn term_contributions(
         ("reaction_balance_penalty", -reaction_balance_term),
         ("hide_story_penalty", -hide_story),
         ("removed_suggestion_penalty", -removed_suggestion),
+        ("nonmutual_close_tie_penalty", -nonmutual_close_tie),
     ]
 }
 
@@ -282,6 +288,20 @@ fn is_parasocial(f: &AccountFeatures) -> bool {
         && !f.is_close_friend
         && !f.is_keeplisted
         && !has_inbound_signal(f)
+}
+
+/// `true` when an account is an **unreciprocated explicit tie**: a personal
+/// account the owner marked close-friend or favorited that never followed them
+/// back. The mirror-inverse of [`is_parasocial`] — where that exempts
+/// close-friend/favorited, this targets exactly that pair when combined with
+/// non-mutuality. `is_keeplisted` is folded in so an explicit keep opts out;
+/// brands are excluded (they legitimately don't follow back). Drives both the
+/// penalty term and the keep-ceiling gate.
+fn is_nonreciprocal_close_tie(f: &AccountFeatures) -> bool {
+    f.account_class == AccountClass::Personal
+        && !f.is_mutual
+        && (f.is_close_friend || f.is_favorited)
+        && !f.is_keeplisted
 }
 
 /// Any signal that the other party engaged toward you — the inbound directions
@@ -378,6 +398,16 @@ fn assign_bucket(f: &AccountFeatures, keep_prob: f64, p: &ScoringParams) -> Buck
             && effort_skew_has_evidence(f, p)
             && reply_skew(f).is_some_and(|s| s >= p.effort_skew_soft)
         {
+            return Bucket::Review;
+        }
+        // Non-reciprocal close-tie ceiling: an explicit close-friend/favorite
+        // marker on a personal account that never followed back is a red flag,
+        // not a keep signal. The penalty term may already have eroded the
+        // score; this guarantees the Review floor when it didn't. Monotonic
+        // (Keep → Review only) — the mirror-inverse of the reciprocity ceiling
+        // below. keeplist is folded into the predicate, so an explicit keep
+        // opts out. See docs/specs/2026-06-01-nonmutual-close-tie-gate-design.md.
+        if p.demote_nonmutual_close_ties && is_nonreciprocal_close_tie(f) {
             return Bucket::Review;
         }
         // Reciprocity keep-ceiling: refuse to auto-keep a personal account
@@ -483,6 +513,7 @@ mod tests {
                 reaction_balance_penalty: 0.5,
                 hide_story_penalty: 2.0,
                 removed_suggestion_penalty: 0.3,
+                nonmutual_close_tie_penalty: 0.0,
                 close_friend_boost: 5.0,
                 favorite_boost: 3.0,
                 inbound_request: 0.5,
@@ -497,6 +528,7 @@ mod tests {
                 effort_skew_min_dm_out: 0,
                 effort_skew_soft: 0.85,
                 effort_skew_hard: 0.95,
+                demote_nonmutual_close_ties: false,
             },
         }
     }
@@ -933,6 +965,77 @@ mod tests {
     }
 
     #[test]
+    fn nonmutual_close_friend_penalty_applies() {
+        // Personal + non-mutual + close_friend (baseline_account is non-mutual,
+        // Personal, not keeplisted) → close_friend_boost(+5) minus penalty(6) = -1.
+        let mut cfg = baseline_cfg();
+        cfg.weights.nonmutual_close_tie_penalty = 6.0;
+        let mut acct = baseline_account("redflag");
+        acct.is_close_friend = true;
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        assert!((score_raw - (-1.0)).abs() < 1e-12, "score_raw={score_raw}");
+    }
+
+    #[test]
+    fn nonmutual_favorite_penalty_applies() {
+        // favorite_boost(+3) minus penalty(6) = -3.
+        let mut cfg = baseline_cfg();
+        cfg.weights.nonmutual_close_tie_penalty = 6.0;
+        let mut acct = baseline_account("redflag");
+        acct.is_favorited = true;
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        assert!((score_raw - (-3.0)).abs() < 1e-12, "score_raw={score_raw}");
+    }
+
+    #[test]
+    fn mutual_close_friend_has_no_penalty() {
+        // is_mutual = true → predicate false → full +5 boost, no erosion.
+        let mut cfg = baseline_cfg();
+        cfg.weights.nonmutual_close_tie_penalty = 6.0;
+        let mut acct = baseline_account("realfriend");
+        acct.is_close_friend = true;
+        acct.is_mutual = true;
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        assert!((score_raw - 5.0).abs() < 1e-12, "score_raw={score_raw}");
+    }
+
+    #[test]
+    fn brand_close_friend_has_no_penalty() {
+        // account_class == Brand → predicate excludes it (brands legitimately
+        // don't follow back). Full boost, no penalty.
+        let mut cfg = baseline_cfg();
+        cfg.weights.nonmutual_close_tie_penalty = 6.0;
+        let mut acct = baseline_account("brandtie");
+        acct.is_close_friend = true;
+        acct.account_class = AccountClass::Brand;
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        assert!((score_raw - 5.0).abs() < 1e-12, "score_raw={score_raw}");
+    }
+
+    #[test]
+    fn keeplisted_nonmutual_close_friend_has_no_penalty() {
+        // is_keeplisted folded into the predicate → explicit keep opts out.
+        let mut cfg = baseline_cfg();
+        cfg.weights.nonmutual_close_tie_penalty = 6.0;
+        let mut acct = baseline_account("kepttie");
+        acct.is_close_friend = true;
+        acct.is_keeplisted = true;
+        let score_raw = score(std::slice::from_ref(&acct), &cfg)[0].score_raw;
+        assert!((score_raw - 5.0).abs() < 1e-12, "score_raw={score_raw}");
+    }
+
+    #[test]
+    fn nonmutual_close_tie_penalty_can_be_dominant_feature() {
+        // |penalty 6| > |close_friend_boost 5| → surfaces as dominant_feature.
+        let mut cfg = baseline_cfg();
+        cfg.weights.nonmutual_close_tie_penalty = 6.0;
+        let mut acct = baseline_account("redflag");
+        acct.is_close_friend = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].dominant_feature, "nonmutual_close_tie_penalty");
+    }
+
+    #[test]
     fn keep_prob_equal_to_unfollow_max_is_review_not_unfollow() {
         // The unfollow gate is `keep_prob < unfollow_max` — exclusive. Set
         // unfollow_max to a keep_prob the scorer actually produces so the
@@ -1328,6 +1431,123 @@ mod tests {
             scored[0].bucket,
             Bucket::Review,
             "reply_skew == soft must demote (>=)"
+        );
+    }
+
+    // ── non-reciprocal close-tie Keep→Review gate (Rule 4) ───────────────
+    //
+    // An explicit close-friend / favorite marker on a personal account that
+    // never followed back is a red flag, not a keep signal. When
+    // `demote_nonmutual_close_ties` is on the gate demotes Keep → Review.
+    // Monotonic only; keeplist opts out; mutual opts out.
+
+    #[test]
+    fn gate_demotes_nonmutual_close_friend_keeper() {
+        // Penalty stays 0 (baseline) so the account still scores into Keep —
+        // isolates the gate. close_friend(+5) → keep_prob ≈ 0.993 ≥ keep_min.
+        let mut cfg = baseline_cfg();
+        cfg.scoring.demote_nonmutual_close_ties = true;
+        let mut acct = baseline_account("ghosttie");
+        acct.is_close_friend = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(
+            scored[0].keep_prob >= cfg.scoring.keep_min,
+            "must score into Keep first: {}",
+            scored[0].keep_prob,
+        );
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn gate_demotes_nonmutual_favorite_keeper() {
+        let mut cfg = baseline_cfg();
+        cfg.scoring.demote_nonmutual_close_ties = true;
+        let mut acct = baseline_account("favtie");
+        acct.is_favorited = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert!(
+            scored[0].keep_prob >= cfg.scoring.keep_min,
+            "favorite must score into Keep first: {}",
+            scored[0].keep_prob,
+        );
+        assert_eq!(scored[0].bucket, Bucket::Review);
+    }
+
+    #[test]
+    fn gate_off_keeps_nonmutual_close_friend() {
+        let cfg = baseline_cfg(); // demote_nonmutual_close_ties = false
+        let mut acct = baseline_account("ghosttie");
+        acct.is_close_friend = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Keep, "gate off → stays Keep");
+    }
+
+    #[test]
+    fn gate_respects_keeplist() {
+        let mut cfg = baseline_cfg();
+        cfg.scoring.demote_nonmutual_close_ties = true;
+        let mut acct = baseline_account("kepttie");
+        acct.is_close_friend = true;
+        acct.is_keeplisted = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(
+            scored[0].bucket,
+            Bucket::Keep,
+            "keeplist folded into predicate → gate skips it",
+        );
+    }
+
+    #[test]
+    fn gate_ignores_mutual_close_friend() {
+        let mut cfg = baseline_cfg();
+        cfg.scoring.demote_nonmutual_close_ties = true;
+        let mut acct = baseline_account("realfriend");
+        acct.is_close_friend = true;
+        acct.is_mutual = true;
+        let scored = score(std::slice::from_ref(&acct), &cfg);
+        assert_eq!(scored[0].bucket, Bucket::Keep, "mutual opts out of gate");
+    }
+
+    #[test]
+    fn heavy_close_tie_penalty_never_manufactures_unfollow() {
+        // Feature-level monotonicity guarantee: even a penalty large enough to
+        // drag keep_prob below unfollow_max can never push a marked close-tie to
+        // Unfollow. This holds via the PRE-EXISTING rung-6 close-friend/favorite
+        // Unfollow-guard (the design's documented fallback), independent of the
+        // new keep-ceiling rung — so we assert Review with the gate BOTH on and
+        // off. The new rung's own demotion is proven separately by
+        // `gate_demotes_nonmutual_close_friend_keeper` + `gate_off_keeps_*`.
+        let mut acct = baseline_account("buriedtie");
+        acct.is_close_friend = true;
+
+        let mut on = baseline_cfg();
+        on.scoring.demote_nonmutual_close_ties = true;
+        on.weights.nonmutual_close_tie_penalty = 20.0; // 5 - 20 = -15
+        let scored_on = score(std::slice::from_ref(&acct), &on);
+        assert!(
+            scored_on[0].keep_prob < on.scoring.unfollow_max,
+            "penalty must drag it into the Unfollow score range: {}",
+            scored_on[0].keep_prob,
+        );
+        assert_eq!(
+            scored_on[0].bucket,
+            Bucket::Review,
+            "gate on: floored at Review, never Unfollow",
+        );
+
+        // Off-control: with the gate disabled the penalty still applies, the
+        // score is still sub-unfollow_max, yet the close-friend Unfollow-guard
+        // still floors it at Review — proving the no-Unfollow property does not
+        // depend on the new rung, and the penalty alone cannot manufacture one.
+        let mut off = baseline_cfg();
+        off.scoring.demote_nonmutual_close_ties = false;
+        off.weights.nonmutual_close_tie_penalty = 20.0;
+        let scored_off = score(std::slice::from_ref(&acct), &off);
+        assert!(scored_off[0].keep_prob < off.scoring.unfollow_max);
+        assert_eq!(
+            scored_off[0].bucket,
+            Bucket::Review,
+            "gate off: penalty alone cannot manufacture Unfollow",
         );
     }
 }

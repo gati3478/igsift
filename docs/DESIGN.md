@@ -295,12 +295,17 @@ penalties      = w_dm_balance_penalty·dm_balance_penalty
                + w_reaction_balance_penalty·reaction_balance_penalty
                + (is_hide_story_from   ? w_hide_story_penalty   : 0)
                + (is_removed_suggestion ? w_removed_suggestion_penalty : 0)
+               + (nonmutual_close_tie ? w_nonmutual_close_tie_penalty : 0)
 score_raw      = engagement + reciprocity + tenure + boosts - penalties
 keep_prob      = sigmoid((score_raw - threshold) / scale)
 ```
 
 Every key in [`config/scoring.toml`](../config/scoring.toml) `[weights]` appears
-exactly once above. Recency enters through the exponential decay applied to
+exactly once above. `nonmutual_close_tie` is the predicate `account_class ==
+Personal && !mutual && (is_close_friend || is_favorited) && !is_keeplisted` —
+an explicit relationship marker the followee never reciprocated with a
+follow-back (the mirror-inverse of the reciprocity ceiling below). Recency
+enters through the exponential decay applied to
 each count (`[decay]` τ constants), not as an additive term — `dm_recency_days`
 is materialized on `AccountFeatures` for the CSV (`last_dm_days`) but never
 fed into `score_raw`. Weights and constants live in TOML so they can be
@@ -365,7 +370,9 @@ lists bracket the inferred score:
                                       — overrides close-friend / favorite / mutual + the deep-mutual floor
 4. deep-mutual floor    → Keep        mutual & mutual_age_days ≥ deep_mutual_keep_days
 5. keep_prob ≥ keep_min → Keep        …unless effort-skew SOFT (unmarked & DM evidence &
-                                      reply_skew ≥ effort_skew_soft) or the reciprocity gate fires → Review
+                                      reply_skew ≥ effort_skew_soft), the non-reciprocal close-tie
+                                      gate (personal & !mutual & marked & !keeplisted), or the
+                                      reciprocity gate fires → Review
 6. keep_prob < unfollow_max:
      is_close_friend | is_favorited | is_keeplisted | non-Personal → Review
      else → Unfollow
@@ -392,8 +399,8 @@ only where Instagram actually exports both sides of the conversation, so it neve
 touches relationships that live off-platform. Full design:
 [`docs/specs/2026-05-31-effort-skew-gate-design.md`](specs/2026-05-31-effort-skew-gate-design.md).
 
-**Two relationship gates bracket the score (rungs 4–5), both monotonic — each
-can only move an account one direction, so neither can manufacture a wrongful
+**Three relationship gates bracket the score (rungs 4–5), each monotonic — each
+can only move an account one direction, so none can manufacture a wrongful
 `unfollow`.** They encode the core principle that _keep = relationship, not
 consumption_:
 
@@ -402,6 +409,19 @@ consumption_:
   later of {you followed them, they followed you back}) is ≥ the threshold
   floors to `keep`. A long two-way history is a real relationship worth keeping
   even with no recent engagement. Only moves up to `keep`; `0` disables it.
+- **Non-reciprocal close-tie ceiling** (rung 5, `demote_nonmutual_close_ties`,
+  default **on**): the mirror-inverse of the reciprocity ceiling — an account
+  that scored into `keep` is demoted to `review` when the owner applied an
+  explicit relationship marker the followee never reciprocated:
+  `account_class == Personal`, **not** mutual, `is_close_friend || is_favorited`,
+  and not keeplisted. A paired **penalty** (`nonmutual_close_tie_penalty`) also
+  erodes `score_raw` so the report reflects the red flag, but the gate is what
+  guarantees the floor; only moves down to `review`, never `unfollow` (a
+  heavily-penalized marked account is caught by rung 6's marker guard). Ships
+  **on across all presets** — unlike the other two gates — because it is
+  high-precision (the explicit marker _and_ non-mutuality _and_ personal-class)
+  and Review-only. Full design:
+  [`docs/specs/2026-06-01-nonmutual-close-tie-gate-design.md`](specs/2026-06-01-nonmutual-close-tie-gate-design.md).
 - **Reciprocity keep-ceiling** (rung 5, `require_reciprocity_for_keep`, default
   **off** — opt-in): when enabled, an account that scored into `keep` is
   demoted to `review` when its _entire_ relationship is one-directional

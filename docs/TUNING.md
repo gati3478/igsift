@@ -10,6 +10,77 @@ The methodology choice for this pass was the **hybrid** in DESIGN.md's
 with `config/labels.txt` (when laid down) serving as a held-out accuracy
 floor. The labels file is not committed — it's a per-user artifact.
 
+## 2026-06-01 — non-reciprocal close-tie penalty + gate (round 10)
+
+A penalty weight + a monotonic gate for the **mirror-inverse of the parasocial
+exemption**: a personal, non-mutual account the owner marked close-friend or
+favorited — an explicit "matters to me" signal the followee never reciprocated
+with a follow-back. Full design:
+[`specs/2026-06-01-nonmutual-close-tie-gate-design.md`](specs/2026-06-01-nonmutual-close-tie-gate-design.md).
+
+### What changed
+
+Two knobs, following the codebase's existing split (penalties are weight-
+controlled and always-on; gates are toggle-controlled):
+
+```toml
+# [weights]
+nonmutual_close_tie_penalty = 6.0   # subtracted when personal + !mutual + (close_friend|favorited)
+# [scoring]
+demote_nonmutual_close_ties = true  # floor such accounts at review
+```
+
+Unlike the round-6 reciprocity ceiling and the round-9 effort-skew gate (both
+default **off**), this ships **on by default in all three presets** — it is
+high-precision (requires the explicit marker AND non-mutuality AND
+personal-class) and Review-only, so a binary-only install gets it.
+
+### Distribution shift (real export, 649 followings)
+
+Feature off → on: **keep 569 → 546, review 43 → 66, unfollow 37 → 37.**
+**23 personal non-mutual close-tie accounts demoted Keep → Review**, by two
+mechanically-distinct paths:
+
+- **14 via penalty-crater**: the −6 penalty erodes the +3 / +5 marker boost
+  below `unfollow_max`; the _pre-existing_ rung-6 close-friend/favorite guard
+  then floors them at Review (never Unfollow).
+- **9 via the gate rung**: heavy engagers whose `score_raw` (often 20–35) swamps
+  the −6, so they still score into Keep — the keep-ceiling rung demotes them.
+
+Unfollow is unchanged at 37: the feature **never manufactures an Unfollow** (the
+marker guard catches the cratered accounts; the gate is Keep → Review only).
+
+### Zero labeled collateral
+
+The confusion matrix is **identical** feature-off vs feature-on —
+`label=keep ∩ bucket=review = 12` both ways, `label=keep ∩ bucket=unfollow = 0`
+— so **agreement holds steady at 79.3% (46/58)** and all 23 demoted accounts are
+**unlabeled**. The gate encodes a principle, not a fit to the labels: it moves
+exactly the accounts the labels are silent on.
+
+### Magnitude finding — 6.0 is a tie-breaker, not a score-dominator
+
+At 6.0 the _score erosion_ is visible only for low-engagement ties
+(`keep_score ≈ 0.82`, `top_signal = nonmutual_close_tie_penalty`); heavy engagers
+keep `keep_score = 1.000` (a −6 is noise against `score_raw ≈ 27`). This is by
+design: `keep_score` is a sigmoid of an **unbounded** engagement sum, so no
+fixed additive penalty can dent a heavy scorer without becoming the single
+largest weight in the model and cratering the low-engagement ties to ~0. The
+**gate**, not the penalty, guarantees the bucket; the decision-hint
+("close tie not reciprocated — they don't follow you back") carries the reason
+in the report. Same affinity-score-stays / call-moves split as `is_restricted`,
+effort-skew, and the deep-mutual floor. (A follow-up — capping the displayed
+`keep_score` when the gate fires — was considered and deferred as a separate
+change.)
+
+### Why gates, not weights
+
+Same as rounds 6 and 9: the gate encodes a one-sentence principle ("an
+unreciprocated explicit close tie is a red flag, not a keep signal") whose
+correctness does not depend on the noisy labels. The penalty is the only weight
+here and is deliberately small — a nudge, with the gate doing the load-bearing
+work.
+
 ## 2026-06-01 — effort-skew gate shipped (round 9, structural)
 
 Not a TOML weights edit — a new monotonic gate and its three config knobs

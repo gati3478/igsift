@@ -73,6 +73,13 @@ pub struct WeightsConfig {
     pub reaction_balance_penalty: f64,
     pub hide_story_penalty: f64,
     pub removed_suggestion_penalty: f64,
+    /// Subtracted from `score_raw` for a personal, non-mutual account the
+    /// owner marked close-friend/favorited (an unreciprocated explicit tie).
+    /// Always-on like the other penalties — `0.0` disables the score erosion;
+    /// the Review floor is governed separately by
+    /// `ScoringParams::demote_nonmutual_close_ties`. See
+    /// `scoring::is_nonreciprocal_close_tie`.
+    pub nonmutual_close_tie_penalty: f64,
     pub close_friend_boost: f64,
     pub favorite_boost: f64,
     pub inbound_request: f64,
@@ -123,6 +130,15 @@ pub struct ScoringParams {
     /// and the restricted floor still win).
     #[serde(default = "default_effort_skew_hard")]
     pub effort_skew_hard: f64,
+    /// When `true` (**default**), a personal, non-mutual account marked
+    /// close-friend/favorited (and not keeplisted) is floored at `review`
+    /// instead of auto-keeping on the stale marker — the mirror-inverse of the
+    /// reciprocity ceiling. Monotonic: Keep → Review only. See
+    /// [`crate::scoring::assign_bucket`]. Unlike effort-skew/reciprocity this
+    /// defaults ON: it is high-precision (explicit marker + non-mutual +
+    /// personal) and never produces Unfollow.
+    #[serde(default = "default_demote_nonmutual_close_ties")]
+    pub demote_nonmutual_close_ties: bool,
 }
 
 fn default_require_reciprocity_for_keep() -> bool {
@@ -149,6 +165,12 @@ fn default_effort_skew_soft() -> f64 {
 
 fn default_effort_skew_hard() -> f64 {
     0.95
+}
+
+fn default_demote_nonmutual_close_ties() -> bool {
+    // On by default — see docs/specs/2026-06-01-nonmutual-close-tie-gate-design.md.
+    // High-precision (explicit marker + non-mutual + personal), Review-only.
+    true
 }
 
 /// Read and parse the scoring config, following the documented resolution
@@ -236,6 +258,10 @@ fn validate(cfg: &ScoringConfig) -> Result<()> {
         (
             "removed_suggestion_penalty",
             cfg.weights.removed_suggestion_penalty,
+        ),
+        (
+            "nonmutual_close_tie_penalty",
+            cfg.weights.nonmutual_close_tie_penalty,
         ),
         ("close_friend_boost", cfg.weights.close_friend_boost),
         ("favorite_boost", cfg.weights.favorite_boost),
@@ -346,6 +372,7 @@ removed_suggestion_penalty = 0.3
 close_friend_boost = 5.0
 favorite_boost = 3.0
 inbound_request = 0.5
+nonmutual_close_tie_penalty = 4.0
 
 [scoring]
 threshold = 0.0
@@ -539,5 +566,45 @@ unfollow_max = 0.3
         let cfg: ScoringConfig = toml::from_str(&body).expect("toml parses");
         let err = validate(&cfg).expect_err("soft > 1 must be rejected");
         assert!(format!("{err:#}").contains("effort_skew_soft"));
+    }
+
+    #[test]
+    fn nonmutual_close_tie_defaults_to_demote_true() {
+        // A config body with no `demote_nonmutual_close_ties` key parses with
+        // the gate ON by default — unlike effort-skew/reciprocity, this gate
+        // ships live (high-precision, Review-only). The weight is required, so
+        // VALID_BODY carries it (see `nonmutual_close_tie_penalty_is_required`).
+        let cfg = parse_str(VALID_BODY, "/synthetic.toml").expect("parses");
+        validate(&cfg).expect("validates");
+        assert!(cfg.scoring.demote_nonmutual_close_ties);
+    }
+
+    #[test]
+    fn nonmutual_close_tie_penalty_is_required() {
+        // The penalty is a [weights] field with no serde default (every weight
+        // is required). A body omitting it must fail to parse, naming the field.
+        let body = VALID_BODY.replace("nonmutual_close_tie_penalty = 4.0\n", "");
+        let err =
+            parse_str(&body, "/synthetic.toml").expect_err("missing required weight must fail");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("nonmutual_close_tie_penalty"),
+            "error must name the missing weight: {msg}",
+        );
+    }
+
+    #[test]
+    fn non_finite_nonmutual_close_tie_penalty_is_rejected() {
+        let body = VALID_BODY.replace(
+            "nonmutual_close_tie_penalty = 4.0",
+            "nonmutual_close_tie_penalty = nan",
+        );
+        let cfg: ScoringConfig = toml::from_str(&body).expect("toml parses");
+        let err = validate(&cfg).expect_err("NaN penalty must be rejected");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("nonmutual_close_tie_penalty"),
+            "error must name the offending weight: {msg}",
+        );
     }
 }

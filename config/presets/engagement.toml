@@ -27,6 +27,7 @@ dm_balance_penalty = 1.5
 reaction_balance_penalty = 0.7
 hide_story_penalty = 2.0
 removed_suggestion_penalty = 0.5
+nonmutual_close_tie_penalty = 6.0
 
 # --- boolean boosts ---
 close_friend_boost = 5.0

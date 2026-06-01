@@ -97,6 +97,19 @@ pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str
     if f.is_keeplisted {
         return "explicit keeplist";
     }
+    // A personal account marked close-friend/favorited that never followed
+    // back — name the red flag rather than the bland "marked close friend".
+    // (is_keeplisted already returned above, so the keeplist opt-out holds.)
+    // Deliberately mirrors `scoring::is_nonreciprocal_close_tie` by shape: that
+    // predicate is private to `scoring`, so it can't be shared across the module
+    // boundary — a new marker added there must be added here too (the
+    // precedence test's favorited + mutual-guard rows pin the current shape).
+    if !f.is_mutual
+        && (f.is_close_friend || f.is_favorited)
+        && matches!(f.account_class, AccountClass::Personal)
+    {
+        return "close tie not reciprocated — they don't follow you back";
+    }
     if f.is_close_friend {
         return "marked close friend";
     }
@@ -313,6 +326,42 @@ mod tests {
                     f.is_close_friend = true;
                 },
                 bucket: Bucket::Keep,
+            },
+            Case {
+                // The new red-flag arm beats the generic "marked close friend":
+                // a personal, non-mutual, close-friend account is described as
+                // the unreciprocated tie it is. Sits below keeplist, above the
+                // plain close_friend/favorited arms.
+                label: "non-reciprocal close tie beats marked close friend",
+                expected: "close tie not reciprocated — they don't follow you back",
+                mutate: |f| {
+                    f.is_close_friend = true;
+                    f.is_mutual = false; // baseline is_mutual = true
+                },
+                bucket: Bucket::Review,
+            },
+            Case {
+                // Guard: a MUTUAL close friend still reports "marked close
+                // friend" — the new arm requires non-mutuality.
+                label: "mutual close friend still marked close friend",
+                expected: "marked close friend",
+                mutate: |f| {
+                    f.is_close_friend = true; // is_mutual stays true (baseline)
+                },
+                bucket: Bucket::Keep,
+            },
+            Case {
+                // The OR's favorited branch: a non-mutual FAVORITED personal
+                // account (no close-friend flag) also hits the red-flag arm.
+                // Pins the `|| f.is_favorited` half so a refactor dropping it
+                // trips here.
+                label: "non-reciprocal favorited hits the red-flag arm",
+                expected: "close tie not reciprocated — they don't follow you back",
+                mutate: |f| {
+                    f.is_favorited = true;
+                    f.is_mutual = false; // baseline is_mutual = true
+                },
+                bucket: Bucket::Review,
             },
             Case {
                 label: "close_friend beats favorited",
