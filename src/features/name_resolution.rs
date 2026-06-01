@@ -25,16 +25,25 @@
 //!   than one handle (e.g., `"Mike"` → {`bermudalckt`, `hairycub81`,
 //!   `leahcim333`}). [`NameResolver::resolve`] returns `None` for any
 //!   colliding name rather than guessing — wrong attribution is more
-//!   damaging here than missing attribution. The 21 entries with
-//!   non-empty `Username` but empty `Name` (mostly `close_friends.json`
-//!   entries) are dropped at build time so the empty-string key cannot
-//!   become a phantom resolution path.
+//!   damaging here than missing attribution.
+//! - **No-display-name accounts.** ~23 entries (mostly `close_friends.json`)
+//!   carry a non-empty `Username` but an empty `Name` — accounts that
+//!   never set a display name. For these, IG emits the **handle** as the
+//!   DM `sender_name` and `participants[].name`. [`NameResolver::build`]
+//!   registers an identity mapping (`handle → handle`) so their threads
+//!   resolve to themselves instead of being dropped. Earlier versions
+//!   dropped these entries, silently losing whole threads (a 436-message
+//!   close-friend thread, 277 inbound, reported as `dm=0`). The identity
+//!   key is the handle, not `""`, so no phantom empty-string path is
+//!   created; a real display name elsewhere that equals the handle still
+//!   collides safely to `None`.
 //!
 //! The folder name `<inbox>/<thread>/` is **not** a usable bridge:
 //! validation showed it is the participant's display name sanitized
-//! (lowercased, spaces/punctuation stripped), not the handle. The 3 of 30
-//! sampled followings whose folder prefix equaled the handle were
-//! coincidences where the display name happens to equal the handle.
+//! (lowercased, spaces/punctuation stripped), not the handle. The handful
+//! of sampled followings whose folder prefix equaled the handle were the
+//! no-display-name case above (handle used everywhere), now handled via
+//! the `sender_name`-side identity mapping rather than the folder name.
 
 use std::collections::HashMap;
 
@@ -76,7 +85,26 @@ impl NameResolver {
         let mut handle_to_names: HashMap<String, Vec<String>> = HashMap::new();
         for source in sources {
             for entry in *source {
-                let Some((name, handle)) = label_pair(entry) else {
+                let (name, handle) = label_fields(entry);
+                let Some(handle) = handle else {
+                    continue;
+                };
+                let Some(name) = name else {
+                    // No display name: IG emits the handle as
+                    // participants[].name and sender_name, so register an
+                    // identity mapping (handle → handle) on the forward
+                    // side only. Keyed on the handle (not ""), so there is
+                    // no phantom empty-string path; handles are unique, so
+                    // the only way this key collides is a real display
+                    // name elsewhere that equals the handle — which
+                    // correctly surfaces as a collision (resolve → None).
+                    // The reverse side is left untouched: the account has
+                    // no display name, so the CSV column stays empty
+                    // rather than echoing the handle back as a name.
+                    let handles = name_to_handles.entry(handle.to_owned()).or_default();
+                    if !handles.iter().any(|h| h == handle) {
+                        handles.push(handle.to_owned());
+                    }
                     continue;
                 };
                 // Fix IG's UTF-8-as-Latin-1 mojibake on the display-name
@@ -150,15 +178,17 @@ impl NameResolver {
     }
 }
 
-fn label_pair(entry: &ShapeCEntry) -> Option<(&str, &str)> {
-    // Both fields must be non-empty to be a usable bridge. The 2026-05-11
-    // export ships 21 entries (mostly in `close_friends.json`) with a
-    // non-empty `Username` but an empty `Name` — likely accounts that
-    // never set a display name, so the handle IS the display name.
-    // Including them as `("", handle)` would lump every empty-name entry
-    // under the same `""` key, polluting the collision-detection logic
-    // and creating a phantom resolution path no DM thread can hit
-    // (display name `""` does not occur in participant lists).
+/// Extract the `(Name, Username)` pair from a relationship-flag entry,
+/// each empty-filtered to `None`.
+///
+/// A `Username` with no `Name` is the no-display-name case: the 2026-05-11
+/// export ships ~23 such entries (mostly in `close_friends.json`) for
+/// accounts that never set a display name. IG then emits the *handle* as
+/// the DM `sender_name` / `participants[].name`, so [`NameResolver::build`]
+/// registers an identity mapping for them rather than dropping them — the
+/// fix for the silently-dropped DM threads (e.g. a 436-message thread read
+/// as `dm=0`). The caller, not this function, applies that policy.
+fn label_fields(entry: &ShapeCEntry) -> (Option<&str>, Option<&str>) {
     let mut name = None;
     let mut handle = None;
     for lv in &entry.label_values {
@@ -168,7 +198,7 @@ fn label_pair(entry: &ShapeCEntry) -> Option<(&str, &str)> {
             _ => {}
         }
     }
-    Some((name?, handle?))
+    (name, handle)
 }
 
 #[cfg(test)]
@@ -238,36 +268,75 @@ mod tests {
     }
 
     #[test]
-    fn ignores_entries_missing_either_field() {
+    fn entry_without_username_is_ignored_without_name_is_identity() {
         let entries = vec![
-            entry(&[("Name", "Alice")]),     // no Username
-            entry(&[("Username", "bob_h")]), // no Name
+            entry(&[("Name", "Alice")]),     // no Username → can't bridge
+            entry(&[("Username", "bob_h")]), // no Name → identity mapping
             entry(&[("Name", "Carol"), ("Username", "carol_h")]),
         ];
         let r = NameResolver::build(&[&entries]);
-        assert_eq!(r.unique_name_count(), 1);
+        // Carol (full bridge) + bob_h (identity) are known; Alice is not.
+        assert_eq!(r.unique_name_count(), 2);
         assert_eq!(r.resolve("Carol"), Some("carol_h"));
+        assert_eq!(r.resolve("bob_h"), Some("bob_h"));
         assert_eq!(r.resolve("Alice"), None);
     }
 
     #[test]
-    fn empty_name_or_username_is_not_a_bridge() {
-        // The 2026-05-11 export ships 21 entries with non-empty Username
-        // but empty Name (mostly close_friends entries where the user
-        // never set a display name). Treating those as ("", handle)
-        // bridges would lump them all under the empty-string key —
-        // polluting collision detection and creating an unreachable
-        // resolution path.
+    fn empty_name_resolves_handle_to_itself() {
+        // When a DM counterparty never set an Instagram display name, IG
+        // emits the *handle* in participants[].name and sender_name. The
+        // matching label_values entry then carries a Username but an empty
+        // Name. Register an identity mapping (handle → handle) so the
+        // thread resolves to itself instead of being dropped — the
+        // bubblegumflavoredhippo case: a 436-message close-friend thread
+        // (277 inbound) silently reported as dm=0. Keyed on the handle, so
+        // no phantom empty-string path; handles are unique, so no
+        // collision risk from this side.
+        let entries = vec![entry(&[("Name", ""), ("Username", "hippo_handle")])];
+        let r = NameResolver::build(&[&entries]);
+        assert_eq!(r.resolve("hippo_handle"), Some("hippo_handle"));
+        // The account genuinely has no display name → the reverse
+        // direction stays None so the CSV display_name column stays empty
+        // rather than fabricating the handle as a display name.
+        assert_eq!(r.display_name_for("hippo_handle"), None);
+        // No phantom empty-string resolution path (the original concern).
+        assert_eq!(r.resolve(""), None);
+    }
+
+    #[test]
+    fn identity_mapping_collides_safely() {
+        // If some other account's real display name equals this handle
+        // string, the identity key collides — resolve returns None (no
+        // guess), preserving "misattribution is worse than missing
+        // attribution".
         let entries = vec![
-            entry(&[("Name", ""), ("Username", "handle_a")]),
-            entry(&[("Name", ""), ("Username", "handle_b")]),
-            entry(&[("Name", "Real Name"), ("Username", "")]),
+            entry(&[("Name", ""), ("Username", "ambiguous")]),
+            entry(&[("Name", "ambiguous"), ("Username", "other_handle")]),
+        ];
+        let r = NameResolver::build(&[&entries]);
+        assert_eq!(r.resolve("ambiguous"), None);
+    }
+
+    #[test]
+    fn empty_username_is_not_a_bridge() {
+        // The mirror case stays excluded: a Name with no Username can't
+        // bridge (nothing to map to). An empty Name with a Username now
+        // registers an identity mapping instead of being dropped.
+        let entries = vec![
+            entry(&[("Name", ""), ("Username", "handle_a")]), // identity now
+            entry(&[("Name", "Real Name"), ("Username", "")]), // no handle → skip
             entry(&[("Name", "Bob Synth"), ("Username", "bob_h")]),
         ];
         let r = NameResolver::build(&[&entries]);
-        assert_eq!(r.unique_name_count(), 1, "only Bob Synth should remain");
-        assert_eq!(r.collision_count(), 0);
+        assert_eq!(r.resolve("Real Name"), None, "no Username → no bridge");
         assert_eq!(r.resolve("Bob Synth"), Some("bob_h"));
+        assert_eq!(
+            r.resolve("handle_a"),
+            Some("handle_a"),
+            "empty Name → identity",
+        );
+        assert_eq!(r.collision_count(), 0);
         assert_eq!(r.resolve(""), None);
     }
 

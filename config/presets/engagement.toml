@@ -47,3 +47,6 @@ unfollow_max = 0.4
 # is a legitimate keep signal here — opt out of the reciprocity ceiling.
 require_reciprocity_for_keep = false
 deep_mutual_keep_days = 730
+# Dead-mutual gate: inert personal mutual younger than this -> Review. 0 disables.
+# See docs/specs/2026-06-01-dead-mutual-review-gate-design.md.
+dead_mutual_review_max_tenure_days = 437

@@ -10,6 +10,62 @@ The methodology choice for this pass was the **hybrid** in DESIGN.md's
 with `config/labels.txt` (when laid down) serving as a held-out accuracy
 floor. The labels file is not committed — it's a per-user artifact.
 
+## 2026-06-01 — DM-attribution fix + dead-mutual gate (round 11)
+
+Two changes from one triage pass. First a **data-correctness fix**, then a
+gate built on the corrected data. Full design:
+[`specs/2026-06-01-dead-mutual-review-gate-design.md`](specs/2026-06-01-dead-mutual-review-gate-design.md).
+
+### Part A — DM attribution for no-display-name accounts (not a tuning edit)
+
+The `NameResolver` dropped `label_values` entries with a `Username` but an
+empty `Name`. Those are accounts that never set an Instagram display name —
+and for exactly those, IG emits the **handle** as the DM `sender_name`, so
+their whole thread failed to resolve and scored as `dm=0`. The fix registers
+an identity mapping (`handle → handle`). On the real export this recovered
+**20 accounts / ~12k previously-dropped messages** (one thread was 4905
+messages, 2540 inbound). Feeding correct DM volume to the _existing_ gates
+moved **24 accounts Keep → Review** on its own (keep 569 → 545, review 43 → 67) — including one that was an effort-skew case **masked** by its dropped
+thread. Lesson: a "missing gate" symptom can be a "corrupted feature"
+symptom in disguise; fix the input before adding scoring logic.
+
+### Part B — dead-mutual gate
+
+A monotonic Keep → Review gate for a personal _mutual_ riding a high
+`keep_prob` on undecayed mutual + tenure with **zero interaction in either
+direction** (no DM sent/received, no inbound, ≤1 like/comment in 90d) and a
+short tenure — a follow-back that never became a relationship. None of the
+existing gates reach it (close-tie needs `!mutual`, effort-skew needs DM
+volume, deep-mutual _protects_ long mutuals, reciprocity needs `!mutual`).
+
+```toml
+# [scoring]
+dead_mutual_review_max_tenure_days = 437  # p25 of kept-mutual tenure; 0 disables
+```
+
+Pure gate, no penalty term. Markers do **not** exempt (the owner's call: a
+stale close-friend flag with no interaction behind it is still review-worthy);
+a real DM/inbound signal does, folded into the predicate. The engagement cap
+is load-bearing — without it the set widens 23 → 36, sweeping in active
+one-sided likers (one at 42 likes/90d). Ships **on** in all presets
+(Review-only), like the close-tie gate.
+
+**Distribution shift (corrected export, 649 followings):** keep 545 → **522**,
+review 67 → **90**, unfollow 37 → 37. **23** accounts demoted, all matching
+the dead-mutual shape, **0** collision with the 58 `labels.txt` entries
+(label=keep ∩ bucket=keep held at 40), agreement steady at **79.3%**. The
+gate trades nothing measurable against the oracle because the class is
+non-separable for the labeled set yet structurally obvious — exactly the
+"gates not weights" case.
+
+### Deferred — effort-skew companion
+
+The original plan also lowered `effort_skew_soft` 0.80 → 0.75 to catch a
+faded outbound-skewed mutual (`reply_skew = 0.769`). Dropped: that account is
+close-friend-marked, and SOFT _exempts_ markers — only HARD (0.85) overrides
+them, and 0.769 < 0.85. Catching it needs a HARD-tier change with its own
+blast-radius pass; left for a separate decision.
+
 ## 2026-06-01 — non-reciprocal close-tie penalty + gate (round 10)
 
 A penalty weight + a monotonic gate for the **mirror-inverse of the parasocial

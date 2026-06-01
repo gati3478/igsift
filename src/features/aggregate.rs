@@ -1266,6 +1266,38 @@ mod tests {
     }
 
     #[test]
+    fn handle_as_sender_name_attributes_via_identity_mapping() {
+        // Regression: a counterparty who never set a display name appears
+        // in the thread as the bare handle (participants[].name ==
+        // sender_name == handle). Its close_friends entry carries a
+        // Username but empty Name, so the resolver registers an identity
+        // mapping — the thread must attribute instead of dropping to dm=0.
+        // The bubblegumflavoredhippo case: 436 real messages (277 inbound)
+        // previously lost.
+        let followings = vec![following("hippo", None)];
+        let hide = empty_hide_entry();
+        let me = synth_me();
+        // Empty Name + Username → identity mapping for `hippo`.
+        let resolver = resolver_from(&[("", "hippo")]);
+        let decay = synth_decay();
+        let classifier = synth_classifier();
+        let mut inputs = empty_inputs(&followings, &hide, &me, &resolver, &classifier, &decay);
+        let threads = vec![dm_thread(
+            &["hippo", "Me Real"],
+            vec![
+                msg(Some("hippo"), Some(1_700_000_000), vec![]), // inbound
+                msg(Some("hippo"), Some(1_700_000_100), vec![]), // inbound
+                msg(Some("Me Real"), Some(1_700_000_200), vec![]), // outbound
+            ],
+        )];
+        inputs.inbox_threads = &threads;
+
+        let by = by_username(aggregate(&inputs, fixed_now()));
+        assert_eq!(by["hippo"].dm_messages_total, 3);
+        assert_eq!(by["hippo"].dm_inbound_replies, 2);
+    }
+
+    #[test]
     fn colliding_display_name_credits_no_followee() {
         // Resolver collisions (one Name maps to ≥ 2 distinct handles)
         // resolve to None, mirroring the resolver's "misattribution >
