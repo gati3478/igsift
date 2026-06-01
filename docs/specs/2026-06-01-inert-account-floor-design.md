@@ -125,6 +125,12 @@ Every token must pass the module's existing discipline — a
 it ships; a token that false-positives on any real personal handle is
 dropped from this change.
 
+> **As built:** on verification only `project` passed the 0-FP grep. `design`
+> matched a personal design-creator the owner engages with (a real FP) and
+> `studies` matched an ambiguous `name.studies` personal portfolio, so both
+> were dropped — see TUNING round 12. The two paragraphs below are the
+> pre-implementation rationale and still hold for the shipped `project` token.
+
 Honest scope: with Change A in place the lexicon's _bucketing_ value is
 small — every zero-engagement `*_design` / `*studies` / `*project` handle is
 already floored by the inert gate. The payoff is **classification accuracy**
