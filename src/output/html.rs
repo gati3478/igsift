@@ -53,7 +53,7 @@ pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> 
     let total = scored.len();
 
     writeln!(writer, "<!DOCTYPE html>").context("html doctype")?;
-    writeln!(writer, "<html lang=\"en\">").context("html")?;
+    writeln!(writer, "<html lang=\"en\" data-theme=\"auto\">").context("html")?;
     writeln!(writer, "<head>").context("html")?;
     writeln!(writer, "<meta charset=\"utf-8\">").context("html")?;
     writeln!(
@@ -61,8 +61,23 @@ pub fn write_to(scored: &[ScoredAccount], mut writer: impl Write) -> Result<()> 
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     )
     .context("html")?;
+    // Anti-FOUC: stamp the persisted theme onto <html> before the stylesheet
+    // paints, so a saved Dark choice never flashes light on load. Runs ahead
+    // of <style>; with JS disabled the markup's data-theme="auto" + the
+    // prefers-color-scheme media query still drive the right theme.
+    writeln!(writer, "<script>{BOOT_SCRIPT}</script>").context("script")?;
     writeln!(writer, "<title>Following audit — {}</title>", escape(&date)).context("html")?;
-    writeln!(writer, "<style>{STYLE}</style>").context("style")?;
+    // Dark tokens are emitted twice from one source (`dark_rules`): once under
+    // the explicit `[data-theme="dark"]` override, once inside the media query
+    // scoped to `[data-theme="auto"]` so auto still defers to the OS. Single
+    // source, two emit sites — no drift between manual and system dark.
+    writeln!(
+        writer,
+        "<style>{STYLE}\n{dark}@media (prefers-color-scheme: dark){{\n{auto}}}\n</style>",
+        dark = dark_rules(":root[data-theme=\"dark\"]"),
+        auto = dark_rules(":root[data-theme=\"auto\"]"),
+    )
+    .context("style")?;
     writeln!(writer, "</head>").context("html")?;
     writeln!(writer, "<body>").context("html")?;
 
@@ -92,12 +107,17 @@ fn write_header(
     unfollow: usize,
 ) -> Result<()> {
     writeln!(writer, "<header>").context("html")?;
+    writeln!(writer, "<div class=\"head-row\">").context("html")?;
+    writeln!(writer, "<div class=\"head-text\">").context("html")?;
     writeln!(
         writer,
         "<p class=\"eyebrow\">igsift · local-first following audit</p>"
     )
     .context("html")?;
     writeln!(writer, "<h1>Following audit</h1>").context("html")?;
+    writeln!(writer, "</div>").context("html")?;
+    write_theme_switcher(writer)?;
+    writeln!(writer, "</div>").context("html")?;
     writeln!(
         writer,
         "<p class=\"meta\">{total} accounts scored on {} · no network, no automated unfollow — you act manually in Instagram.</p>",
@@ -127,6 +147,34 @@ fn write_header(
     }
     writeln!(writer, "</div>").context("html")?;
     writeln!(writer, "</header>").context("html")?;
+    Ok(())
+}
+
+/// Theme switcher: a three-state segmented control (Auto / Light / Dark)
+/// as an ARIA radiogroup. Auto is first-class — the report tracks
+/// `prefers-color-scheme` by default, so dropping it would be a regression
+/// for system-sync users. Roving `tabindex` (checked radio is the single
+/// tab stop) + arrow-key navigation are wired in the bottom script; the
+/// static markup ships Auto checked so a JS-disabled load is still coherent.
+fn write_theme_switcher(writer: &mut impl Write) -> Result<()> {
+    writeln!(
+        writer,
+        "<div class=\"theme\" role=\"radiogroup\" aria-label=\"Color theme\">"
+    )
+    .context("html")?;
+    for (val, label, icon, title, checked) in [
+        ("auto", "Auto", AUTO_ICON, "Match system", true),
+        ("light", "Light", SUN_ICON, "Light", false),
+        ("dark", "Dark", MOON_ICON, "Dark", false),
+    ] {
+        writeln!(
+            writer,
+            "<button class=\"theme-opt\" role=\"radio\" data-theme-set=\"{val}\" aria-checked=\"{checked}\" tabindex=\"{tab}\" title=\"{title}\">{icon}<span>{label}</span></button>",
+            tab = if checked { 0 } else { -1 },
+        )
+        .context("html")?;
+    }
+    writeln!(writer, "</div>").context("html")?;
     Ok(())
 }
 
@@ -441,12 +489,47 @@ fn escape(s: &str) -> String {
     out
 }
 
+/// Dark-theme CSS, parameterized by the root selector so the same bytes are
+/// emitted under both `:root[data-theme="dark"]` (explicit override) and the
+/// `prefers-color-scheme: dark` media query scoped to `:root[data-theme="auto"]`
+/// (system-tracking). Single source → no drift between manual and system dark.
+/// Covers the token block plus the two `.seg` pressed-button color tweaks that
+/// previously lived in their own dark media query — without re-scoping those,
+/// a light-system user who picks Dark would get white triage-button text.
+fn dark_rules(root: &str) -> String {
+    format!(
+        "{root} {{ \
+--bg:#161618; --surface:#1f1f22; --surface-2:#26262a; \
+--fg:#f2f2f4; --fg-2:#c4c4c9; --muted:#9a9aa1; \
+--border:#3a3a40; --border-soft:#2c2c31; \
+--accent:#4ea1ff; --accent-weak:#16304d; \
+--keep-fg:#6fd99b; --keep-bg:#11301f; --keep-line:#2e9e5b; \
+--review-fg:#f0c265; --review-bg:#332406; --review-line:#d9920b; \
+--unfollow-fg:#f0908f; --unfollow-bg:#361414; --unfollow-line:#d94a4a; \
+--shadow:none; --seg-thumb:#34343a; }}\n\
+{root} .seg button[aria-pressed=true].keep {{ color:#08160d; }}\n\
+{root} .seg button[aria-pressed=true].drop {{ color:#1a0707; }}\n"
+    )
+}
+
 /// Inline SVGs — outlined, 1-style icon set, sized to text via CSS.
 const KEEP_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 8.5l3.2 3.2L13 5\"/></svg>";
 const DROP_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 4l8 8M12 4l-8 8\"/></svg>";
 const SEARCH_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"7\" cy=\"7\" r=\"4.5\"/><path d=\"M11 11l3 3\"/></svg>";
 const COPY_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"5\" y=\"5\" width=\"8\" height=\"8\" rx=\"1.5\"/><path d=\"M3 11V4a1.5 1.5 0 011.5-1.5H11\"/></svg>";
 const DOWNLOAD_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 2v8M4.5 7.5L8 11l3.5-3.5M3 13.5h10\"/></svg>";
+/// Theme-switcher glyphs — same thin-stroke (1.6) chrome family as
+/// search/copy. Sun = Light, crescent = Dark, half-filled circle = Auto
+/// (the one intentional `fill`, so the system-sync mark reads at 15px).
+const SUN_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"8\" cy=\"8\" r=\"3\"/><path d=\"M8 1.5v1.5M8 13v1.5M1.5 8h1.5M13 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M12.6 3.4l-1.05 1.05M4.45 11.55L3.4 12.6\"/></svg>";
+const MOON_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M13 9.2A5.2 5.2 0 016.8 3a5.2 5.2 0 100 10 5.2 5.2 0 006.2-3.8z\"/></svg>";
+const AUTO_ICON: &str = "<svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"8\" cy=\"8\" r=\"5.5\"/><path d=\"M8 2.5v11\"/><path d=\"M8 2.5a5.5 5.5 0 000 11z\" fill=\"currentColor\" stroke=\"none\"/></svg>";
+
+/// Anti-FOUC boot script (emitted in `<head>`, ahead of `<style>`): copies a
+/// valid persisted theme onto `<html>` before first paint. Guarded so a junk
+/// localStorage value or a privacy-mode `getItem` throw degrades to the
+/// markup default (`auto`). Kept tiny and dependency-free.
+const BOOT_SCRIPT: &str = "(function(){try{var t=localStorage.getItem('igsift.theme.v1');if(t==='light'||t==='dark'||t==='auto'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();";
 
 /// Inline CSS. 8pt spacing grid, system font, semantic bucket color
 /// applied as a thin top rule + the number (not full tile fills), real
@@ -463,22 +546,13 @@ const STYLE: &str = "\
   --unfollow-fg: #a3282a; --unfollow-bg: #fce9e9; --unfollow-line: #d94a4a;
   --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
   --radius: 12px; --radius-sm: 8px;
+  --seg-thumb: var(--surface);
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s8:48px;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161618; --surface: #1f1f22; --surface-2: #26262a;
-    --fg: #f2f2f4; --fg-2: #c4c4c9; --muted: #9a9aa1;
-    --border: #3a3a40; --border-soft: #2c2c31;
-    --accent: #4ea1ff; --accent-weak: #16304d;
-    --keep-fg: #6fd99b; --keep-bg: #11301f; --keep-line: #2e9e5b;
-    --review-fg: #f0c265; --review-bg: #332406; --review-line: #d9920b;
-    --unfollow-fg: #f0908f; --unfollow-bg: #361414; --unfollow-line: #d94a4a;
-    --shadow: none;
-  }
-}
+/* Dark token sets are appended after this const by write_to() — emitted from
+   dark_rules() under both :root[data-theme=dark] and the auto/media pairing. */
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body { font-family: var(--font); background: var(--bg); color: var(--fg);
@@ -491,6 +565,27 @@ header { padding: var(--s8) 0 var(--s5); }
   text-transform: uppercase; color: var(--muted); margin: 0 0 var(--s2); }
 h1 { margin: 0; font-size: 2rem; font-weight: 600; letter-spacing: -.02em; }
 .meta { margin: var(--s2) 0 0; color: var(--muted); font-size: .9375rem; }
+.head-row { display:flex; align-items:flex-start; justify-content:space-between; gap: var(--s4); }
+.head-text { min-width: 0; }
+/* Theme switcher: lifted-thumb segmented control. Neutral (not accent-filled
+   like the triage .seg) because theme is chrome, not a consequential action —
+   accent stays reserved for links/actions per the 60-30-10 discipline. */
+/* Track is recessed (--border-soft), thumb is an elevated surface — in light
+   mode a white thumb on a near-white --surface-2 track is invisible (~1.01:1),
+   so the track must sit a step below the thumb in both themes. */
+.theme { display:inline-flex; align-items:center; gap:2px; padding:3px; flex:none;
+  background: var(--border-soft); border:1px solid var(--border); border-radius: var(--radius-sm); }
+.theme-opt { display:inline-flex; align-items:center; gap: var(--s1); height:32px;
+  padding:0 var(--s3); border:0; background:transparent; cursor:pointer; font: inherit;
+  font-size:.8125rem; font-weight:500; color: var(--muted); border-radius:6px;
+  transition: color .12s ease-out, background .12s ease-out, transform .12s ease-out; }
+.theme-opt svg { width:15px; height:15px; flex:none; }
+.theme-opt:hover { color: var(--fg-2); }
+.theme-opt[aria-checked=true] { background: var(--seg-thumb); color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0,0,0,.16); }
+.theme-opt:active { transform: scale(.97); }
+.theme-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-opt:focus:not(:focus-visible) { outline: none; }
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); margin-top: var(--s5); }
 .tile { background: var(--surface); border: 1px solid var(--border-soft);
   border-radius: var(--radius); box-shadow: var(--shadow);
@@ -587,10 +682,8 @@ tbody tr.sel-drop td.actions { background: var(--unfollow-bg); }
 .seg button:hover { background: var(--surface-2); color: var(--fg); }
 .seg button[aria-pressed=true].keep { background: var(--keep-line); color:#fff; }
 .seg button[aria-pressed=true].drop { background: var(--unfollow-line); color:#fff; }
-@media (prefers-color-scheme: dark) {
-  .seg button[aria-pressed=true].keep { color:#08160d; }
-  .seg button[aria-pressed=true].drop { color:#1a0707; }
-}
+/* The dark pressed-button text tweaks now ship via dark_rules() so they fire
+   for the manual [data-theme=dark] override, not just system dark. */
 .empty-state { padding: var(--s8) var(--s5); text-align:center; color: var(--muted); font-style: italic; }
 .exportbar { position: fixed; left: 50%; bottom: var(--s5);
   transform: translateX(-50%) translateY(160%); z-index: 50; display:flex;
@@ -643,6 +736,8 @@ tbody tr.sel-drop td.actions { background: var(--unfollow-bg); }
 @media (max-width: 860px) {
   .tiles { grid-template-columns: 1fr; }
   .why, thead th.col-why, td.why { display:none; }
+  .head-row { align-items: center; }
+  .theme-opt { height:44px; padding:0 var(--s2); }
   .exportbar { left: var(--s3); right: var(--s3); transform: translateY(160%);
     flex-wrap: wrap; justify-content:center; gap: var(--s3); max-width:none;
     padding: var(--s3); bottom: var(--s3); }
@@ -650,6 +745,16 @@ tbody tr.sel-drop td.actions { background: var(--unfollow-bg); }
   .eb-sep { display:none; }
   .eb-counts { width:100%; justify-content:center; }
   .eb-actions { flex-wrap: wrap; justify-content:center; }
+}
+@media (max-width: 460px) {
+  /* Very narrow: control floats above the title, labels go visually-hidden
+     (SR + title tooltip keep them) so it never wraps under the eyebrow. */
+  .head-row { flex-wrap: wrap; }
+  .theme { order:-1; align-self: flex-end; }
+  .theme-opt { width:44px; padding:0; justify-content:center; }
+  .theme-opt span { position:absolute; width:1px; height:1px; overflow:hidden;
+    clip:rect(0 0 0 0); clip-path: inset(50%); white-space:nowrap;
+    border:0; padding:0; margin:-1px; }
 }
 ";
 
@@ -787,6 +892,39 @@ document.getElementById('clearAll').addEventListener('click', function(){
 /* restore persisted selections on load */
 document.querySelectorAll('tbody tr').forEach(syncRow);
 renderBar();
+
+/* theme switcher — radiogroup: one tab stop (the checked radio), arrows move
+   selection and apply immediately (selection-follows-focus), wrapping at ends.
+   Persists to igsift.theme.v1; the head boot script already applied it. */
+var TKEY = 'igsift.theme.v1';
+var tg = document.querySelector('.theme');
+/* persist=false on the load-time reconcile so a never-touched switcher doesn't
+   pin 'auto' into localStorage; only real user actions write. */
+function setTheme(v, persist){
+  document.documentElement.setAttribute('data-theme', v);
+  if(persist){ try { localStorage.setItem(TKEY, v); } catch(e){} }
+  tg.querySelectorAll('[role=radio]').forEach(function(b){
+    var on = b.dataset.themeSet === v;
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
+}
+tg.addEventListener('click', function(e){
+  var b = e.target.closest('[role=radio]');
+  if(b) setTheme(b.dataset.themeSet, true);
+});
+tg.addEventListener('keydown', function(e){
+  var ks = ['ArrowRight','ArrowDown','ArrowLeft','ArrowUp'];
+  if(ks.indexOf(e.key) < 0) return;
+  e.preventDefault();
+  var opts = Array.prototype.slice.call(tg.querySelectorAll('[role=radio]'));
+  var i = opts.findIndex(function(b){ return b.getAttribute('aria-checked') === 'true'; });
+  var d = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1 : -1;
+  var n = (i + d + opts.length) % opts.length;
+  setTheme(opts[n].dataset.themeSet, true); opts[n].focus();
+});
+/* reconcile aria-checked/tabindex with whatever the boot script set on <html> */
+setTheme(document.documentElement.getAttribute('data-theme') || 'auto', false);
 ";
 
 #[cfg(test)]
@@ -1028,6 +1166,83 @@ mod tests {
             !html.contains("data-h=\"a\"b\""),
             "raw double-quote must not break the data-h attribute: {html}",
         );
+    }
+
+    #[test]
+    fn html_root_defaults_to_auto_theme() {
+        // The emitted <html> ships data-theme="auto" so a JS-disabled view
+        // still tracks the system via the prefers-color-scheme media query.
+        let html = render(&[baseline("a", Bucket::Keep, 0.9)]);
+        assert!(
+            html.contains("<html lang=\"en\" data-theme=\"auto\">"),
+            "root must default to auto theme: {html}",
+        );
+    }
+
+    #[test]
+    fn theme_switcher_is_a_three_state_radiogroup_with_auto_selected() {
+        let html = render(&[baseline("a", Bucket::Keep, 0.9)]);
+        assert!(html.contains("role=\"radiogroup\""), "radiogroup: {html}");
+        for v in ["auto", "light", "dark"] {
+            assert!(
+                html.contains(&format!("data-theme-set=\"{v}\"")),
+                "missing {v} radio: {html}",
+            );
+        }
+        // Exactly one radio is checked at rest, and it's Auto (radiogroup
+        // contract: one-of-N). aria-pressed (triage) is a separate attribute.
+        assert_eq!(
+            html.matches("aria-checked=\"true\"").count(),
+            1,
+            "exactly one theme radio may be checked: {html}",
+        );
+        assert!(
+            html.contains("data-theme-set=\"auto\" aria-checked=\"true\""),
+            "auto must be the checked default: {html}",
+        );
+    }
+
+    #[test]
+    fn theme_boot_script_precedes_stylesheet_to_avoid_flash() {
+        // Anti-FOUC: the persisted choice must land on <html> before the
+        // stylesheet paints, else a saved Dark flashes light on load.
+        let html = render(&[baseline("a", Bucket::Keep, 0.9)]);
+        let boot = html
+            .find("igsift.theme.v1")
+            .expect("theme localStorage key present");
+        let style = html.find("<style>").expect("stylesheet present");
+        assert!(
+            boot < style,
+            "theme boot script must precede <style>: boot={boot} style={style}",
+        );
+    }
+
+    #[test]
+    fn dark_tokens_apply_to_manual_override_not_only_system_dark() {
+        // The regression a naive manual switcher introduces: dark tokens stay
+        // trapped inside @media(prefers-color-scheme:dark), so picking Dark on
+        // a light system does nothing. Pin that the dark token block is also
+        // emitted under the explicit [data-theme="dark"] selector, and that
+        // auto still defers to the media query.
+        let html = render(&[baseline("a", Bucket::Keep, 0.9)]);
+        assert!(
+            html.contains(":root[data-theme=\"dark\"]"),
+            "explicit dark override selector missing: {html}",
+        );
+        assert!(
+            html.contains(":root[data-theme=\"auto\"]"),
+            "auto-defers-to-system selector missing: {html}",
+        );
+        assert!(html.contains("@media (prefers-color-scheme: dark)"));
+        // The dark surface value must appear under the explicit-dark selector,
+        // not solely the media query — assert it occurs at least twice (once
+        // per emit site) so a single-site regression trips.
+        assert!(
+            html.matches("--surface:#1f1f22").count() >= 2,
+            "dark --surface must be emitted for both [data-theme=dark] and auto/media: {html}",
+        );
+        // New shared token the segmented thumb keys off.
+        assert!(html.contains("--seg-thumb"), "seg-thumb token: {html}");
     }
 
     #[test]
