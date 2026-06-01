@@ -497,7 +497,14 @@ then **Copies** or **Downloads** the appendable handle lists to paste into
 to disk, so collect-and-paste is the model — nothing leaves the browser.
 Rows are server-rendered with HTML-escaping as the security boundary; the
 JS reads handles back from `data-` attributes only to build the export
-text, never as `innerHTML`.
+text, never as `innerHTML`. The report tracks the OS `prefers-color-scheme`
+by default and adds a header **Auto / Light / Dark** switcher (ARIA
+radiogroup, choice persisted in `localStorage`) to override it; theming is
+driven by a `data-theme` attribute on `<html>`, with the dark token set
+emitted from one source under both `:root[data-theme="dark"]` and a
+media query scoped to `:root[data-theme="auto"]` so manual and system dark
+can't drift. An anti-FOUC boot script applies the saved theme before first
+paint; JS-disabled falls back to `auto` + the media query.
 
 Filenames: `following-audit_YYYY-MM-DD.{csv,md,html}`, written next to
 the input by default, overridable via `--out`.

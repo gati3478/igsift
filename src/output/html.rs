@@ -15,6 +15,19 @@
 //! model. Keep/drop are mutually exclusive per row, mirroring
 //! `lists::ensure_disjoint`.
 //!
+//! ## Theme
+//!
+//! A header [`write_theme_switcher`] segmented control (Auto / Light / Dark,
+//! an ARIA radiogroup) lets the reader override the OS preference; the choice
+//! persists in `localStorage` (`igsift.theme.v1`). Theming is driven by a
+//! `data-theme` attribute on `<html>`. The dark token set is emitted once by
+//! [`dark_rules`] but under two selectors — `:root[data-theme="dark"]`
+//! (explicit) and a `prefers-color-scheme: dark` media query scoped to
+//! `:root[data-theme="auto"]` (system-tracking) — so manual and system dark
+//! never drift. An anti-FOUC boot script stamps the persisted theme onto
+//! `<html>` before the stylesheet paints; with JS disabled the markup default
+//! (`auto`) plus the media query still pick the right theme.
+//!
 //! ## Why hand-rolled markup
 //!
 //! No template engine (`maud`, `minijinja`, …). The output is one

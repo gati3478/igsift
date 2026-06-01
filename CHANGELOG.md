@@ -55,7 +55,9 @@ account. Fully offline — no network, database, or automated unfollow.
       segmented controls (green = keeplist, red = droplist) — that Copies or
       Downloads the appendable handle lists to paste into
       `config/keeplist.txt` / `config/droplist.txt`. Fully local; nothing
-      leaves the browser.
+      leaves the browser. Follows the OS light/dark setting with a header
+      **Auto / Light / Dark** switcher (ARIA radiogroup, persisted in
+      `localStorage`, anti-FOUC) to override it.
 - Polished terminal run-summary dashboard: boxed header banner, colored bucket
   panel with proportional bars, keep_prob histogram, side-by-side keep/unfollow
   cards, and a colored accuracy block. Pipe-safe — emits no ANSI when stdout is
