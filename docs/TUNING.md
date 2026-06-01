@@ -621,14 +621,15 @@ list** before trusting these numbers transitively.
 ### Considered and held out
 
 - `design` (6 chars, 4 hits, 0 FPs against the export). Held by Gati's
-  call: handles like `indiebydesign` could be personal-designer
-  portfolio accounts, not brands. The brand-gate flooring would be
-  reasonable for explicit design studios but wrong for personal
-  designers; `keeplist.txt` is the right venue case-by-case.
-- `bar` (3 chars, 3 real hits, 5 FPs without word boundaries:
-  `bardic.cub`, `mimosa_barr`, `nbaratelli`, `waynebarlowe_thedarkness`,
-  `thebarewytchproject`). Safe only under word-boundary semantics.
-  Deferred until a labeled round shows the recall need.
+  call: some matching handles are personal-designer portfolio accounts,
+  not brands. The brand-gate flooring would be reasonable for explicit
+  design studios but wrong for personal designers; `keeplist.txt` is the
+  right venue case-by-case. (Round 12 revisited `design` and dropped it
+  on a confirmed personal FP — see that round above.)
+- `bar` (3 chars, 3 real hits, 5 substring FPs without word boundaries —
+  a mix of personal handles and unrelated words containing `bar`). Safe
+  only under word-boundary semantics. Deferred until a labeled round
+  shows the recall need.
 
 ### Side effect — test isolation
 
