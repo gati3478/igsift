@@ -609,7 +609,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--fg);
 header { padding: var(--s8) 0 var(--s5); }
 .eyebrow { font-size: .75rem; font-weight: 600; letter-spacing: .08em;
   text-transform: uppercase; color: var(--muted); margin: 0 0 var(--s2); }
-h1 { margin: 0; font-size: 2rem; font-weight: 600; letter-spacing: -.02em; }
+h1 { margin: 0; font-size: 1.75rem; font-weight: 600; letter-spacing: -.02em; }
 .meta { margin: var(--s2) 0 0; color: var(--muted); font-size: .9375rem; }
 .head-row { display:flex; align-items:flex-start; justify-content:space-between; gap: var(--s4); }
 .head-text { min-width: 0; }
