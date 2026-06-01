@@ -424,7 +424,15 @@ fn write_row(writer: &mut impl Write, s: &ScoredAccount) -> Result<()> {
         tenure.map(|d| d.to_string()).unwrap_or_default()
     )
     .context("html")?;
-    writeln!(writer, "<td class=\"why\">{}</td>", escape(&why)).context("html")?;
+    // Truncated with ellipsis (CSS); the full breakdown stays reachable via
+    // the title tooltip so the mono string can't shove the sticky Triage column
+    // off-screen on dense tables.
+    writeln!(
+        writer,
+        "<td class=\"why\" title=\"{w}\">{w}</td>",
+        w = escape(&why)
+    )
+    .context("html")?;
     if inert {
         writeln!(
             writer,
@@ -576,7 +584,7 @@ const BOOT_SCRIPT: &str = "(function(){try{var t=localStorage.getItem('igsift.th
 const STYLE: &str = "\
 :root {
   --bg: #f5f5f7; --surface: #ffffff; --surface-2: #fbfbfd;
-  --fg: #1d1d1f; --fg-2: #515154; --muted: #6e6e73;
+  --fg: #1d1d1f; --fg-2: #515154; --muted: #636367;
   --border: #d2d2d7; --border-soft: #e8e8ed;
   --accent: #0066cc; --accent-weak: #e6f0fb;
   --keep-fg: #1c6b3d; --keep-bg: #e9f6ee; --keep-line: #2e9e5b;
@@ -667,7 +675,8 @@ table { width:100%; border-collapse: collapse; font-size: .875rem; }
 thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2);
   text-align: left; font-weight: 600; font-size: .6875rem; letter-spacing: .06em;
   text-transform: uppercase; color: var(--muted); padding: var(--s3) var(--s3);
-  white-space: nowrap; border-bottom: 1px solid var(--border); }
+  white-space: nowrap; border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 var(--border); }
 thead th.sortable { cursor: pointer; user-select: none; }
 thead th.sortable:hover { color: var(--fg); }
 thead th .arrow { opacity: 0; margin-left: 4px; font-size: .75rem; }
@@ -675,8 +684,8 @@ thead th[aria-sort=ascending] .arrow, thead th[aria-sort=descending] .arrow { op
 thead th[aria-sort=ascending] .arrow::after { content:'\\2191'; }
 thead th[aria-sort=descending] .arrow::after { content:'\\2193'; }
 thead th.col-num { text-align: right; }
-thead th.col-act { text-align: right; right: 0; z-index: 3; box-shadow: -8px 0 8px -8px rgba(0,0,0,.18); }
-tbody td { padding: var(--s3) var(--s3); border-bottom: 1px solid var(--border-soft);
+thead th.col-act { text-align: right; right: 0; z-index: 3; box-shadow: -8px 0 8px -8px rgba(0,0,0,.18), 0 1px 0 var(--border); }
+tbody td { padding: var(--s4) var(--s3); border-bottom: 1px solid var(--border-soft);
   vertical-align: middle; color: var(--fg-2); }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover td { background: var(--surface-2); }
@@ -701,12 +710,13 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; white-space:nowr
 .tag { display:inline-flex; align-items:center; gap:4px; font-size:.75rem; padding: 1px 8px;
   border-radius: 999px; border:1px solid var(--border); color: var(--fg-2);
   background: var(--surface-2); white-space:nowrap; }
-.tag.inert { background: var(--border-soft); color: var(--muted); }
+.tag.inert { background: var(--border-soft); color: var(--muted); margin-right: var(--s1); vertical-align: baseline; }
 .hide-inert { display:inline-flex; align-items:center; gap:6px; font-size:.8125rem;
   color: var(--muted); white-space:nowrap; cursor:pointer; }
 .hide-inert input { accent-color: var(--review-line); cursor:pointer; }
 .mutual-yes { color: var(--keep-fg); border-color: var(--keep-line); background: var(--keep-bg); }
-.why { font-family: var(--mono); font-size: .75rem; color: var(--muted); white-space: nowrap; }
+.why { font-family: var(--mono); font-size: .75rem; color: var(--muted);
+  max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hint { color: var(--muted); max-width: 22rem; }
 td.actions { text-align: right; white-space: nowrap;
   position: sticky; right: 0; background: var(--surface);
@@ -722,6 +732,8 @@ tbody tr.sel-drop td.actions { background: var(--unfollow-bg); }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button svg { width:13px; height:13px; }
 .seg button:hover { background: var(--surface-2); color: var(--fg); }
+.seg button.keep:hover { color: var(--keep-fg); }
+.seg button.drop:hover { color: var(--unfollow-fg); }
 .seg button[aria-pressed=true].keep { background: var(--keep-line); color:#fff; }
 .seg button[aria-pressed=true].drop { background: var(--unfollow-line); color:#fff; }
 /* The dark pressed-button text tweaks now ship via dark_rules() so they fire
@@ -778,6 +790,9 @@ tbody tr.sel-drop td.actions { background: var(--unfollow-bg); }
 @media (max-width: 860px) {
   .tiles { grid-template-columns: 1fr; }
   .why, thead th.col-why, td.why { display:none; }
+  /* The export bar drops to the bottom edge and can wrap to two rows here,
+     so lift the toast clear of it. */
+  .toast { bottom: 140px; }
   .head-row { align-items: center; }
   .theme-opt { height:44px; padding:0 var(--s2); }
   .exportbar { left: var(--s3); right: var(--s3); transform: translateY(160%);
