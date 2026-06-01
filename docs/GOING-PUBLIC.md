@@ -7,6 +7,10 @@ exception is the release (step 6): it's now automated by
 changelog and pushing a tag. Work top to bottom. Items marked **done** are
 recorded for auditability.
 
+> **✅ Launch complete (2026-06-02).** The repo is public and `v1.0.0` is
+> published as a **full** release (10 assets, checksums verified). Steps 0–6
+> below are all done — this doc is now a historical record, not a live checklist.
+
 ## 0. Purge the leaked blob from the remote (GATING — ✅ DONE 2026-05-30)
 
 > **Resolved 2026-05-30.** The repo was deleted and recreated from the clean
@@ -67,12 +71,12 @@ Do **not** flip the repo public (step 1) until that blobs-API call returns
 `404`. If you maintain any clone from before the rewrite, **re-clone** — do not
 `git pull`.
 
-## 1. Flip the repo to public
+## 1. Flip the repo to public (✅ DONE 2026-06-02)
 
 Settings → General → Danger Zone → **Change visibility → Public**. Do this only
 after step 0 verifies clean.
 
-## 2. Description and topics
+## 2. Description and topics (✅ DONE 2026-06-02)
 
 Settings → top of the repo page (the gear next to "About"):
 
@@ -80,12 +84,12 @@ Settings → top of the repo page (the gear next to "About"):
 - **Topics:** `rust`, `cli`, `instagram`, `data-export`, `local-first`, `privacy`
   (mirrors `Cargo.toml` `keywords`/`categories`).
 
-## 3. Private vulnerability reporting
+## 3. Private vulnerability reporting (✅ DONE 2026-06-02)
 
 Settings → Security → **Enable private vulnerability reporting** (free for public
 repos). This is the channel `SECURITY.md` points contributors to.
 
-## 4. Branch protection on `main`
+## 4. Branch protection on `main` (✅ DONE 2026-06-02)
 
 Free for public repos. Settings → Branches → add a rule for `main`:
 
@@ -98,13 +102,13 @@ Free for public repos. Settings → Branches → add a rule for `main`:
 - Require branches to be up to date before merging.
 - Require linear history (matches the existing clean linear log).
 
-## 5. Confirm Dependabot is active
+## 5. Confirm Dependabot is active (✅ DONE 2026-06-02)
 
 `.github/dependabot.yml` is already committed (weekly `cargo` + `github-actions`
 updates). After going public, confirm Settings → Code security → Dependabot is
 enabled.
 
-## 6. Cutting a release (automated)
+## 6. Cutting a release (automated) (✅ DONE 2026-06-02 — v1.0.0 shipped)
 
 Releases are built by `.github/workflows/release.yml`. Pushing a `v*` tag
 triggers it; there is **no** manual "draft a release from the tag" step
@@ -125,8 +129,9 @@ What it does, on a single `v*` tag push:
       (statically linked against musl, so they run on Fedora and any other
       distro regardless of the builder's libc)
 
-**Status today:** `v0.1.0` is already published as a **pre-release** with all
-five binaries attached.
+**Status today:** `v1.0.0` is published as a **full** release with all ten
+assets attached (5 archives + 5 `.sha256`), checksums verified. `v0.1.0` remains
+as the earlier validation pre-release.
 
 ### Cutting the 1.0 release
 
