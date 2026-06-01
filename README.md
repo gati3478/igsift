@@ -28,12 +28,14 @@ distribution, and the strongest keeps next to the first accounts to drop:
 The HTML report is the one you act from: sortable, filterable tables with a
 per-row **Keep / Drop** toggle. Your picks collect in a floating bar that
 copies or downloads the exact lines for your keeplist / droplist — nothing
-leaves the page. It ships with real dark mode (shown here to match your theme):
+leaves the page. It follows your system light/dark setting out of the box,
+with an **Auto / Light / Dark** switcher in the header to override it — both
+themes below:
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/html-report-dark.png">
-  <img alt="igsift HTML report — stat tiles, the Unfollow table with keep-likelihood bars and Keep/Drop triage, and the floating export bar" src="docs/assets/html-report-light.png">
-</picture>
+<p align="center">
+  <img width="49%" alt="igsift HTML report, light theme — stat tiles, the Unfollow table with keep-likelihood bars and Keep/Drop triage, the floating export bar, and the Auto/Light/Dark theme switcher" src="docs/assets/html-report-light.png">
+  <img width="49%" alt="igsift HTML report, dark theme — the same view with the Dark theme selected in the header switcher" src="docs/assets/html-report-dark.png">
+</p>
 
 <sub>Synthetic sample, not a real export — personal accounts are fabricated; any brand pages shown are public. Regenerate with <code>scripts/showcase-shots.sh</code> (data from <code>examples/showcase.rs</code>, scored through the real pipeline).</sub>
 

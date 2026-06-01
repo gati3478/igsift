@@ -4,7 +4,7 @@
 # Pipeline (all local, no network beyond the one-time browser install):
 #   examples/showcase.rs  ──▶  dashboard ANSI + HTML report (real scorer)
 #         ANSI  ──▶  a terminal-styled HTML page  ──▶  Chromium screenshot
-#         HTML report (triage pre-seeded)  ──▶  Chromium screenshot ×2 (light/dark)
+#         HTML report (triage + theme pre-seeded)  ──▶  Chromium screenshot ×2 (light/dark)
 #         all three  ──▶  pngquant
 #
 # Why Chromium and not `freeze` for the terminal shot: freeze/resvg renders the
@@ -35,9 +35,9 @@ echo "▶ 1/5  Running the example through the real scorer…"
 #                                                       └ writes audit.{csv,md,html}; dashboard ANSI on stdout
 
 echo "▶ 2/5  ANSI → terminal-styled HTML…"
-SEED_JSON="$SEED_JSON" python3 - "$WORK/dash.ansi" "$WORK/terminal.html" "$WORK/audit.html" "$WORK/audit-seeded.html" <<'PY'
+SEED_JSON="$SEED_JSON" python3 - "$WORK/dash.ansi" "$WORK/terminal.html" "$WORK/audit.html" "$WORK/audit-light.html" "$WORK/audit-dark.html" <<'PY'
 import html, os, re, sys
-ansi_path, term_out, report_in, report_out = sys.argv[1:5]
+ansi_path, term_out, report_in, report_light, report_dark = sys.argv[1:6]
 
 # --- ANSI (SGR 0/2/31/32/33 only) → colored <span>s ---
 CLS = {'2': 'dim', '31': 'r', '32': 'g', '33': 'y'}
@@ -79,11 +79,22 @@ pre{{margin:0;padding:22px 26px 26px;color:#dcdcdc;
 </div><pre>{body}</pre></div>'''
 open(term_out, 'w', encoding='utf-8').write(page)
 
-# --- Pre-seed the report's triage localStorage so the export bar shows ---
+# --- Pre-seed triage (export bar visible) + theme, one file per shot. The
+#     theme boot script runs in <head>, so seeding localStorage at <body> is
+#     too late for this load — stamp data-theme on <html> directly so the
+#     render and the selected radio are deterministic; seed localStorage too
+#     so the persisted state is realistic. ---
 report = open(report_in, encoding='utf-8').read()
-inject = '<script>try{localStorage.setItem("igsift.triage.v1",JSON.stringify(%s));}catch(e){}</script>\n' % os.environ['SEED_JSON']
-open(report_out, 'w', encoding='utf-8').write(report.replace('<body>\n', '<body>\n' + inject, 1))
-print('   terminal.html + seeded report ready')
+def seed(theme):
+    inject = ('<script>try{'
+              'localStorage.setItem("igsift.triage.v1",JSON.stringify(%s));'
+              'localStorage.setItem("igsift.theme.v1","%s");'
+              '}catch(e){}</script>\n') % (os.environ['SEED_JSON'], theme)
+    out = report.replace('<body>\n', '<body>\n' + inject, 1)
+    return out.replace('data-theme="auto"', 'data-theme="%s"' % theme, 1)
+open(report_light, 'w', encoding='utf-8').write(seed('light'))
+open(report_dark, 'w', encoding='utf-8').write(seed('dark'))
+print('   terminal.html + seeded reports (light/dark) ready')
 PY
 
 shoot() { # url  out  [extra flags…]
@@ -94,8 +105,8 @@ echo "▶ 3/5  Screenshotting the terminal dashboard…"
 shoot --full-page --wait-for-timeout 400 "$WORK/terminal.html" "$ASSETS/cli-dashboard.png"
 
 echo "▶ 4/5  Screenshotting the HTML report (light + dark)…"
-shoot --viewport-size 1300,1040 --color-scheme light --wait-for-timeout 700 "$WORK/audit-seeded.html" "$ASSETS/html-report-light.png"
-shoot --viewport-size 1300,1040 --color-scheme dark  --wait-for-timeout 700 "$WORK/audit-seeded.html" "$ASSETS/html-report-dark.png"
+shoot --viewport-size 1300,1040 --color-scheme light --wait-for-timeout 700 "$WORK/audit-light.html" "$ASSETS/html-report-light.png"
+shoot --viewport-size 1300,1040 --color-scheme dark  --wait-for-timeout 700 "$WORK/audit-dark.html" "$ASSETS/html-report-dark.png"
 
 echo "▶ 5/5  Optimizing…"
 if command -v pngquant >/dev/null 2>&1; then
