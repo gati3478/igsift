@@ -151,6 +151,14 @@ pub(super) fn decision_hint(f: &AccountFeatures, bucket: Bucket) -> &'static str
     // private to `scoring`, with its tenure threshold in config; the const
     // here is the decoupled descriptor). Short tenure (< 437d) excludes the
     // long-standing mutuals below by construction.
+    //
+    // The DM clause is written as `dm_messages_total == 0` rather than the
+    // gate's `dm_out == 0 && !has_inbound_signal`, but the two coincide
+    // whenever the gate fires: any inbound message makes `dm_balance < 1.0`
+    // (→ `has_inbound_signal`, gate suppressed) and any unclassifiable-sender
+    // message raises `dm_out > 0` (gate suppressed), so a gate-demoted account
+    // always has `dm_messages_total == 0`. If the DM dedup / balance logic in
+    // `aggregate` ever changes that equivalence, revisit this clause.
     if bucket == Bucket::Review
         && f.is_mutual
         && matches!(f.account_class, AccountClass::Personal)
